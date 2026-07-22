@@ -233,6 +233,11 @@ function openDetailByIndex(index) {
   if (product) openDetail(product);
 }
 
+function openDetailByCandidate(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (candidate?.product) openDetail(candidate.product);
+}
+
 function quickSaveByIndex(index) {
   const product = searchResults[index];
   if (product) quickSave(product);
@@ -413,6 +418,7 @@ function candidateCard(item) {
         <label>ハッシュタグ<textarea onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
         <div class="record-actions">
+          <button class="primary-button" type="button" onclick="openDetailByCandidate('${item.id}')">商品詳細・紹介文作成</button>
           ${productLink}
           <button class="secondary-button" type="button" onclick="copyText(${JSON.stringify(`${item.introText}\n${item.hashTags}`)})">全文コピー</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
