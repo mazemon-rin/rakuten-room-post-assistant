@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>楽天ROOM投稿アシスタント</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">ROOMらくらく投稿メーカー</p>
+      <h1>楽天ROOM投稿アシスタント</h1>
+      <p class="lead">商品探し、紹介文づくり、投稿履歴管理をまとめて支える静的Webアプリです。</p>
+    </div>
+    <div class="header-note">
+      <strong>安心運用</strong>
+      <span>ROOMへの自動投稿・自動ログイン・自動いいねは行いません。</span>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="画面切り替え">
+    <button class="tab-button active" data-tab="dashboard">トップ</button>
+    <button class="tab-button" data-tab="search">商品検索</button>
+    <button class="tab-button" data-tab="candidates">投稿候補</button>
+    <button class="tab-button" data-tab="history">投稿履歴</button>
+    <button class="tab-button" data-tab="favorites">お気に入り</button>
+    <button class="tab-button" data-tab="calendar">投稿予定</button>
+    <button class="tab-button" data-tab="ranking">ランキング</button>
+    <button class="tab-button" data-tab="settings">設定</button>
+  </nav>
+
+  <main>
+    <section id="dashboard" class="tab-panel active">
+      <div class="section-heading">
+        <h2>トップ画面</h2>
+        <p>今日の作業状況を確認します。</p>
+      </div>
+      <div class="stats-grid" id="statsGrid"></div>
+      <section class="panel chart-panel"><h3>ジャンル別投稿数</h3><div id="genreChart" class="bar-chart"></div></section>
+      <div class="two-column">
+        <section class="panel">
+          <h3>最近保存した商品</h3>
+          <div id="recentCandidates" class="compact-list"></div>
+        </section>
+        <section class="panel">
+          <h3>最近投稿した商品</h3>
+          <div id="recentHistory" class="compact-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="search" class="tab-panel">
+      <div class="section-heading">
+        <h2>商品検索</h2>
+        <p>楽天市場の商品を探します。Application ID未設定時はサンプル商品で試せます。</p>
+      </div>
+      <form id="searchForm" class="search-form">
+        <label>
+          検索キーワード
+          <input id="keyword" type="search" placeholder="例：モバイルバッテリー" required>
+        </label>
+        <label>
+          最低価格
+          <input id="minPrice" type="number" min="0" placeholder="0">
+        </label>
+        <label>
+          最高価格
+          <input id="maxPrice" type="number" min="0" placeholder="3000">
+        </label>
+        <label>
+          レビュー評価
+          <input id="minReview" type="number" min="0" max="5" step="0.1" placeholder="4.0">
+        </label>
+        <label>
+          ジャンルID
+          <input id="genreId" type="text" placeholder="任意">
+        </label>
+        <label>
+          並び順
+          <select id="sortOrder">
+            <option value="standard">おすすめ順</option>
+            <option value="+itemPrice">価格が安い順</option>
+            <option value="-itemPrice">価格が高い順</option>
+            <option value="-reviewCount">レビュー件数順</option>
+            <option value="-reviewAverage">レビュー評価順</option>
+            <option value="-updateTimestamp">新着順</option>
+          </select>
+        </label>
+        <label>
+          表示件数
+          <select id="hits">
+            <option>10</option>
+            <option>20</option>
+            <option>30</option>
+          </select>
+        </label>
+        <label class="wide">
+          除外キーワード
+          <input id="excludeWords" type="text" placeholder="例：中古 訳あり">
+        </label>
+        <button type="submit" class="primary-button">検索する</button>
+      </form>
+      <p id="searchMessage" class="message"></p>
+      <div id="results" class="product-grid"></div>
+    </section>
+
+    <section id="detail" class="tab-panel">
+      <div class="section-heading">
+        <h2>商品詳細・紹介文作成</h2>
+        <p>商品情報をもとに、ChatGPTへ渡すプロンプトを作ります。</p>
+      </div>
+      <div id="detailArea"></div>
+    </section>
+
+    <section id="candidates" class="tab-panel">
+      <div class="section-heading">
+        <h2>投稿候補一覧</h2>
+        <p>保存した商品と紹介文を管理します。</p>
+      </div>
+      <div class="toolbar">
+        <input id="candidateFilter" type="search" placeholder="商品名・ショップ名・メモで検索">
+        <select id="candidateStatusFilter">
+          <option value="">すべてのステータス</option>
+          <option>未作成</option>
+          <option>文章作成済み</option>
+          <option>投稿待ち</option>
+          <option>投稿済み</option>
+          <option>保留</option>
+          <option>対象外</option>
+        </select>
+      </div>
+      <div id="candidateList" class="record-list"></div>
+    </section>
+
+    <section id="history" class="tab-panel">
+      <div class="section-heading">
+        <h2>投稿履歴</h2>
+        <p>手動投稿後に記録します。CSV出力にも対応しています。</p>
+      </div>
+      <div class="toolbar">
+        <input id="historyFilter" type="search" placeholder="商品名・ジャンル・メモで検索">
+        <button id="exportCsv" class="secondary-button" type="button">CSV出力</button>
+      </div>
+      <div id="historyList" class="record-list"></div>
+    </section>
+
+    <section id="favorites" class="tab-panel">
+      <div class="section-heading">
+        <h2>お気に入り</h2>
+        <p>あとで投稿したい商品や、セール待ちの商品を整理します。</p>
+      </div>
+      <div class="toolbar">
+        <input id="favoriteFilter" type="search" placeholder="商品名・ショップ名で検索">
+        <select id="favoriteTypeFilter">
+          <option value="">すべての分類</option>
+          <option>今すぐ投稿</option><option>セール待ち</option><option>季節商品</option><option>自分で購入予定</option><option>実際に使った商品</option><option>比較検討中</option>
+        </select>
+      </div>
+      <div id="favoriteList" class="record-list"></div>
+    </section>
+
+    <section id="calendar" class="tab-panel">
+      <div class="section-heading">
+        <h2>投稿予定</h2>
+        <p>投稿候補を日付別に確認します。</p>
+      </div>
+      <div class="panel">
+        <label>表示する月<input id="calendarMonth" type="month"></label>
+      </div>
+      <div id="calendarGrid" class="calendar-grid"></div>
+    </section>
+
+    <section id="ranking" class="tab-panel">
+      <div class="section-heading">
+        <h2>楽天ランキング</h2>
+        <p>楽天アプリIDがある場合はランキングAPIを利用し、未設定時はサンプルを表示します。</p>
+      </div>
+      <form id="rankingForm" class="search-form">
+        <label>ジャンルID<input id="rankingGenreId" type="text" placeholder="空欄で総合"></label>
+        <label>表示件数<select id="rankingHits"><option>10</option><option>20</option><option>30</option></select></label>
+        <button class="primary-button" type="submit">ランキング取得</button>
+      </form>
+      <p id="rankingMessage" class="message"></p>
+      <div id="rankingResults" class="product-grid"></div>
+    </section>
+
+    <section id="settings" class="tab-panel">
+      <div class="section-heading">
+        <h2>設定</h2>
+        <p>API設定、初期値、バックアップを管理します。</p>
+      </div>
+      <form id="settingsForm" class="settings-form">
+        <label>
+          楽天アプリID
+          <input id="applicationId" type="password" autocomplete="off" placeholder="ブラウザ内だけに保存">
+        </label>
+        <label>
+          紹介文の初期雰囲気
+          <select id="defaultTone">
+            <option>やさしい</option>
+            <option>親しみやすい</option>
+            <option>シンプル</option>
+            <option>お得感重視</option>
+            <option>丁寧</option>
+            <option>家族向け</option>
+          </select>
+        </label>
+        <label>
+          絵文字の初期設定
+          <select id="defaultEmoji">
+            <option value="少なめ">少なめ</option>
+            <option value="なし">なし</option>
+            <option value="あり">あり</option>
+          </select>
+        </label>
+        <label>
+          ハッシュタグ数
+          <input id="defaultTagCount" type="number" min="3" max="20" value="8">
+        </label>
+        <button class="primary-button" type="submit">設定を保存</button>
+      </form>
+      <div class="panel data-panel">
+        <h3>データのバックアップ・復元</h3>
+        <div class="button-row">
+          <button id="exportJson" class="secondary-button" type="button">JSONバックアップ</button>
+          <label class="file-button">
+            JSON復元
+            <input id="importJson" type="file" accept="application/json">
+          </label>
+          <button id="clearData" class="danger-button" type="button">全データ削除</button>
+        </div>
+        <p class="small-note">復元前に、ファイル形式とデータ項目を確認します。</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="script.js"></script>
+</body>
+</html>
