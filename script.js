@@ -399,8 +399,9 @@ function renderCandidates() {
 }
 
 function candidateCard(item) {
-  const productLink = item.itemUrl
-    ? `<a class="secondary-button product-link-button" href="${escapeAttr(item.itemUrl)}" target="_blank" rel="noopener noreferrer">商品ページを開く</a>`
+  const itemUrl = item.itemUrl || item.product?.itemUrl || item.product?.affiliateUrl || "";
+  const productLink = itemUrl
+    ? `<a class="secondary-button product-link-button" href="${escapeAttr(itemUrl)}" target="_blank" rel="noopener noreferrer">楽天商品ページを開く</a>`
     : `<button class="secondary-button product-link-button" type="button" disabled>商品URLがありません</button>`;
   return `
     <article class="record-card">
