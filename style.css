@@ -121,6 +121,19 @@ h1 {
   background: #edf6f2;
 }
 
+.product-link-button {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #fff;
+  text-decoration: none;
+  text-align: center;
+}
+
+.product-link-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .danger-button {
   border-color: #d99191;
   color: #842c2c;

@@ -333,19 +333,21 @@ function generatePrompt() {
 }
 
 function quickSave(product) {
-  const duplicate = findDuplicate(product);
+  const itemUrl = product.itemUrl || product.affiliateUrl || "";
+  const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
+  const duplicate = findDuplicate(productWithUrl);
   const candidate = {
     id: crypto.randomUUID(),
-    product,
-    title: product.itemName,
-    imageUrl: getImage(product),
-    itemUrl: product.itemUrl,
-    itemCode: product.itemCode,
-    price: product.itemPrice,
-    shopName: product.shopName,
-    genreId: product.genreId || "",
+    product: productWithUrl,
+    title: productWithUrl.itemName,
+    imageUrl: getImage(productWithUrl),
+    itemUrl,
+    itemCode: productWithUrl.itemCode,
+    price: productWithUrl.itemPrice,
+    shopName: productWithUrl.shopName,
+    genreId: productWithUrl.genreId || "",
     introText: $("#introText")?.value || "",
-    hashTags: $("#hashTags")?.value || makeTags(product, data.settings.defaultTagCount).join(" "),
+    hashTags: $("#hashTags")?.value || makeTags(productWithUrl, data.settings.defaultTagCount).join(" "),
     savedAt: new Date().toISOString(),
     plannedDate: new Date().toISOString().slice(0, 10),
     memo: duplicate ? duplicate : "",
@@ -397,6 +399,9 @@ function renderCandidates() {
 }
 
 function candidateCard(item) {
+  const productLink = item.itemUrl
+    ? `<a class="secondary-button product-link-button" href="${escapeAttr(item.itemUrl)}" target="_blank" rel="noopener noreferrer">商品ページを開く</a>`
+    : `<button class="secondary-button product-link-button" type="button" disabled>商品URLがありません</button>`;
   return `
     <article class="record-card">
       <img src="${escapeAttr(item.imageUrl)}" alt="">
@@ -407,6 +412,7 @@ function candidateCard(item) {
         <label>ハッシュタグ<textarea onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
         <div class="record-actions">
+          ${productLink}
           <button class="secondary-button" type="button" onclick="copyText(${JSON.stringify(`${item.introText}\n${item.hashTags}`)})">全文コピー</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
           <select onchange="updateCandidate('${item.id}', 'status', this.value)">${["未作成", "文章作成済み", "投稿待ち", "投稿済み", "保留", "対象外"].map((status) => `<option ${item.status === status ? "selected" : ""}>${status}</option>`).join("")}</select>
