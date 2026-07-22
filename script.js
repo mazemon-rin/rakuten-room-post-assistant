@@ -48,6 +48,7 @@ const sampleProducts = [
 const defaultData = {
   settings: {
     applicationId: "",
+    accessKey: "",
     defaultTone: "やさしい",
     defaultEmoji: "少なめ",
     defaultTagCount: 8
@@ -114,6 +115,7 @@ function bindForms() {
 
 function fillSettings() {
   $("#applicationId").value = data.settings.applicationId || "";
+  $("#accessKey").value = data.settings.accessKey || "";
   $("#defaultTone").value = data.settings.defaultTone;
   $("#defaultEmoji").value = data.settings.defaultEmoji;
   $("#defaultTagCount").value = data.settings.defaultTagCount;
@@ -127,16 +129,17 @@ async function searchProducts(event) {
   const keyword = $("#keyword").value.trim();
   message.textContent = "検索しています...";
 
-  if (!data.settings.applicationId) {
+  if (!hasRakutenCredentials()) {
     const filtered = sampleProducts.filter((product) => product.itemName.includes(keyword) || product.itemCaption.includes(keyword));
     renderResults(filtered.length ? filtered : sampleProducts);
-    message.textContent = "楽天アプリID未設定のため、サンプル商品を表示しています。";
+    message.textContent = "楽天アプリIDまたはアクセスキーが未設定のため、サンプル商品を表示しています。";
     return;
   }
 
   const params = new URLSearchParams({
     format: "json",
     applicationId: data.settings.applicationId,
+    accessKey: data.settings.accessKey,
     keyword,
     hits: $("#hits").value,
     sort: $("#sortOrder").value
@@ -147,10 +150,10 @@ async function searchProducts(event) {
   addParam(params, "genreId", $("#genreId").value);
 
   try {
-    const response = await fetch(`https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601?${params.toString()}`);
-    if (!response.ok) throw new Error("楽天APIの検索に失敗しました。");
+    const response = await fetch(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`);
+    if (!response.ok) throw new Error(await readRakutenApiError(response));
     const json = await response.json();
-    const products = (json.Items || []).map((entry) => entry.Item);
+    const products = normalizeRakutenItems(json);
     const excludeWords = $("#excludeWords").value.trim().split(/\s+/).filter(Boolean);
     const filtered = products.filter((product) => !excludeWords.some((word) => product.itemName.includes(word)));
     renderResults(filtered);
@@ -163,6 +166,40 @@ async function searchProducts(event) {
 
 function addParam(params, key, value) {
   if (value) params.set(key, value);
+}
+
+function hasRakutenCredentials() {
+  return Boolean(data.settings.applicationId && data.settings.accessKey);
+}
+
+async function readRakutenApiError(response) {
+  const fallback = `HTTP ${response.status}`;
+  try {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const errorBody = await response.json();
+      return formatRakutenApiError(errorBody.error_description || errorBody.error || fallback);
+    }
+    const text = await response.text();
+    return formatRakutenApiError(text || fallback);
+  } catch {
+    return formatRakutenApiError(fallback);
+  }
+}
+
+function formatRakutenApiError(message) {
+  return `楽天APIエラー：${hideCredentials(String(message))}`;
+}
+
+function hideCredentials(text) {
+  return text
+    .replaceAll(data.settings.applicationId || "no-application-id", "[applicationId]")
+    .replaceAll(data.settings.accessKey || "no-access-key", "[accessKey]");
+}
+
+function normalizeRakutenItems(json) {
+  const items = json.items || json.Items || [];
+  return items.map((entry) => entry.item || entry.Item || entry);
 }
 
 function renderResults(products) {
@@ -430,6 +467,7 @@ function saveSettings(event) {
   event.preventDefault();
   data.settings = {
     applicationId: $("#applicationId").value.trim(),
+    accessKey: $("#accessKey").value.trim(),
     defaultTone: $("#defaultTone").value,
     defaultEmoji: $("#defaultEmoji").value,
     defaultTagCount: Number($("#defaultTagCount").value) || 8
@@ -681,23 +719,24 @@ async function loadRanking(event) {
   event.preventDefault();
   const message = $("#rankingMessage");
   message.textContent = "ランキングを取得しています...";
-  if (!data.settings.applicationId) {
+  if (!hasRakutenCredentials()) {
     renderRankingResults(sampleProducts);
-    message.textContent = "楽天アプリID未設定のため、サンプル商品を表示しています。";
+    message.textContent = "楽天アプリIDまたはアクセスキーが未設定のため、サンプル商品を表示しています。";
     return;
   }
   const params = new URLSearchParams({
     format: "json",
     applicationId: data.settings.applicationId,
+    accessKey: data.settings.accessKey,
     page: "1"
   });
   const genreId = $("#rankingGenreId").value.trim();
   if (genreId) params.set("genreId", genreId);
   try {
-    const response = await fetch(`https://app.rakuten.co.jp/services/api/IchibaItem/Ranking/20220601?${params.toString()}`);
-    if (!response.ok) throw new Error("ランキングの取得に失敗しました。");
+    const response = await fetch(`https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`);
+    if (!response.ok) throw new Error(await readRakutenApiError(response));
     const json = await response.json();
-    const products = (json.Items || []).map((entry) => entry.Item).slice(0, Number($("#rankingHits").value));
+    const products = normalizeRakutenItems(json).slice(0, Number($("#rankingHits").value));
     renderRankingResults(products);
     message.textContent = `${products.length}件のランキング商品を表示しました。`;
   } catch (error) {
