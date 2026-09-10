@@ -1,5 +1,7 @@
 const STORAGE_KEY = "roomAssistantDataV1";
-const RANKING_REQUEST_INTERVAL_MS = 1200;
+const RANKING_INTERVAL_SHORT_MS = 1200;
+const RANKING_INTERVAL_LONG_MS = 1800;
+const RANKING_RETRY_SAFETY_MARGIN_MS = 200;
 const RANKING_MAX_RETRIES = 1;
 
 // These top-level Rakuten market categories were verified from Rakuten category pages.
@@ -74,6 +76,9 @@ const defaultData = {
 let data = loadData();
 let currentProduct = null;
 let searchResults = [];
+let rankingCategoryStates = new Map();
+let rankingRequestContext = null;
+let rankingRetryInProgress = false;
 const codexPasteErrors = new Map();
 
 const $ = (selector) => document.querySelector(selector);
@@ -123,6 +128,7 @@ function bindForms() {
   $("#calendarMonth").addEventListener("change", renderCalendar);
   $("#rankingForm").addEventListener("submit", loadRanking);
   $("#queue-selected-ranking").addEventListener("click", queueSelectedRanking);
+  $("#retry-failed-ranking").addEventListener("click", retryFailedRanking);
   $$("input[name='rankingCategory']").forEach((input) => input.addEventListener("change", saveRankingCategorySelection));
   $("#exportJson").addEventListener("click", exportJson);
   $("#importJson").addEventListener("change", importJson);
@@ -215,7 +221,7 @@ async function readRakutenApiError(response) {
   }
 }
 
-async function fetchRankingCategory(category, limit) {
+async function fetchRankingCategory(category, limit, fallbackWaitMs = RANKING_INTERVAL_SHORT_MS) {
   const params = new URLSearchParams({
     format: "json",
     applicationId: data.settings.applicationId,
@@ -233,13 +239,13 @@ async function fetchRankingCategory(category, limit) {
     }
     const rawBody = await response.text().catch(() => "");
     if (response.status === 429 && retryCount < RANKING_MAX_RETRIES) {
-      const waitMs = getRankingRetryWaitMs(response, rawBody);
+      const waitMs = getRankingRetryWaitMs(response, rawBody, fallbackWaitMs);
       retryCount += 1;
       showRankingProgress(`${category.name}で429。${Math.ceil(waitMs / 1000)}秒待機して再試行...`);
       await sleep(waitMs);
       continue;
     }
-    throw new Error(formatRakutenApiError(`HTTP ${response.status}：${extractRakutenApiErrorDetail(rawBody)}`));
+    throw createRankingApiError(response.status, rawBody, retryCount);
   }
 }
 
@@ -247,20 +253,32 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function getRankingRetryWaitMs(response, rawBody) {
+function getRankingRequestInterval(categoryCount) {
+  return categoryCount >= 4 ? RANKING_INTERVAL_LONG_MS : RANKING_INTERVAL_SHORT_MS;
+}
+
+function getRankingRetryWaitMs(response, rawBody, fallbackWaitMs) {
   const retryAfter = response.headers.get("retry-after");
   if (retryAfter) {
     const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 60) return Math.max(1000, seconds * 1000);
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 60) return Math.max(1000, seconds * 1000 + RANKING_RETRY_SAFETY_MARGIN_MS);
     const retryDate = Date.parse(retryAfter);
-    if (Number.isFinite(retryDate)) return Math.max(1000, Math.min(60000, retryDate - Date.now()));
+    if (Number.isFinite(retryDate)) return Math.max(1000, Math.min(60000, retryDate - Date.now() + RANKING_RETRY_SAFETY_MARGIN_MS));
   }
   const bodySeconds = rawBody.match(/Try again in\s+(\d+(?:\.\d+)?)\s+seconds?/i)?.[1];
   if (bodySeconds) {
     const seconds = Number(bodySeconds);
-    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 60) return Math.max(1000, seconds * 1000);
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 60) return Math.max(1000, seconds * 1000 + RANKING_RETRY_SAFETY_MARGIN_MS);
   }
-  return RANKING_REQUEST_INTERVAL_MS;
+  return fallbackWaitMs + RANKING_RETRY_SAFETY_MARGIN_MS;
+}
+
+function createRankingApiError(status, rawBody, retryCount) {
+  const error = new Error(formatRakutenApiError(`HTTP ${status}：${extractRakutenApiErrorDetail(rawBody)}`));
+  error.httpStatus = status;
+  error.rawBody = rawBody;
+  error.retryCount = retryCount;
+  return error;
 }
 
 function extractRakutenApiErrorDetail(rawBody) {
@@ -276,6 +294,14 @@ function extractRakutenApiErrorDetail(rawBody) {
 function showRankingProgress(message) {
   const messageEl = $("#rankingMessage");
   if (messageEl) messageEl.textContent = message;
+}
+
+function renderRankingRetryControl() {
+  const button = $("#retry-failed-ranking");
+  if (!button) return;
+  const hasFailed = [...rankingCategoryStates.values()].some((state) => state.status === "failed");
+  button.hidden = !hasFailed;
+  button.disabled = rankingRetryInProgress;
 }
 
 function formatRakutenApiError(message) {
@@ -1297,15 +1323,34 @@ async function loadRanking(event) {
   const legacyGenreId = $("#rankingGenreId").value.trim();
   if (legacyGenreId) selectedCategories.unshift({ id: legacyGenreId, name: `ジャンルID ${legacyGenreId}` });
   const limit = Number($("#rankingHits").value);
+  const requestInterval = getRankingRequestInterval(selectedCategories.length);
+  rankingRequestContext = { categories: selectedCategories, limit, requestInterval };
+  rankingCategoryStates = new Map(selectedCategories.map((category) => [category.id, {
+    categoryId: category.id,
+    categoryName: category.name,
+    status: "retrying",
+    httpStatus: null,
+    errorMessage: "",
+    retryCount: 0,
+    lastTriedAt: null
+  }]));
+  renderRankingRetryControl();
   data.settings.rankingCategoryIds = selectedCategories.map((category) => category.id);
   saveData();
   const allProducts = [];
   const errors = [];
   const selectionContext = { selectedIdentities: new Set() };
   for (const [categoryIndex, category] of selectedCategories.entries()) {
+    const categoryState = rankingCategoryStates.get(category.id);
+    categoryState.status = "retrying";
+    categoryState.lastTriedAt = new Date().toISOString();
     showRankingProgress(`${category.name}を取得中...`);
     try {
-      const products = await fetchRankingCategory(category, limit);
+      const products = await fetchRankingCategory(category, limit, requestInterval);
+      categoryState.status = "success";
+      categoryState.httpStatus = 200;
+      categoryState.errorMessage = "";
+      categoryState.retryCount = 0;
       const categoryProducts = products.map((product, index) => ({
         ...product,
         categoryId: category.id,
@@ -1323,14 +1368,19 @@ async function loadRanking(event) {
       }
       allProducts.push(...categoryProducts);
     } catch (error) {
+      categoryState.status = "failed";
+      categoryState.httpStatus = error.httpStatus || null;
+      categoryState.errorMessage = error.message;
+      categoryState.retryCount = error.retryCount || 0;
       errors.push(`${category.name}: ${error.message}`);
     }
     if (categoryIndex < selectedCategories.length - 1) {
       showRankingProgress(`${category.name}の取得完了。次のカテゴリーまで待機しています...`);
-      await sleep(RANKING_REQUEST_INTERVAL_MS);
+      await sleep(requestInterval);
     }
   }
   renderRankingResults(allProducts);
+  renderRankingRetryControl();
   if (!allProducts.length && errors.length) {
     message.textContent = `${errors.join(" / ")} サンプル商品を表示します。`;
     renderRankingResults(sampleProducts);
@@ -1339,6 +1389,58 @@ async function loadRanking(event) {
   } else {
     message.textContent = allProducts.length ? `${allProducts.length}件のランキング商品を表示しました。` : "ランキング結果が0件でした。";
   }
+}
+
+async function retryFailedRanking() {
+  if (rankingRetryInProgress || !rankingRequestContext) return;
+  const failedCategories = rankingRequestContext.categories.filter((category) => rankingCategoryStates.get(category.id)?.status === "failed");
+  if (!failedCategories.length) {
+    toast("再取得する失敗カテゴリーはありません。");
+    renderRankingRetryControl();
+    return;
+  }
+
+  rankingRetryInProgress = true;
+  renderRankingRetryControl();
+  const selectionContext = {
+    selectedIdentities: new Set(searchResults.filter((product) => product.selectionStatus === "selected").map((product) => rankingIdentity(product)))
+  };
+  await sleep(rankingRequestContext.requestInterval);
+
+  for (const [index, category] of failedCategories.entries()) {
+    const state = rankingCategoryStates.get(category.id);
+    state.status = "retrying";
+    state.lastTriedAt = new Date().toISOString();
+    showRankingProgress(`${category.name}を再取得中...`);
+    try {
+      const products = await fetchRankingCategory(category, rankingRequestContext.limit, rankingRequestContext.requestInterval);
+      const categoryProducts = products.map((product, productIndex) => ({
+        ...product,
+        categoryId: category.id,
+        categoryName: category.name,
+        rank: product.rank || productIndex + 1,
+        fetchedAt: new Date().toISOString()
+      }));
+      selectRankingCandidate(categoryProducts, selectionContext);
+      searchResults = [...searchResults.filter((product) => product.categoryId !== category.id), ...categoryProducts];
+      state.status = "success";
+      state.httpStatus = 200;
+      state.errorMessage = "";
+      state.retryCount = 0;
+    } catch (error) {
+      state.status = "failed";
+      state.httpStatus = error.httpStatus || null;
+      state.errorMessage = error.message;
+      state.retryCount = error.retryCount || 0;
+    }
+    renderRankingResults(searchResults);
+    if (index < failedCategories.length - 1) await sleep(rankingRequestContext.requestInterval);
+  }
+
+  rankingRetryInProgress = false;
+  renderRankingRetryControl();
+  const remaining = [...rankingCategoryStates.values()].filter((state) => state.status === "failed");
+  showRankingProgress(remaining.length ? `再取得後も${remaining.length}カテゴリーが失敗しています。` : "失敗カテゴリーの再取得が完了しました。");
 }
 
 function renderRankingResults(products) {
