@@ -121,6 +121,25 @@ h1 {
   background: #edf6f2;
 }
 
+.codex-post-button {
+  box-shadow: 0 2px 0 rgba(167, 63, 37, 0.18);
+}
+
+.post-status-line {
+  margin: 8px 0;
+}
+
+.post-status-badge {
+  color: #fff;
+  background: var(--green);
+}
+
+.candidate-intro textarea[readonly] {
+  min-height: 180px;
+  margin-bottom: 8px;
+  background: #f7f3ec;
+}
+
 .product-link-button {
   border-color: var(--accent);
   color: var(--accent);

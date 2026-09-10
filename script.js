@@ -477,15 +477,22 @@ function candidateCard(item) {
         <label>紹介文<textarea onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
+        <p class="post-status-line"><span class="badge post-status-badge">${escapeHtml(item.postStatus || "投稿待ち")}</span>${item.postStatus === "Codex処理中" ? " CodexでROOM投稿準備中" : ""}</p>
         ${item.introText ? `<details class="candidate-intro"><summary>紹介文を確認</summary><p>${escapeHtml(item.introText)}</p><p>${escapeHtml(item.hashTags || "")}</p></details>` : ""}
+        ${item.introPrompt ? `<details class="candidate-intro"><summary>Codex投稿指示文を確認</summary><textarea readonly>${escapeHtml(item.introPrompt)}</textarea><button class="secondary-button" type="button" onclick="copyCandidatePrompt('${item.id}')">指示文をコピー</button></details>` : ""}
         <div class="record-actions">
           <button class="primary-button" type="button" onclick="openDetailByCandidate('${item.id}')">商品詳細・紹介文作成</button>
           <button class="secondary-button" type="button" onclick="generateCandidatePrompt('${item.id}')">紹介文プロンプト</button>
           <button class="secondary-button" type="button" onclick="openCandidateForPaste('${item.id}')">紹介文を貼り付け</button>
+          <button class="primary-button codex-post-button" type="button" onclick="startCodexPost('${item.id}')">Codex投稿開始</button>
           <button class="secondary-button" type="button" onclick="prepareCandidatePost('${item.id}')">投稿準備</button>
           ${productLink}
           <button class="secondary-button" type="button" onclick="copyText(${JSON.stringify(`${item.introText}\n${item.hashTags}`)})">全文コピー</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
+          <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
+          <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button>
+          ${item.postStatus === "投稿済み" || item.postStatus === "スキップ" ? `<button class="secondary-button" type="button" onclick="focusNextCandidate('${item.id}')">次の商品</button>` : ""}
+          <select aria-label="投稿状態" onchange="setPostStatus('${item.id}', this.value)">${["投稿待ち", "Codex処理中", "確認待ち", "投稿済み", "スキップ", "エラー"].map((status) => `<option ${item.postStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select>
           <select onchange="updateCandidate('${item.id}', 'status', this.value)">${["未作成", "文章作成済み", "投稿待ち", "投稿済み", "保留", "対象外"].map((status) => `<option ${item.status === status ? "selected" : ""}>${status}</option>`).join("")}</select>
           <button class="danger-button" type="button" onclick="deleteCandidate('${item.id}')">削除</button>
         </div>
@@ -517,6 +524,38 @@ function updateCandidate(id, field, value) {
   if (field === "introText" && value && item.status === "未作成") item.status = "文章作成済み";
   if (field === "introText") item.postStatus = value ? "紹介文作成済み" : "紹介文未作成";
   saveData();
+}
+
+function setPostStatus(id, status) {
+  const item = data.candidates.find((candidate) => candidate.id === id);
+  if (!item) return;
+  if (status === "投稿済み") {
+    markPosted(id);
+    return;
+  }
+  item.postStatus = status;
+  if (status === "スキップ") item.status = "対象外";
+  if (status === "確認待ち" || status === "投稿待ち" || status === "Codex処理中") item.status = "投稿待ち";
+  saveData();
+  toast(`投稿状態を「${status}」に変更しました。`);
+}
+
+async function copyCandidatePrompt(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate?.introPrompt) return;
+  if (await copyText(candidate.introPrompt, { silent: true })) toast("Codex投稿指示文をコピーしました。");
+  else toast("コピーに失敗しました。表示された指示文を手動でコピーしてください。");
+}
+
+function focusNextCandidate(id) {
+  const index = data.candidates.findIndex((candidate) => candidate.id === id);
+  const next = data.candidates.slice(index + 1).find((candidate) => !["投稿済み", "スキップ"].includes(candidate.postStatus));
+  if (!next) {
+    toast("次に処理できる商品はありません。");
+    return;
+  }
+  document.querySelector("#candidateFilter")?.focus();
+  toast(`次の商品「${next.title}」を処理できます。`);
 }
 
 function markPosted(id) {
@@ -551,6 +590,67 @@ function generateCandidatePrompt(id) {
   saveData();
   showTab("detail");
   toast("紹介文プロンプトを作成しました。");
+}
+
+function buildCodexPostInstructions(candidate) {
+  const product = candidate.product || candidate;
+  const itemUrl = candidate.itemUrl || product.itemUrl || product.affiliateUrl || "";
+  return [
+    "楽天ROOM投稿準備をしてください。",
+    "",
+    "【商品情報】",
+    `商品名：${candidate.title || product.itemName || ""}`,
+    `価格：${formatYen(candidate.price || product.itemPrice)}`,
+    `ショップ名：${candidate.shopName || product.shopName || ""}`,
+    `商品説明：${stripHtml(product.itemCaption || "" )}`,
+    `商品URL：${itemUrl}`,
+    `itemCode：${candidate.itemCode || product.itemCode || ""}`,
+    `categoryId：${candidate.categoryId || product.categoryId || ""}`,
+    `categoryName：${candidate.categoryName || product.categoryName || ""}`,
+    `rank：${candidate.rank || product.rank || ""}`,
+    `fetchedAt：${candidate.fetchedAt || product.fetchedAt || ""}`,
+    "",
+    "【手順】",
+    "1. 商品情報を確認する",
+    "2. 商品情報だけを使い、楽天ROOM向け紹介文とハッシュタグを作成する",
+    "3. 商品ページをCodex内蔵ブラウザで開く",
+    "4. JavaScript実行後DOMから aria-label=\"ROOMに投稿\" のa要素を探す",
+    "5. そのa要素の実hrefを取得する。商品番号からROOM URLを推測生成しない",
+    "6. 取得したROOM URLを直接開く",
+    "7. ROOM投稿画面の #collect-content を確認する",
+    "8. 紹介文とハッシュタグを入力する",
+    "9. 入力内容と文字数（500文字以内）を確認する",
+    "10. ROOMの「完了」は絶対にクリックしない",
+    "11. 「確認待ち」の状態で停止する",
+    "",
+    "【紹介文条件】",
+    "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。",
+    "「絶対」「必ず」「最安」「No.1」など根拠のない断定や効果保証は禁止。",
+    "agent-browser、ROOMの完了、自動いいね、フォロー、コメントは使用しない。"
+  ].join("\n");
+}
+
+async function startCodexPost(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate) return;
+  const itemUrl = candidate.itemUrl || candidate.product?.itemUrl || candidate.product?.affiliateUrl || "";
+  if (!itemUrl) {
+    setPostStatus(id, "エラー");
+    toast("商品URLがないため、Codex投稿準備を開始できません。");
+    return;
+  }
+  const instructions = buildCodexPostInstructions(candidate);
+  candidate.introPrompt = instructions;
+  candidate.postStatus = "Codex処理中";
+  candidate.status = "投稿待ち";
+  saveData();
+  const copied = await copyText(instructions, { silent: true });
+  if (copied) {
+    toast("Codex投稿指示文をコピーしました。状態を「Codex処理中」にしました。");
+  } else {
+    toast("コピーに失敗しました。カード内の指示文を手動でコピーしてください。");
+    openCandidateForPaste(id);
+  }
 }
 
 function openCandidateForPaste(id) {
@@ -737,9 +837,14 @@ function copyValue(id) {
   copyText($(`#${id}`).value);
 }
 
-async function copyText(text) {
-  await navigator.clipboard.writeText(text || "");
-  toast("コピーしました。");
+async function copyText(text, options = {}) {
+  try {
+    await navigator.clipboard.writeText(text || "");
+    if (!options.silent) toast("コピーしました。");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function makeTags(product, count) {
