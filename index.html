@@ -208,7 +208,18 @@
           </div>
         </fieldset>
         <label>ジャンルID<input id="rankingGenreId" type="text" placeholder="空欄で総合"></label>
-        <label>取得順位<select id="rankingHits"><option value="1">1位のみ</option><option value="3" selected>1〜3位</option></select></label>
+        <label>表示する順位帯<select id="rankingRangeStart">
+          <option value="1" selected>1〜3位</option>
+          <option value="4">4〜6位</option>
+          <option value="7">7〜9位</option>
+          <option value="10">10〜12位</option>
+          <option value="13">13〜15位</option>
+          <option value="16">16〜18位</option>
+          <option value="19">19〜21位</option>
+          <option value="22">22〜24位</option>
+          <option value="25">25〜27位</option>
+          <option value="28">28〜30位</option>
+        </select></label>
         <button class="primary-button" type="submit">ランキング取得</button>
         <button id="queue-selected-ranking" class="secondary-button" type="button">選択ジャンルを投稿キュー化</button>
         <button id="retry-failed-ranking" class="secondary-button" type="button" hidden>失敗カテゴリーを再取得</button>

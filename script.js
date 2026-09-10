@@ -960,10 +960,10 @@ function buildCodexPostInstructions(candidate) {
     "9. 一致しない、複数一致、解析失敗、500文字超過、保存後の値不一致の場合は状態をエラーにして停止する",
     "10. 正常時だけpostStatusが確認待ちになったことを確認する",
     "11. Google Chromeの既存の商品ページタブで商品ページを開く",
-    "12. JavaScript実行後DOMから aria-label=\"ROOMに投稿\" のa要素を探す",
-    "13. そのa要素の実hrefを取得する。商品番号からROOM URLを推測生成しない",
-    "14. 利用者が事前に開いたGoogle Chromeの楽天ROOM固定タブがない場合は処理を開始せず報告する",
-    "15. 固定ROOMタブだけを取得URLへ遷移させる（ROOM用の新規タブは禁止）",
+    "12. 商品ページ上の「ROOMに投稿」リンクを通常のChrome操作で認識する（aria-label、リンク文字、role=link、アクセシビリティ上の操作可能リンクの順）",
+    "13. 認識した実在の「ROOMに投稿」リンクを直接クリックする。JavaScript実行は必須にせず、商品番号・itemCode・商品URLからROOM URLを推測生成しない",
+    "14. 既存のGoogle Chrome楽天ROOM固定タブを優先して再利用する。商品ページ上のリンクが同一タブ遷移しかできない場合は、そのタブ内でクリックしてよい。ROOM用の新規タブは作成しない",
+    "15. 遷移後の現在URLがroom.rakuten.co.jpで、可能なら/mixまたは/mix/collectを含むことを確認する",
     "16. ROOM投稿画面で対象商品、#collect-content、「完了」ボタンを確認する。違う商品なら入力せず停止する",
     "17. 保存済みの紹介文とハッシュタグを#collect-contentへ入力する",
     "18. 商品、文章、ハッシュタグ、500文字以内を確認する",
@@ -1402,9 +1402,11 @@ async function loadRanking(event) {
   }
   const legacyGenreId = $("#rankingGenreId").value.trim();
   if (legacyGenreId) selectedCategories.unshift({ id: legacyGenreId, name: `ジャンルID ${legacyGenreId}` });
-  const limit = Number($("#rankingHits").value);
+  const rankStart = Number($("#rankingRangeStart").value || 1);
+  const rankEnd = rankStart + 2;
+  const limit = rankEnd;
   const requestInterval = getRankingRequestInterval(selectedCategories.length);
-  rankingRequestContext = { categories: selectedCategories, limit, requestInterval };
+  rankingRequestContext = { categories: selectedCategories, limit, requestInterval, rankStart, rankEnd };
   rankingCategoryStates = new Map(selectedCategories.map((category) => [category.id, {
     categoryId: category.id,
     categoryName: category.name,
@@ -1437,12 +1439,12 @@ async function loadRanking(event) {
         categoryName: category.name,
         rank: product.rank || index + 1,
         fetchedAt: new Date().toISOString()
-      }));
+      })).filter((product) => product.rank >= rankStart && product.rank <= rankEnd);
       if (!selectRankingCandidate(categoryProducts, selectionContext)) {
         categoryProducts.forEach((product) => {
           if (!product.selectionStatus) {
             product.selectionStatus = "no_candidate";
-            product.selectionReason = "1〜3位すべて除外";
+            product.selectionReason = `${rankStart}〜${rankEnd}位すべて除外`;
           }
         });
       }
@@ -1500,7 +1502,7 @@ async function retryFailedRanking() {
         categoryName: category.name,
         rank: product.rank || productIndex + 1,
         fetchedAt: new Date().toISOString()
-      }));
+      })).filter((product) => product.rank >= rankingRequestContext.rankStart && product.rank <= rankingRequestContext.rankEnd);
       selectRankingCandidate(categoryProducts, selectionContext);
       searchResults = [...searchResults.filter((product) => product.categoryId !== category.id), ...categoryProducts];
       state.status = "success";
