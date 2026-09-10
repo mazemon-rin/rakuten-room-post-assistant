@@ -479,13 +479,13 @@ function candidateCard(item) {
     ? `<a class="secondary-button product-link-button" href="${escapeAttr(itemUrl)}" target="_blank" rel="noopener noreferrer">楽天商品ページを開く</a>`
     : `<button class="secondary-button product-link-button" type="button" disabled>商品URLがありません</button>`;
   return `
-    <article class="record-card">
+    <article class="record-card candidate-card" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}">
       <img src="${escapeAttr(item.imageUrl)}" alt="">
       <div>
         <h3>${escapeHtml(item.title)}</h3>
         <p><span class="badge">${escapeHtml(item.status)}</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
-        <label>紹介文<textarea onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
-        <label>ハッシュタグ<textarea onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
+        <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
+        <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
         <p class="post-status-line"><span class="badge post-status-badge">${escapeHtml(item.postStatus || "投稿待ち")}</span>${item.postStatus === "Codex処理中" ? " CodexでROOM投稿準備中" : ""}</p>
         ${item.introText ? `<details class="candidate-intro"><summary>紹介文を確認</summary><p>${escapeHtml(item.introText)}</p><p>${escapeHtml(item.hashTags || "")}</p></details>` : ""}
@@ -494,6 +494,7 @@ function candidateCard(item) {
           <button class="primary-button" type="button" onclick="openDetailByCandidate('${item.id}')">商品詳細・紹介文作成</button>
           <button class="secondary-button" type="button" onclick="generateCandidatePrompt('${item.id}')">紹介文プロンプト</button>
           <button class="secondary-button" type="button" onclick="openCandidateForPaste('${item.id}')">紹介文を貼り付け</button>
+          <button class="secondary-button" type="button" onclick="pasteCodexResult('${item.id}')">Codex結果を貼り付け</button>
           <button class="primary-button codex-post-button" type="button" onclick="startCodexPost('${item.id}')">Codex投稿開始</button>
           <button class="secondary-button" type="button" onclick="prepareCandidatePost('${item.id}')">投稿準備</button>
           ${productLink}
@@ -555,6 +556,39 @@ async function copyCandidatePrompt(id) {
   if (!candidate?.introPrompt) return;
   if (await copyText(candidate.introPrompt, { silent: true })) toast("Codex投稿指示文をコピーしました。");
   else toast("コピーに失敗しました。表示された指示文を手動でコピーしてください。");
+}
+
+async function pasteCodexResult(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate) return;
+  let rawText;
+  try {
+    rawText = await navigator.clipboard.readText();
+  } catch (error) {
+    toast("クリップボードを読み取れませんでした。紹介文とハッシュタグを手入力してください。");
+    return;
+  }
+
+  const introMatch = rawText.match(/(?:^|\n)\s*紹介文：\s*([\s\S]*?)(?=\n\s*ハッシュタグ：)/);
+  const hashTagsMatch = rawText.match(/(?:^|\n)\s*ハッシュタグ：\s*([\s\S]*?)(?=\n\s*状態：|$)/);
+  const introText = introMatch?.[1]?.trim() || "";
+  const hashTags = hashTagsMatch?.[1]?.trim() || "";
+  if (!introText || !hashTags) {
+    toast("Codex結果の形式を確認できませんでした。『紹介文：』『ハッシュタグ：』を含めて手入力してください。");
+    return;
+  }
+  if (`${introText}\n${hashTags}`.length > 500) {
+    toast("紹介文とハッシュタグが500文字を超えています。内容を確認して手入力してください。");
+    return;
+  }
+
+  candidate.introText = introText;
+  candidate.hashTags = hashTags;
+  candidate.status = "文章作成済み";
+  candidate.postStatus = /(?:^|\n)\s*状態：\s*確認待ち/.test(rawText) ? "確認待ち" : "紹介文作成済み";
+  saveData();
+  renderCandidates();
+  toast("Codex結果を商品単位で保存し、投稿キューへ反映しました。");
 }
 
 function focusNextCandidate(id) {
@@ -631,12 +665,28 @@ function buildCodexPostInstructions(candidate) {
     "8. 紹介文とハッシュタグを入力する",
     "9. 入力内容と文字数（500文字以内）を確認する",
     "10. ROOMの「完了」は絶対にクリックしない",
-    "11. 「確認待ち」の状態で停止する",
+    "11. ROOM投稿画面の紹介文とハッシュタグを保持する",
+    "12. 楽天ROOM投稿アシスタントのタブへ戻る",
+    `13. itemCode「${candidate.itemCode || product.itemCode || ""}」をdata-item-codeで検索し、1件だけ一致する商品カードを特定する`,
+    `14. itemUrl「${itemUrl}」も照合し、商品名だけで判定しない`,
+    "15. 一致したカードの紹介文textareaとハッシュタグtextareaをDOMから特定する",
+    "16. ROOMへ入力した同じ紹介文とハッシュタグをそれぞれ入力し、input/changeイベントを発生させて保存する",
+    "17. 保存後に値を読み返し、入力内容と完全一致することを確認する",
+    "18. 一致しない、複数一致、入力欄不明、500文字超過の場合は入力と状態変更を中止し、エラーとして報告する",
+    "19. 正常時だけ対象商品の「確認待ちにする」を押し、postStatusが確認待ちになったことを確認する",
+    "20. ROOM投稿画面のタブへ戻り、「完了」直前で停止する",
     "",
     "【紹介文条件】",
     "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。",
     "「絶対」「必ず」「最安」「No.1」など根拠のない断定や効果保証は禁止。",
-    "agent-browser、ROOMの完了、自動いいね、フォロー、コメントは使用しない。"
+    "agent-browser、ROOMの完了、自動いいね、フォロー、コメントは使用しない。",
+    "",
+    "【必ず最後に返す形式】",
+    "紹介文：",
+    "（作成した紹介文）",
+    "ハッシュタグ：",
+    "（使用したハッシュタグを空白区切りで記載）",
+    "状態：確認待ち"
   ].join("\n");
 }
 
