@@ -1434,6 +1434,7 @@ async function loadRanking(event) {
   saveData();
   const allProducts = [];
   const errors = [];
+  const diagnostics = [];
   const selectionContext = { selectedIdentities: new Set() };
   for (const [categoryIndex, category] of selectedCategories.entries()) {
     const categoryState = rankingCategoryStates.get(category.id);
@@ -1455,6 +1456,7 @@ async function loadRanking(event) {
         rank: index + 1,
         fetchedAt: new Date().toISOString()
       })).filter((product) => product.rank >= rankStart && product.rank <= rankEnd);
+      diagnostics.push(`${category.name}: API取得${products.length}件 / ${rankStart}〜${rankEnd}位の対象${categoryProducts.length}件`);
       if (!selectRankingCandidate(categoryProducts, selectionContext)) {
         categoryProducts.forEach((product) => {
           if (!product.selectionStatus) {
@@ -1484,7 +1486,9 @@ async function loadRanking(event) {
   } else if (errors.length) {
     message.textContent = `${allProducts.length}件を表示しました。一部カテゴリーで取得に失敗しました：${errors.join(" / ")}`;
   } else {
-    message.textContent = allProducts.length ? `${allProducts.length}件のランキング商品を表示しました。` : "ランキング結果が0件でした。";
+    message.textContent = allProducts.length
+      ? `${allProducts.length}件のランキング商品を表示しました。${diagnostics.length ? `（${diagnostics.join("、")}）` : ""}`
+      : `ランキング結果が0件でした。${diagnostics.length ? ` 診断：${diagnostics.join("、")}` : ""}`;
   }
 }
 
