@@ -178,8 +178,19 @@
         <p>楽天アプリIDがある場合はランキングAPIを利用し、未設定時はサンプルを表示します。</p>
       </div>
       <form id="rankingForm" class="search-form">
+        <fieldset class="ranking-category-fieldset">
+          <legend>対象カテゴリー</legend>
+          <div class="category-checkboxes">
+            <label><input type="checkbox" name="rankingCategory" value="562637"> 家電</label>
+            <label><input type="checkbox" name="rankingCategory" value="100026"> パソコン・周辺機器</label>
+            <label><input type="checkbox" name="rankingCategory" value="100554"> 日用品・生活雑貨</label>
+            <label><input type="checkbox" name="rankingCategory" value="558944"> キッチン用品・食器・調理器具</label>
+            <label><input type="checkbox" name="rankingCategory" value="100227"> 食品</label>
+            <label><input type="checkbox" name="rankingCategory" value="100939"> 美容・コスメ・香水</label>
+          </div>
+        </fieldset>
         <label>ジャンルID<input id="rankingGenreId" type="text" placeholder="空欄で総合"></label>
-        <label>表示件数<select id="rankingHits"><option>10</option><option>20</option><option>30</option></select></label>
+        <label>取得順位<select id="rankingHits"><option value="1">1位のみ</option><option value="3" selected>1〜3位</option></select></label>
         <button class="primary-button" type="submit">ランキング取得</button>
       </form>
       <p id="rankingMessage" class="message"></p>

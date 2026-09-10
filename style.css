@@ -254,6 +254,37 @@ main {
   margin-bottom: 18px;
 }
 
+.ranking-category-fieldset {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.ranking-category-fieldset legend {
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+.category-checkboxes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.category-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.category-checkboxes input {
+  width: auto;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -300,6 +331,19 @@ textarea {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+}
+
+.ranking-group {
+  grid-column: 1 / -1;
+}
+
+.ranking-group > h3 {
+  margin: 8px 0 12px;
+  color: var(--green);
+}
+
+.ranking-group .product-grid {
+  margin-bottom: 22px;
 }
 
 .product-card {
@@ -458,6 +502,10 @@ textarea {
   .toolbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .category-checkboxes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
@@ -472,6 +520,10 @@ textarea {
   .prompt-controls,
   .toolbar,
   .record-card {
+    grid-template-columns: 1fr;
+  }
+
+  .category-checkboxes {
     grid-template-columns: 1fr;
   }
 

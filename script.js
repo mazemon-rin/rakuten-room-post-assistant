@@ -1,5 +1,15 @@
 const STORAGE_KEY = "roomAssistantDataV1";
 
+// These top-level Rakuten market categories were verified from Rakuten category pages.
+const rankingCategories = [
+  { id: "562637", name: "家電" },
+  { id: "100026", name: "パソコン・周辺機器" },
+  { id: "100554", name: "日用品・生活雑貨" },
+  { id: "558944", name: "キッチン用品・食器・調理器具" },
+  { id: "100227", name: "食品" },
+  { id: "100939", name: "美容・コスメ・香水" }
+];
+
 const sampleProducts = [
   {
     itemName: "大容量モバイルバッテリー 10000mAh USB-C対応",
@@ -51,7 +61,8 @@ const defaultData = {
     accessKey: "",
     defaultTone: "やさしい",
     defaultEmoji: "少なめ",
-    defaultTagCount: 8
+    defaultTagCount: 8,
+    rankingCategoryIds: rankingCategories.map((category) => category.id)
   },
   candidates: [],
   history: [],
@@ -107,10 +118,16 @@ function bindForms() {
   $("#favoriteTypeFilter").addEventListener("change", renderFavorites);
   $("#calendarMonth").addEventListener("change", renderCalendar);
   $("#rankingForm").addEventListener("submit", loadRanking);
+  $$("input[name='rankingCategory']").forEach((input) => input.addEventListener("change", saveRankingCategorySelection));
   $("#exportJson").addEventListener("click", exportJson);
   $("#importJson").addEventListener("change", importJson);
   $("#exportCsv").addEventListener("click", exportCsv);
   $("#clearData").addEventListener("click", clearData);
+}
+
+function saveRankingCategorySelection() {
+  data.settings.rankingCategoryIds = $$("input[name='rankingCategory']:checked").map((input) => input.value);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
 function fillSettings() {
@@ -119,6 +136,10 @@ function fillSettings() {
   $("#defaultTone").value = data.settings.defaultTone;
   $("#defaultEmoji").value = data.settings.defaultEmoji;
   $("#defaultTagCount").value = data.settings.defaultTagCount;
+  const selectedIds = data.settings.rankingCategoryIds || rankingCategories.map((category) => category.id);
+  $$("input[name='rankingCategory']").forEach((input) => {
+    input.checked = selectedIds.includes(input.value);
+  });
   $("#hits").value = data.settings.defaultHits || "10";
   $("#calendarMonth").value = new Date().toISOString().slice(0, 7);
 }
@@ -175,15 +196,46 @@ function hasRakutenCredentials() {
 async function readRakutenApiError(response) {
   const fallback = `HTTP ${response.status}`;
   try {
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      const errorBody = await response.json();
-      return formatRakutenApiError(errorBody.error_description || errorBody.error || fallback);
+    const raw = await response.text();
+    if (!raw) return formatRakutenApiError(fallback);
+    try {
+      const errorBody = JSON.parse(raw);
+      const detail = errorBody.error_description || errorBody.error || raw;
+      return formatRakutenApiError(`${fallback}：${detail}`);
+    } catch {
+      return formatRakutenApiError(`${fallback}：${raw.slice(0, 240)}`);
     }
-    const text = await response.text();
-    return formatRakutenApiError(text || fallback);
   } catch {
     return formatRakutenApiError(fallback);
+  }
+}
+
+async function fetchRankingCategory(category, limit) {
+  const params = new URLSearchParams({
+    format: "json",
+    applicationId: data.settings.applicationId,
+    accessKey: data.settings.accessKey,
+    page: "1",
+    genreId: category.id
+  });
+  const url = `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`;
+  let retried = false;
+  while (true) {
+    const response = await fetch(url);
+    if (response.ok) {
+      const json = await response.json();
+      return normalizeRakutenItems(json).slice(0, limit);
+    }
+    const retryAfter = response.headers.get("retry-after");
+    if (response.status === 429 && !retried && retryAfter) {
+      const seconds = Number(retryAfter);
+      if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 60) {
+        retried = true;
+        await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+        continue;
+      }
+    }
+    throw new Error(await readRakutenApiError(response));
   }
 }
 
@@ -483,7 +535,8 @@ function saveSettings(event) {
     accessKey: $("#accessKey").value.trim(),
     defaultTone: $("#defaultTone").value,
     defaultEmoji: $("#defaultEmoji").value,
-    defaultTagCount: Number($("#defaultTagCount").value) || 8
+    defaultTagCount: Number($("#defaultTagCount").value) || 8,
+    rankingCategoryIds: data.settings.rankingCategoryIds || rankingCategories.map((category) => category.id)
   };
   saveData();
   toast("設定を保存しました。");
@@ -737,34 +790,62 @@ async function loadRanking(event) {
     message.textContent = "楽天アプリIDまたはアクセスキーが未設定のため、サンプル商品を表示しています。";
     return;
   }
-  const params = new URLSearchParams({
-    format: "json",
-    applicationId: data.settings.applicationId,
-    accessKey: data.settings.accessKey,
-    page: "1"
-  });
-  const genreId = $("#rankingGenreId").value.trim();
-  if (genreId) params.set("genreId", genreId);
-  try {
-    const response = await fetch(`https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`);
-    if (!response.ok) throw new Error(await readRakutenApiError(response));
-    const json = await response.json();
-    const products = normalizeRakutenItems(json).slice(0, Number($("#rankingHits").value));
-    renderRankingResults(products);
-    message.textContent = `${products.length}件のランキング商品を表示しました。`;
-  } catch (error) {
+  const selectedCategories = $$("input[name='rankingCategory']:checked").map((input) => rankingCategories.find((category) => category.id === input.value)).filter(Boolean);
+  if (!selectedCategories.length) {
+    renderRankingResults([]);
+    message.textContent = "カテゴリーを1つ以上選択してください。";
+    return;
+  }
+  const legacyGenreId = $("#rankingGenreId").value.trim();
+  if (legacyGenreId) selectedCategories.unshift({ id: legacyGenreId, name: `ジャンルID ${legacyGenreId}` });
+  const limit = Number($("#rankingHits").value);
+  data.settings.rankingCategoryIds = selectedCategories.map((category) => category.id);
+  saveData();
+  const allProducts = [];
+  const errors = [];
+  for (const category of selectedCategories) {
+    try {
+      const products = await fetchRankingCategory(category, limit);
+      products.forEach((product, index) => allProducts.push({
+        ...product,
+        categoryId: category.id,
+        categoryName: category.name,
+        rank: index + 1,
+        fetchedAt: new Date().toISOString()
+      }));
+    } catch (error) {
+      errors.push(`${category.name}: ${error.message}`);
+    }
+  }
+  renderRankingResults(allProducts);
+  if (!allProducts.length && errors.length) {
+    message.textContent = `${errors.join(" / ")} サンプル商品を表示します。`;
     renderRankingResults(sampleProducts);
-    message.textContent = `${error.message} サンプル商品を表示します。`;
+  } else if (errors.length) {
+    message.textContent = `${allProducts.length}件を表示しました。一部カテゴリーで取得に失敗しました：${errors.join(" / ")}`;
+  } else {
+    message.textContent = allProducts.length ? `${allProducts.length}件のランキング商品を表示しました。` : "ランキング結果が0件でした。";
   }
 }
 
 function renderRankingResults(products) {
   searchResults = products;
   const container = $("#rankingResults");
-  container.innerHTML = products.map((product, index) => `
-    <article class="product-card">
-      <img src="${escapeAttr(getImage(product))}" alt="">
-      <div class="product-body"><div class="product-title">${index + 1}位 ${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.shopName)}</p></div>
-      <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button><button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button></div>
-    </article>`).join("");
+  const groups = products.reduce((result, product) => {
+    const key = product.categoryId || "総合";
+    (result[key] ||= { name: product.categoryName || "総合ランキング", products: [] }).products.push(product);
+    return result;
+  }, {});
+  container.innerHTML = Object.values(groups).map((group) => `
+    <section class="ranking-group">
+      <h3>${escapeHtml(group.name)}</h3>
+      <div class="product-grid">${group.products.map((product) => {
+        const index = searchResults.indexOf(product);
+        return `<article class="product-card">
+          <img src="${escapeAttr(getImage(product))}" alt="">
+          <div class="product-body"><div class="product-title">${product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p></div>
+          <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button><button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
+        </article>`;
+      }).join("")}</div>
+    </section>`).join("");
 }
