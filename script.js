@@ -72,6 +72,7 @@ const defaultData = {
 let data = loadData();
 let currentProduct = null;
 let searchResults = [];
+const codexPasteErrors = new Map();
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -488,6 +489,7 @@ function candidateCard(item) {
         <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
         <p class="post-status-line"><span class="badge post-status-badge">${escapeHtml(item.postStatus || "投稿待ち")}</span>${item.postStatus === "Codex処理中" ? " CodexでROOM投稿準備中" : ""}</p>
+        ${codexPasteErrors.has(item.id) ? `<p class="message" role="alert">${escapeHtml(codexPasteErrors.get(item.id))}</p>` : ""}
         ${item.introText ? `<details class="candidate-intro"><summary>紹介文を確認</summary><p>${escapeHtml(item.introText)}</p><p>${escapeHtml(item.hashTags || "")}</p></details>` : ""}
         ${item.introPrompt ? `<details class="candidate-intro"><summary>Codex投稿指示文を確認</summary><textarea readonly>${escapeHtml(item.introPrompt)}</textarea><button class="secondary-button" type="button" onclick="copyCandidatePrompt('${item.id}')">指示文をコピー</button></details>` : ""}
         <div class="record-actions">
@@ -561,11 +563,14 @@ async function copyCandidatePrompt(id) {
 async function pasteCodexResult(id) {
   const candidate = data.candidates.find((item) => item.id === id);
   if (!candidate) return;
+  codexPasteErrors.delete(id);
   let rawText;
   try {
     rawText = await navigator.clipboard.readText();
   } catch (error) {
-    toast("クリップボードを読み取れませんでした。紹介文とハッシュタグを手入力してください。");
+    codexPasteErrors.set(id, "クリップボードを読み取れませんでした。紹介文とハッシュタグを手入力してください。");
+    renderCandidates();
+    toast("クリップボードを読み取れませんでした。手動入力へ切り替えてください。");
     return;
   }
 
@@ -573,20 +578,54 @@ async function pasteCodexResult(id) {
   const hashTagsMatch = rawText.match(/(?:^|\n)\s*ハッシュタグ：\s*([\s\S]*?)(?=\n\s*状態：|$)/);
   const introText = introMatch?.[1]?.trim() || "";
   const hashTags = hashTagsMatch?.[1]?.trim() || "";
+  const isConfirmationReady = /(?:^|\n)\s*状態：\s*確認待ち(?:\s|$)/.test(rawText);
   if (!introText || !hashTags) {
-    toast("Codex結果の形式を確認できませんでした。『紹介文：』『ハッシュタグ：』を含めて手入力してください。");
+    codexPasteErrors.set(id, "Codex結果の形式を確認できませんでした。『紹介文：』『ハッシュタグ：』『状態：確認待ち』を含む形式で手動入力してください。");
+    renderCandidates();
+    toast("Codex結果の形式を確認できません。保存していません。");
     return;
   }
   if (`${introText}\n${hashTags}`.length > 500) {
-    toast("紹介文とハッシュタグが500文字を超えています。内容を確認して手入力してください。");
+    codexPasteErrors.set(id, "紹介文とハッシュタグが500文字を超えています。保存していません。内容を手動で確認してください。");
+    renderCandidates();
+    toast("紹介文とハッシュタグが500文字を超えています。保存していません。");
+    return;
+  }
+  if (!isConfirmationReady) {
+    codexPasteErrors.set(id, "状態が「確認待ち」ではないため保存していません。指定形式を確認してください。");
+    renderCandidates();
+    toast("状態が確認待ちではありません。保存していません。");
+    return;
+  }
+
+  const itemCode = candidate.itemCode || candidate.product?.itemCode || "";
+  const itemUrl = candidate.itemUrl || candidate.product?.itemUrl || candidate.product?.affiliateUrl || "";
+  const matchingCandidates = data.candidates.filter((item) => {
+    const sameCode = itemCode && (item.itemCode || item.product?.itemCode) === itemCode;
+    const sameUrl = itemUrl && (item.itemUrl || item.product?.itemUrl || item.product?.affiliateUrl) === itemUrl;
+    const sameNameShop = item.title === candidate.title && item.shopName === candidate.shopName;
+    return sameCode || (!itemCode && sameUrl) || (!itemCode && !itemUrl && sameNameShop);
+  });
+  if (matchingCandidates.length !== 1 || matchingCandidates[0].id !== candidate.id) {
+    codexPasteErrors.set(id, "対象商品を一意に特定できないため保存していません。itemCodeと商品URLを確認してください。");
+    renderCandidates();
+    toast("対象商品を一意に特定できません。保存していません。");
     return;
   }
 
   candidate.introText = introText;
   candidate.hashTags = hashTags;
   candidate.status = "文章作成済み";
-  candidate.postStatus = /(?:^|\n)\s*状態：\s*確認待ち/.test(rawText) ? "確認待ち" : "紹介文作成済み";
+  candidate.postStatus = "確認待ち";
   saveData();
+  const savedCandidate = data.candidates.find((item) => item.id === id);
+  if (savedCandidate?.introText !== introText || savedCandidate?.hashTags !== hashTags) {
+    codexPasteErrors.set(id, "保存後の内容確認に失敗したため、確認待ちには変更していません。");
+    savedCandidate.postStatus = "エラー";
+    saveData();
+    toast("保存内容を確認できませんでした。投稿状態をエラーにしました。");
+    return;
+  }
   renderCandidates();
   toast("Codex結果を商品単位で保存し、投稿キューへ反映しました。");
 }
@@ -657,7 +696,7 @@ function buildCodexPostInstructions(candidate) {
     "【手順】",
     "1. 商品情報を確認する",
     "2. 商品情報だけを使い、楽天ROOM向け紹介文とハッシュタグを作成する",
-    "3. 商品ページをCodex内蔵ブラウザで開く",
+    "3. Safariで商品ページを開く",
     "4. JavaScript実行後DOMから aria-label=\"ROOMに投稿\" のa要素を探す",
     "5. そのa要素の実hrefを取得する。商品番号からROOM URLを推測生成しない",
     "6. 取得したROOM URLを直接開く",
@@ -666,27 +705,29 @@ function buildCodexPostInstructions(candidate) {
     "9. 入力内容と文字数（500文字以内）を確認する",
     "10. ROOMの「完了」は絶対にクリックしない",
     "11. ROOM投稿画面の紹介文とハッシュタグを保持する",
-    "12. 楽天ROOM投稿アシスタントのタブへ戻る",
+    "12. Safariの楽天ROOM投稿アシスタントのタブへ戻る",
     `13. itemCode「${candidate.itemCode || product.itemCode || ""}」をdata-item-codeで検索し、1件だけ一致する商品カードを特定する`,
     `14. itemUrl「${itemUrl}」も照合し、商品名だけで判定しない`,
-    "15. 一致したカードの紹介文textareaとハッシュタグtextareaをDOMから特定する",
-    "16. ROOMへ入力した同じ紹介文とハッシュタグをそれぞれ入力し、input/changeイベントを発生させて保存する",
-    "17. 保存後に値を読み返し、入力内容と完全一致することを確認する",
-    "18. 一致しない、複数一致、入力欄不明、500文字超過の場合は入力と状態変更を中止し、エラーとして報告する",
-    "19. 正常時だけ対象商品の「確認待ちにする」を押し、postStatusが確認待ちになったことを確認する",
-    "20. ROOM投稿画面のタブへ戻り、「完了」直前で停止する",
+    "15. ROOMに入力した文章とハッシュタグを指定形式でクリップボードへコピーする",
+    "16. 対象カードの「Codex結果を貼り付け」を押す（textareaへ直接入力しない）",
+    "17. アプリ自身が紹介文・ハッシュタグを解析し、localStorageへ保存したことを確認する",
+    "18. 一致しない、複数一致、500文字超過、保存後の値不一致の場合は状態変更せずエラーとして報告する",
+    "19. 正常時だけpostStatusが確認待ちになったことを確認する",
+    "20. SafariのROOM投稿画面へ戻り、「完了」直前で停止する",
     "",
     "【紹介文条件】",
     "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。",
     "「絶対」「必ず」「最安」「No.1」など根拠のない断定や効果保証は禁止。",
-    "agent-browser、ROOMの完了、自動いいね、フォロー、コメントは使用しない。",
+    "Codex内蔵ブラウザ、Chrome、agent-browser、Playwright、ROOMの完了、自動いいね、フォロー、コメントは使用しない。Safariだけを使用する。",
     "",
-    "【必ず最後に返す形式】",
+    "【必ず最後にクリップボードへコピーする形式】",
     "紹介文：",
     "（作成した紹介文）",
     "ハッシュタグ：",
     "（使用したハッシュタグを空白区切りで記載）",
-    "状態：確認待ち"
+    "状態：",
+    "確認待ち",
+    "この3項目を含む結果全体を、改変せずクリップボードへコピーする。"
   ].join("\n");
 }
 
