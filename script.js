@@ -219,11 +219,35 @@ async function fetchRankingCategory(category, limit) {
     genreId: category.id
   });
   const url = `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`;
+  // TEMP DEBUG: Never log Application ID or Access Key values.
+  const debugParams = new URLSearchParams(params);
+  debugParams.set("applicationId", "***MASKED***");
+  debugParams.set("accessKey", "***MASKED***");
+  console.log("[Ranking API DEBUG]", {
+    categoryName: category.name,
+    categoryId: category.id,
+    genreId: params.get("genreId"),
+    page: params.get("page"),
+    format: params.get("format"),
+    requestUrl: `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${debugParams.toString()}`
+  });
   let retried = false;
   while (true) {
     const response = await fetch(url);
+    // TEMP DEBUG: Log only response metadata and a small, non-sensitive summary.
+    console.log("[Ranking API DEBUG] HTTP status", response.status);
     if (response.ok) {
       const json = await response.json();
+      const debugItems = normalizeRakutenItems(json).slice(0, 3).map((item) => ({
+        rank: item.rank,
+        itemName: item.itemName,
+        itemCode: item.itemCode
+      }));
+      console.log("[Ranking API DEBUG] response summary", {
+        title: json.title,
+        lastBuildDate: json.lastBuildDate,
+        items: debugItems
+      });
       return normalizeRakutenItems(json).slice(0, limit);
     }
     const retryAfter = response.headers.get("retry-after");
