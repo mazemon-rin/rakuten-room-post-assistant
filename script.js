@@ -1,4 +1,6 @@
 const STORAGE_KEY = "roomAssistantDataV1";
+const RANKING_REQUEST_INTERVAL_MS = 1200;
+const RANKING_MAX_RETRIES = 1;
 
 // These top-level Rakuten market categories were verified from Rakuten category pages.
 const rankingCategories = [
@@ -222,24 +224,58 @@ async function fetchRankingCategory(category, limit) {
     genreId: category.id
   });
   const url = `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`;
-  let retried = false;
+  let retryCount = 0;
   while (true) {
     const response = await fetch(url);
     if (response.ok) {
       const json = await response.json();
       return normalizeRakutenItems(json).slice(0, limit);
     }
-    const retryAfter = response.headers.get("retry-after");
-    if (response.status === 429 && !retried && retryAfter) {
-      const seconds = Number(retryAfter);
-      if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 60) {
-        retried = true;
-        await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
-        continue;
-      }
+    const rawBody = await response.text().catch(() => "");
+    if (response.status === 429 && retryCount < RANKING_MAX_RETRIES) {
+      const waitMs = getRankingRetryWaitMs(response, rawBody);
+      retryCount += 1;
+      showRankingProgress(`${category.name}で429。${Math.ceil(waitMs / 1000)}秒待機して再試行...`);
+      await sleep(waitMs);
+      continue;
     }
-    throw new Error(await readRakutenApiError(response));
+    throw new Error(formatRakutenApiError(`HTTP ${response.status}：${extractRakutenApiErrorDetail(rawBody)}`));
   }
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function getRankingRetryWaitMs(response, rawBody) {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 60) return Math.max(1000, seconds * 1000);
+    const retryDate = Date.parse(retryAfter);
+    if (Number.isFinite(retryDate)) return Math.max(1000, Math.min(60000, retryDate - Date.now()));
+  }
+  const bodySeconds = rawBody.match(/Try again in\s+(\d+(?:\.\d+)?)\s+seconds?/i)?.[1];
+  if (bodySeconds) {
+    const seconds = Number(bodySeconds);
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 60) return Math.max(1000, seconds * 1000);
+  }
+  return RANKING_REQUEST_INTERVAL_MS;
+}
+
+function extractRakutenApiErrorDetail(rawBody) {
+  if (!rawBody) return "HTTPエラー";
+  try {
+    const errorBody = JSON.parse(rawBody);
+    return errorBody.error_description || errorBody.error || errorBody.message || rawBody.slice(0, 240);
+  } catch {
+    return rawBody.slice(0, 240);
+  }
+}
+
+function showRankingProgress(message) {
+  const messageEl = $("#rankingMessage");
+  if (messageEl) messageEl.textContent = message;
 }
 
 function formatRakutenApiError(message) {
@@ -1266,7 +1302,8 @@ async function loadRanking(event) {
   const allProducts = [];
   const errors = [];
   const selectionContext = { selectedIdentities: new Set() };
-  for (const category of selectedCategories) {
+  for (const [categoryIndex, category] of selectedCategories.entries()) {
+    showRankingProgress(`${category.name}を取得中...`);
     try {
       const products = await fetchRankingCategory(category, limit);
       const categoryProducts = products.map((product, index) => ({
@@ -1287,6 +1324,10 @@ async function loadRanking(event) {
       allProducts.push(...categoryProducts);
     } catch (error) {
       errors.push(`${category.name}: ${error.message}`);
+    }
+    if (categoryIndex < selectedCategories.length - 1) {
+      showRankingProgress(`${category.name}の取得完了。次のカテゴリーまで待機しています...`);
+      await sleep(RANKING_REQUEST_INTERVAL_MS);
     }
   }
   renderRankingResults(allProducts);
