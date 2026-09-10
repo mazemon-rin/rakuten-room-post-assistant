@@ -500,6 +500,25 @@ textarea {
   margin-top: 10px;
 }
 
+.candidate-primary-actions {
+  padding: 10px;
+  border: 1px solid rgba(218, 91, 54, 0.2);
+  border-radius: 8px;
+  background: #fff8f3;
+}
+
+.candidate-tools {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.candidate-tools summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .candidate-intro {
   margin-top: 10px;
   color: var(--muted);

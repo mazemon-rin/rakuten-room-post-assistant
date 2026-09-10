@@ -120,6 +120,7 @@ function bindForms() {
   $("#favoriteTypeFilter").addEventListener("change", renderFavorites);
   $("#calendarMonth").addEventListener("change", renderCalendar);
   $("#rankingForm").addEventListener("submit", loadRanking);
+  $("#queue-selected-ranking").addEventListener("click", queueSelectedRanking);
   $$("input[name='rankingCategory']").forEach((input) => input.addEventListener("change", saveRankingCategorySelection));
   $("#exportJson").addEventListener("click", exportJson);
   $("#importJson").addEventListener("change", importJson);
@@ -475,6 +476,74 @@ function renderCandidates() {
   $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
 }
 
+function buildQueueCandidate(product) {
+  const itemUrl = product.itemUrl || product.affiliateUrl || "";
+  const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
+  return {
+    id: crypto.randomUUID(),
+    product: productWithUrl,
+    title: productWithUrl.itemName,
+    imageUrl: getImage(productWithUrl),
+    itemUrl,
+    itemCode: productWithUrl.itemCode || "",
+    price: productWithUrl.itemPrice,
+    shopName: productWithUrl.shopName || "",
+    genreId: productWithUrl.genreId || "",
+    categoryId: productWithUrl.categoryId || productWithUrl.genreId || "",
+    categoryName: productWithUrl.categoryName || "",
+    rank: productWithUrl.rank || "",
+    fetchedAt: productWithUrl.fetchedAt || new Date().toISOString(),
+    introPrompt: "",
+    introText: "",
+    hashTags: makeTags(productWithUrl, data.settings.defaultTagCount).join(" "),
+    savedAt: new Date().toISOString(),
+    plannedDate: new Date().toISOString().slice(0, 10),
+    memo: "",
+    status: "未作成",
+    postStatus: "投稿待ち",
+    favoriteType: "今すぐ投稿"
+  };
+}
+
+function queueSelectedRanking() {
+  const message = $("#rankingMessage");
+  const selected = searchResults.filter((product) => product.selectionStatus === "selected");
+  if (!selected.length) {
+    message.textContent = "1〜3位に投稿可能な商品がありません。先にランキングを取得してください。";
+    toast("投稿キューへ追加できる採用商品がありません。");
+    return;
+  }
+
+  const existingIdentities = new Set([...data.candidates, ...data.history].map((item) => rankingIdentity(item.product || item)));
+  const added = [];
+  const skipped = [];
+  selected.forEach((product) => {
+    const identity = rankingIdentity(product);
+    if (existingIdentities.has(identity)) {
+      product.selectionStatus = "existing_duplicate";
+      product.selectionReason = "投稿キューまたは投稿履歴に登録済み";
+      skipped.push(product);
+      return;
+    }
+    const candidate = buildQueueCandidate(product);
+    data.candidates.push(candidate);
+    existingIdentities.add(identity);
+    added.push(candidate);
+  });
+
+  if (added.length) {
+    saveData();
+    renderRankingResults(searchResults);
+    showTab("candidates");
+    message.textContent = `${added.length}件を投稿キューへ追加しました。${skipped.length ? ` ${skipped.length}件は登録済みのため除外しました。` : ""}`;
+    toast(`${added.length}件を投稿キューへ追加しました。`);
+  } else {
+    renderRankingResults(searchResults);
+    message.textContent = "1〜3位に投稿可能な商品がありません。登録済みの商品は除外しました。";
+    toast("登録済みの商品は投稿キューへ追加しませんでした。");
+  }
+}
+
 function parseCodexResult(rawText) {
   const itemCode = rawText.match(/(?:^|\n)\s*ITEM_CODE:\s*([^\n]+)/)?.[1]?.trim() || "";
   const introText = rawText.match(/(?:^|\n)\s*紹介文:\s*([\s\S]*?)(?=\n\s*ハッシュタグ:)/)?.[1]?.trim() || "";
@@ -513,11 +582,12 @@ function candidateCard(item) {
     ? `<a class="secondary-button product-link-button" href="${escapeAttr(itemUrl)}" target="_blank" rel="noopener noreferrer">楽天商品ページを開く</a>`
     : `<button class="secondary-button product-link-button" type="button" disabled>商品URLがありません</button>`;
   return `
-    <article class="record-card candidate-card" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}">
+    <article class="record-card candidate-card" data-candidate-id="${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}">
       <img src="${escapeAttr(item.imageUrl)}" alt="">
       <div>
         <h3>${escapeHtml(item.title)}</h3>
         <p><span class="badge">${escapeHtml(item.status)}</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
+        <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
         <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
@@ -525,22 +595,28 @@ function candidateCard(item) {
         ${codexPasteErrors.has(item.id) ? `<p class="message" role="alert">${escapeHtml(codexPasteErrors.get(item.id))}</p>` : ""}
         ${item.introText ? `<details class="candidate-intro"><summary>紹介文を確認</summary><p>${escapeHtml(item.introText)}</p><p>${escapeHtml(item.hashTags || "")}</p></details>` : ""}
         ${item.introPrompt ? `<details class="candidate-intro"><summary>Codex投稿指示文を確認</summary><textarea readonly>${escapeHtml(item.introPrompt)}</textarea><button class="secondary-button" type="button" onclick="copyCandidatePrompt('${item.id}')">指示文をコピー</button></details>` : ""}
-        <div class="record-actions">
+        <div class="record-actions candidate-primary-actions">
+          <button class="primary-button codex-post-button" type="button" onclick="startCodexPost('${item.id}')">Codex投稿開始</button>
+          <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
+          <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
+          <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button>
+          ${["確認待ち", "投稿済み", "スキップ"].includes(item.postStatus) ? `<button class="secondary-button" type="button" onclick="focusNextCandidate('${item.id}')">次の商品</button>` : ""}
+        </div>
+        <details class="candidate-tools">
+          <summary>手動操作・トラブル対応</summary>
+          <div class="record-actions">
           <button class="primary-button" type="button" onclick="openDetailByCandidate('${item.id}')">商品詳細・紹介文作成</button>
           <button class="secondary-button" type="button" onclick="generateCandidatePrompt('${item.id}')">紹介文プロンプト</button>
           <button class="secondary-button" type="button" onclick="openCandidateForPaste('${item.id}')">紹介文を貼り付け</button>
           <button class="secondary-button" type="button" onclick="pasteCodexResult('${item.id}')">Codex結果を貼り付け</button>
-          <button class="primary-button codex-post-button" type="button" onclick="startCodexPost('${item.id}')">Codex投稿開始</button>
           <button class="secondary-button" type="button" onclick="prepareCandidatePost('${item.id}')">投稿準備</button>
           ${productLink}
           <button class="secondary-button" type="button" onclick="copyText(${JSON.stringify(`${item.introText}\n${item.hashTags}`)})">全文コピー</button>
-          <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
-          <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
-          <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button>
-          ${item.postStatus === "投稿済み" || item.postStatus === "スキップ" ? `<button class="secondary-button" type="button" onclick="focusNextCandidate('${item.id}')">次の商品</button>` : ""}
           <select aria-label="投稿状態" onchange="setPostStatus('${item.id}', this.value)">${["投稿待ち", "Codex処理中", "確認待ち", "投稿済み", "スキップ", "エラー"].map((status) => `<option ${item.postStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select>
           <select onchange="updateCandidate('${item.id}', 'status', this.value)">${["未作成", "文章作成済み", "投稿待ち", "投稿済み", "保留", "対象外"].map((status) => `<option ${item.status === status ? "selected" : ""}>${status}</option>`).join("")}</select>
           <button class="danger-button" type="button" onclick="deleteCandidate('${item.id}')">削除</button>
+          </div>
+        </details>
         </div>
       </div>
     </article>
@@ -665,13 +741,15 @@ async function pasteCodexResult(id) {
 
 function focusNextCandidate(id) {
   const index = data.candidates.findIndex((candidate) => candidate.id === id);
-  const next = data.candidates.slice(index + 1).find((candidate) => !["投稿済み", "スキップ"].includes(candidate.postStatus));
+  const next = data.candidates.slice(index + 1).find((candidate) => candidate.postStatus === "投稿待ち") ||
+    data.candidates.find((candidate) => candidate.postStatus === "投稿待ち");
   if (!next) {
-    toast("次に処理できる商品はありません。");
+    toast("次の「投稿待ち」商品はありません。");
     return;
   }
-  document.querySelector("#candidateFilter")?.focus();
-  toast(`次の商品「${next.title}」を処理できます。`);
+  const card = Array.from(document.querySelectorAll(".candidate-card")).find((element) => element.dataset.candidateId === next.id);
+  card?.scrollIntoView({ behavior: "smooth", block: "center" });
+  toast(`次の商品「${next.title}」を処理できます。自動開始はしていません。`);
 }
 
 function markPosted(id) {
@@ -770,6 +848,15 @@ function buildCodexPostInstructions(candidate) {
 async function startCodexPost(id) {
   const candidate = data.candidates.find((item) => item.id === id);
   if (!candidate) return;
+  const active = data.candidates.find((item) => item.id !== id && item.postStatus === "Codex処理中");
+  if (active) {
+    toast(`別の商品「${active.title}」がCodex処理中です。先に確認待ちまたは投稿済みにしてください。`);
+    return;
+  }
+  if (["Codex処理中", "確認待ち", "投稿済み", "スキップ"].includes(candidate.postStatus)) {
+    toast(`この商品は現在「${candidate.postStatus}」のため、Codex投稿開始は実行しません。`);
+    return;
+  }
   const itemUrl = candidate.itemUrl || candidate.product?.itemUrl || candidate.product?.affiliateUrl || "";
   if (!itemUrl) {
     setPostStatus(id, "エラー");
@@ -863,13 +950,8 @@ function saveSettings(event) {
 
 function findDuplicate(product, ignoreId = "") {
   const allItems = [...data.candidates, ...data.history].filter((item) => item.id !== ignoreId);
-  const found = allItems.find((item) => {
-    const saved = item.product || item;
-    return saved.itemCode === product.itemCode ||
-      saved.itemUrl === product.itemUrl ||
-      saved.itemName === product.itemName ||
-      (saved.shopName === product.shopName && saved.itemName === product.itemName);
-  });
+  const identity = rankingIdentity(product);
+  const found = allItems.find((item) => rankingIdentity(item.product || item) === identity);
   if (!found) return "";
   return `この商品は${formatDate(found.postedAt || found.savedAt)}に${found.postedAt ? "投稿済み" : "保存済み"}です。`;
 }
@@ -895,6 +977,10 @@ function postedHistoryMatch(product) {
   return data.history.some((entry) => rankingIdentity(entry.product || entry) === rankingIdentity(product));
 }
 
+function queuedCandidateMatch(product) {
+  return data.candidates.some((entry) => rankingIdentity(entry.product || entry) === rankingIdentity(product));
+}
+
 function selectRankingCandidate(categoryItems, context) {
   const ordered = [...categoryItems].sort((a, b) => (a.rank || 0) - (b.rank || 0));
   const reasons = [];
@@ -904,6 +990,12 @@ function selectRankingCandidate(categoryItems, context) {
       product.selectionStatus = "posted_duplicate";
       product.selectionReason = "投稿済みのため除外";
       reasons.push(`${product.rank}位は投稿済み`);
+      continue;
+    }
+    if (queuedCandidateMatch(product)) {
+      product.selectionStatus = "existing_duplicate";
+      product.selectionReason = "投稿キューに登録済みのため除外";
+      reasons.push(`${product.rank}位は投稿キュー登録済み`);
       continue;
     }
     if (context.selectedIdentities.has(identity)) {
@@ -1223,7 +1315,7 @@ function renderRankingResults(products) {
         const index = searchResults.indexOf(product);
         return `<article class="product-card">
           <img src="${escapeAttr(getImage(product))}" alt="">
-          <div class="product-body"><div class="product-title">${product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : "採用候補なし"}</strong><br>${escapeHtml(product.selectionReason)}</p>` : ""}</div>
+          <div class="product-body"><div class="product-title">${product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "登録済みのため除外" : "採用候補なし"}</strong><br>${escapeHtml(product.selectionReason)}</p>` : ""}</div>
           <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button><button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
         </article>`;
       }).join("")}</div>
