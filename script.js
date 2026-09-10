@@ -1450,7 +1450,9 @@ async function loadRanking(event) {
         ...product,
         categoryId: category.id,
         categoryName: category.name,
-        rank: product.rank || index + 1,
+        // ランキングAPIのrankはカテゴリ内の表示順位と一致しない場合があるため、
+        // この取得結果の並び順をカテゴリ内順位として扱う。
+        rank: index + 1,
         fetchedAt: new Date().toISOString()
       })).filter((product) => product.rank >= rankStart && product.rank <= rankEnd);
       if (!selectRankingCandidate(categoryProducts, selectionContext)) {
@@ -1513,7 +1515,7 @@ async function retryFailedRanking() {
         ...product,
         categoryId: category.id,
         categoryName: category.name,
-        rank: product.rank || productIndex + 1,
+        rank: productIndex + 1,
         fetchedAt: new Date().toISOString()
       })).filter((product) => product.rank >= rankingRequestContext.rankStart && product.rank <= rankingRequestContext.rankEnd);
       selectRankingCandidate(categoryProducts, selectionContext);
