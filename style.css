@@ -458,6 +458,21 @@ textarea {
   margin-top: 10px;
 }
 
+.candidate-intro {
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+.candidate-intro summary {
+  cursor: pointer;
+  color: var(--green);
+  font-weight: 700;
+}
+
+.candidate-intro p {
+  white-space: pre-wrap;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

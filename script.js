@@ -358,6 +358,8 @@ function generatePrompt() {
 商品名：${currentProduct.itemName}
 価格：${currentProduct.itemPrice}円
 ショップ名：${currentProduct.shopName}
+カテゴリー：${currentProduct.categoryName || "未設定"}
+ランキング順位：${currentProduct.rank || "未設定"}位
 レビュー評価：${currentProduct.reviewAverage || "不明"}
 レビュー件数：${currentProduct.reviewCount || "不明"}
 送料情報：${currentProduct.postageFlag ? "送料無料の可能性あり" : "商品ページで確認"}
@@ -407,12 +409,14 @@ function quickSave(product) {
     categoryName: productWithUrl.categoryName || "",
     rank: productWithUrl.rank || "",
     fetchedAt: productWithUrl.fetchedAt || "",
+    introPrompt: $("#promptOutput")?.value || "",
     introText: $("#introText")?.value || "",
     hashTags: $("#hashTags")?.value || makeTags(productWithUrl, data.settings.defaultTagCount).join(" "),
     savedAt: new Date().toISOString(),
     plannedDate: new Date().toISOString().slice(0, 10),
     memo: duplicate ? duplicate : "",
     status: $("#introText")?.value ? "文章作成済み" : "未作成",
+    postStatus: $("#introText")?.value ? "紹介文作成済み" : "紹介文未作成",
     favoriteType: "今すぐ投稿"
   };
   data.candidates.unshift(candidate);
@@ -473,8 +477,12 @@ function candidateCard(item) {
         <label>紹介文<textarea onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
+        ${item.introText ? `<details class="candidate-intro"><summary>紹介文を確認</summary><p>${escapeHtml(item.introText)}</p><p>${escapeHtml(item.hashTags || "")}</p></details>` : ""}
         <div class="record-actions">
           <button class="primary-button" type="button" onclick="openDetailByCandidate('${item.id}')">商品詳細・紹介文作成</button>
+          <button class="secondary-button" type="button" onclick="generateCandidatePrompt('${item.id}')">紹介文プロンプト</button>
+          <button class="secondary-button" type="button" onclick="openCandidateForPaste('${item.id}')">紹介文を貼り付け</button>
+          <button class="secondary-button" type="button" onclick="prepareCandidatePost('${item.id}')">投稿準備</button>
           ${productLink}
           <button class="secondary-button" type="button" onclick="copyText(${JSON.stringify(`${item.introText}\n${item.hashTags}`)})">全文コピー</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
@@ -507,14 +515,20 @@ function updateCandidate(id, field, value) {
   if (!item) return;
   item[field] = value;
   if (field === "introText" && value && item.status === "未作成") item.status = "文章作成済み";
+  if (field === "introText") item.postStatus = value ? "紹介文作成済み" : "紹介文未作成";
   saveData();
 }
 
 function markPosted(id) {
   const item = data.candidates.find((candidate) => candidate.id === id);
   if (!item) return;
+  if (item.status === "投稿済み" || item.postStatus === "投稿済み") {
+    toast("この商品はすでに投稿済みです。");
+    return;
+  }
   const roomUrl = prompt("ROOM投稿URLがあれば入力してください。空欄でも記録できます。") || "";
   item.status = "投稿済み";
+  item.postStatus = "投稿済み";
   data.history.unshift({
     ...item,
     postedAt: new Date().toISOString(),
@@ -524,6 +538,70 @@ function markPosted(id) {
   saveData();
   showTab("history");
   toast("投稿履歴に記録しました。");
+}
+
+function generateCandidatePrompt(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate?.product) return;
+  currentProduct = candidate.product;
+  openDetail(currentProduct);
+  generatePrompt();
+  candidate.introPrompt = $("#promptOutput").value;
+  candidate.hashTags = $("#hashTags").value;
+  saveData();
+  showTab("detail");
+  toast("紹介文プロンプトを作成しました。");
+}
+
+function openCandidateForPaste(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate?.product) return;
+  currentProduct = candidate.product;
+  openDetail(currentProduct);
+  $("#promptOutput").value = candidate.introPrompt || "";
+  $("#introText").value = candidate.introText || "";
+  $("#hashTags").value = candidate.hashTags || "";
+  showTab("detail");
+}
+
+function prepareCandidatePost(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate) return;
+  const itemUrl = candidate.itemUrl || candidate.product?.itemUrl || "";
+  if (!itemUrl) {
+    toast("商品URLがありません。");
+    return;
+  }
+  if (!candidate.introText.trim()) {
+    toast("先に紹介文を入力してください。");
+    openDetailByCandidate(id);
+    return;
+  }
+  const postText = `${candidate.introText.trim()}\n${candidate.hashTags || ""}`.trim();
+  if (postText.length > 500) {
+    toast("紹介文とハッシュタグを合わせて500文字以内にしてください。");
+    return;
+  }
+  const instructions = [
+    "楽天ROOM投稿準備の操作手順",
+    `商品名：${candidate.title}`,
+    `商品URL：${itemUrl}`,
+    `カテゴリー：${candidate.categoryName || "未設定"}`,
+    `ランキング順位：${candidate.rank || "未設定"}位`,
+    "1. 開いた商品ページの「ROOMに投稿」をクリック",
+    "2. ROOM投稿画面を開く",
+    "3. 紹介文欄へ以下を入力する",
+    candidate.introText.trim(),
+    "4. ハッシュタグを紹介文末尾へ追加する",
+    candidate.hashTags || "",
+    "5. 内容を確認し、「完了」はクリックせず停止する"
+  ].join("\n");
+  candidate.postStatus = "確認待ち";
+  candidate.status = "投稿待ち";
+  saveData();
+  copyText(instructions);
+  window.open(itemUrl, "_blank", "noopener,noreferrer");
+  toast("商品ページを開き、操作手順をコピーしました。");
 }
 
 function deleteCandidate(id) {
