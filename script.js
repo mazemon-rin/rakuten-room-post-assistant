@@ -3,6 +3,7 @@ const RANKING_INTERVAL_SHORT_MS = 1200;
 const RANKING_INTERVAL_LONG_MS = 1800;
 const RANKING_RETRY_SAFETY_MARGIN_MS = 200;
 const RANKING_MAX_RETRIES = 1;
+const RANKING_REQUEST_TIMEOUT_MS = 15000;
 
 // These top-level Rakuten market categories were verified from Rakuten category pages.
 const rankingCategories = [
@@ -233,7 +234,19 @@ async function fetchRankingCategory(category, limit, fallbackWaitMs = RANKING_IN
   const url = `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`;
   let retryCount = 0;
   while (true) {
-    const response = await fetch(url);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), RANKING_REQUEST_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(url, { signal: controller.signal });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw createRankingApiError(408, "楽天ランキングAPIが15秒以内に応答しませんでした。", retryCount);
+      }
+      throw createRankingApiError(0, error.message || "楽天ランキングAPIへの接続に失敗しました。", retryCount);
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (response.ok) {
       const json = await response.json();
       return normalizeRakutenItems(json).slice(0, limit);
