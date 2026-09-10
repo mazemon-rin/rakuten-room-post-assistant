@@ -287,7 +287,7 @@ function openDetailByIndex(index) {
 
 function openDetailByCandidate(id) {
   const candidate = data.candidates.find((item) => item.id === id);
-  if (candidate?.product) openDetail(candidate.product);
+  if (candidate?.product) openDetail(candidate.product, candidate);
 }
 
 function quickSaveByIndex(index) {
@@ -295,9 +295,11 @@ function quickSaveByIndex(index) {
   if (product) quickSave(product);
 }
 
-function openDetail(product) {
+function openDetail(product, draft = {}) {
   currentProduct = product;
   const duplicate = findDuplicate(product);
+  const savedIntroText = draft.introText || "";
+  const savedHashTags = draft.hashTags || "";
   $("#detailArea").innerHTML = `
     <div class="detail-layout">
       <div>
@@ -326,8 +328,8 @@ function openDetail(product) {
           <button class="secondary-button" type="button" onclick="openChatGPT()">ChatGPTで開く</button>
         </div>
         <label>ChatGPTへ渡すプロンプト<textarea id="promptOutput"></textarea></label>
-        <label>紹介文<textarea id="introText" placeholder="ChatGPTで作った文章、または自分で書いた紹介文を貼り付けます。"></textarea></label>
-        <label>ハッシュタグ<textarea id="hashTags" placeholder="#楽天ROOM #買ってよかった など"></textarea></label>
+        <label>紹介文<textarea id="introText" placeholder="ChatGPTで作った文章、または自分で書いた紹介文を貼り付けます。">${escapeHtml(savedIntroText)}</textarea></label>
+        <label>ハッシュタグ<textarea id="hashTags" placeholder="#楽天ROOM #買ってよかった など">${escapeHtml(savedHashTags)}</textarea></label>
         <div class="button-row">
           <button class="secondary-button" type="button" onclick="copyValue('promptOutput')">プロンプトをコピー</button>
           <button class="secondary-button" type="button" onclick="copyValue('introText')">紹介文をコピー</button>
@@ -394,6 +396,14 @@ function generatePrompt() {
 function quickSave(product) {
   const itemUrl = product.itemUrl || product.affiliateUrl || "";
   const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
+  const sameProduct = currentProduct && (
+    (currentProduct.itemCode && productWithUrl.itemCode && currentProduct.itemCode === productWithUrl.itemCode) ||
+    (currentProduct.itemUrl && productWithUrl.itemUrl && currentProduct.itemUrl === productWithUrl.itemUrl) ||
+    currentProduct.itemName === productWithUrl.itemName
+  );
+  const introText = sameProduct ? $("#introText")?.value.trim() || "" : "";
+  const hashTags = sameProduct ? $("#hashTags")?.value.trim() || "" : "";
+  const introPrompt = sameProduct ? $("#promptOutput")?.value || "" : "";
   const duplicate = findDuplicate(productWithUrl);
   const candidate = {
     id: crypto.randomUUID(),
@@ -409,14 +419,14 @@ function quickSave(product) {
     categoryName: productWithUrl.categoryName || "",
     rank: productWithUrl.rank || "",
     fetchedAt: productWithUrl.fetchedAt || "",
-    introPrompt: $("#promptOutput")?.value || "",
-    introText: $("#introText")?.value || "",
-    hashTags: $("#hashTags")?.value || makeTags(productWithUrl, data.settings.defaultTagCount).join(" "),
+    introPrompt,
+    introText,
+    hashTags: hashTags || makeTags(productWithUrl, data.settings.defaultTagCount).join(" "),
     savedAt: new Date().toISOString(),
     plannedDate: new Date().toISOString().slice(0, 10),
     memo: duplicate ? duplicate : "",
-    status: $("#introText")?.value ? "文章作成済み" : "未作成",
-    postStatus: $("#introText")?.value ? "紹介文作成済み" : "紹介文未作成",
+    status: introText ? "文章作成済み" : "未作成",
+    postStatus: introText ? "紹介文作成済み" : "紹介文未作成",
     favoriteType: "今すぐ投稿"
   };
   data.candidates.unshift(candidate);
