@@ -119,6 +119,14 @@
         <h2>投稿キュー</h2>
         <p>採用商品を1件ずつ投稿準備します。ROOMの「完了」は手動で行います。</p>
       </div>
+      <div class="queue-control-panel panel">
+        <div>
+          <strong>Chrome固定タブ運用</strong>
+          <p>開始前に、同じChromeプロフィールで楽天ROOMタブを1枚開いてください。ROOM用の新規タブは作成しません。</p>
+        </div>
+        <button id="start-sequential-processing" class="primary-button" type="button">連続処理開始</button>
+        <p id="queue-progress" class="queue-progress" role="status" aria-live="polite"></p>
+      </div>
       <div class="codex-result-panel">
         <label for="codex-result-input">Codex結果受け取り欄</label>
         <textarea id="codex-result-input" rows="8" placeholder="ITEM_CODE:\n商品コード\n\n紹介文:\n\nハッシュタグ:\n\n状態:\n確認待ち"></textarea>
@@ -132,7 +140,11 @@
           <option>未作成</option>
           <option>文章作成済み</option>
           <option>投稿待ち</option>
+          <option>Codex処理中</option>
+          <option>確認待ち</option>
           <option>投稿済み</option>
+          <option>スキップ</option>
+          <option>エラー</option>
           <option>保留</option>
           <option>対象外</option>
         </select>

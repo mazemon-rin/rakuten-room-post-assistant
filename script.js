@@ -128,6 +128,7 @@ function bindForms() {
   $("#calendarMonth").addEventListener("change", renderCalendar);
   $("#rankingForm").addEventListener("submit", loadRanking);
   $("#queue-selected-ranking").addEventListener("click", queueSelectedRanking);
+  $("#start-sequential-processing").addEventListener("click", startSequentialProcessing);
   $("#retry-failed-ranking").addEventListener("click", retryFailedRanking);
   $$("input[name='rankingCategory']").forEach((input) => input.addEventListener("change", saveRankingCategorySelection));
   $("#exportJson").addEventListener("click", exportJson);
@@ -533,9 +534,28 @@ function renderCandidates() {
   const status = $("#candidateStatusFilter")?.value || "";
   const items = data.candidates.filter((item) => {
     const text = `${item.title} ${item.shopName} ${item.memo}`.toLowerCase();
-    return (!keyword || text.includes(keyword.toLowerCase())) && (!status || item.status === status);
+    const postStatus = item.postStatus || item.status || "投稿待ち";
+    return (!keyword || text.includes(keyword.toLowerCase())) && (!status || postStatus === status || item.status === status);
   });
   $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
+  renderQueueProgress();
+}
+
+function renderQueueProgress() {
+  const progress = $("#queue-progress");
+  if (!progress) return;
+  const queue = data.candidates.filter((item) => !["投稿済み", "スキップ"].includes(item.postStatus));
+  const active = data.candidates.find((item) => ["Codex処理中", "確認待ち"].includes(item.postStatus));
+  if (!queue.length) {
+    progress.textContent = "処理対象の商品はありません。";
+    return;
+  }
+  if (!active) {
+    progress.textContent = `投稿待ち ${queue.filter((item) => item.postStatus === "投稿待ち").length}件。連続処理開始で先頭の商品を準備します。`;
+    return;
+  }
+  const position = data.candidates.findIndex((item) => item.id === active.id) + 1;
+  progress.textContent = `現在の処理商品：${active.title}（${position} / ${data.candidates.length}件） / 状態：${active.postStatus}`;
 }
 
 function buildQueueCandidate(product) {
@@ -624,6 +644,8 @@ function applyCodexResult() {
   if (!parsed.introText || !parsed.hashTags || !parsed.isConfirmationReady) return fail("紹介文・ハッシュタグ・状態:確認待ちを確認できないため保存していません。");
   if (`${parsed.introText}\n${parsed.hashTags}`.length > 500) return fail("紹介文とハッシュタグが500文字を超えているため保存していません。");
   const candidate = matches[0];
+  const blocker = getProcessingBlocker(candidate.id);
+  if (blocker) return fail(`別の商品「${blocker.title}」が${blocker.postStatus}のため、同時に保存できません。`);
   candidate.introText = parsed.introText;
   candidate.hashTags = parsed.hashTags;
   candidate.status = "文章作成済み";
@@ -662,7 +684,7 @@ function candidateCard(item) {
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button>
-          ${["確認待ち", "投稿済み", "スキップ"].includes(item.postStatus) ? `<button class="secondary-button" type="button" onclick="focusNextCandidate('${item.id}')">次の商品</button>` : ""}
+          ${item.postStatus === "投稿済み" ? `<button class="secondary-button" type="button" onclick="startNextCandidate('${item.id}')">次の商品を処理</button>` : ""}
         </div>
         <details class="candidate-tools">
           <summary>手動操作・トラブル対応</summary>
@@ -713,6 +735,13 @@ function updateCandidate(id, field, value) {
 function setPostStatus(id, status) {
   const item = data.candidates.find((candidate) => candidate.id === id);
   if (!item) return;
+  if (["Codex処理中", "確認待ち"].includes(status)) {
+    const blocker = getProcessingBlocker(id);
+    if (blocker) {
+      toast(`別の商品「${blocker.title}」が${blocker.postStatus}のため変更できません。`);
+      return;
+    }
+  }
   if (status === "投稿済み") {
     markPosted(id);
     return;
@@ -784,6 +813,14 @@ async function pasteCodexResult(id) {
     return;
   }
 
+  const blocker = getProcessingBlocker(candidate.id);
+  if (blocker) {
+    codexPasteErrors.set(id, `別の商品「${blocker.title}」が${blocker.postStatus}のため保存していません。`);
+    renderCandidates();
+    toast("同時処理は禁止されています。先に現在の商品を完了してください。");
+    return;
+  }
+
   candidate.introText = introText;
   candidate.hashTags = hashTags;
   candidate.status = "文章作成済み";
@@ -812,6 +849,50 @@ function focusNextCandidate(id) {
   const card = Array.from(document.querySelectorAll(".candidate-card")).find((element) => element.dataset.candidateId === next.id);
   card?.scrollIntoView({ behavior: "smooth", block: "center" });
   toast(`次の商品「${next.title}」を処理できます。自動開始はしていません。`);
+}
+
+function getProcessingBlocker(excludeId = "") {
+  return data.candidates.find((candidate) => candidate.id !== excludeId && ["Codex処理中", "確認待ち"].includes(candidate.postStatus));
+}
+
+function startSequentialProcessing() {
+  const message = $("#codex-result-message");
+  const blocker = getProcessingBlocker();
+  if (blocker) {
+    const text = `別の商品「${blocker.title}」が${blocker.postStatus}です。ROOMの完了後に投稿済みへ変更してください。`;
+    if (message) message.textContent = text;
+    toast(text);
+    return;
+  }
+  const next = data.candidates.find((candidate) => candidate.postStatus === "投稿待ち");
+  if (!next) {
+    const text = "投稿待ちの商品がありません。ランキング商品を投稿キューへ追加してください。";
+    if (message) message.textContent = text;
+    toast(text);
+    return;
+  }
+  startCodexPost(next.id);
+}
+
+function startNextCandidate(id) {
+  const current = data.candidates.find((candidate) => candidate.id === id);
+  if (!current || current.postStatus !== "投稿済み") {
+    toast("前の商品を投稿済みにしてから次の商品を処理してください。");
+    return;
+  }
+  const blocker = getProcessingBlocker();
+  if (blocker) {
+    toast(`別の商品「${blocker.title}」が${blocker.postStatus}のため開始できません。`);
+    return;
+  }
+  const index = data.candidates.findIndex((candidate) => candidate.id === id);
+  const next = data.candidates.slice(index + 1).find((candidate) => candidate.postStatus === "投稿待ち") ||
+    data.candidates.find((candidate) => candidate.postStatus === "投稿待ち");
+  if (!next) {
+    toast("次の投稿待ち商品はありません。");
+    return;
+  }
+  startCodexPost(next.id);
 }
 
 function markPosted(id) {
@@ -869,31 +950,30 @@ function buildCodexPostInstructions(candidate) {
     "【手順】",
     "1. 商品情報を確認する",
     "2. 商品情報だけを使い、楽天ROOM向け紹介文とハッシュタグを作成する",
-    "3. Safariで商品ページを開く",
-    "4. JavaScript実行後DOMから aria-label=\"ROOMに投稿\" のa要素を探す",
-    "5. そのa要素の実hrefを取得する。商品番号からROOM URLを推測生成しない",
-    "6. 取得したROOM URLを直接開く",
-    "7. ROOM投稿画面の #collect-content を確認する",
-    "8. 紹介文とハッシュタグを入力する",
-    "9. 入力内容と文字数（500文字以内）を確認する",
-    "10. ROOMの「完了」は絶対にクリックしない",
-    "11. ROOM投稿画面の紹介文とハッシュタグを保持する",
-    "12. Safariの楽天ROOM投稿アシスタントのタブへ戻る",
-    `13. itemCode「${candidate.itemCode || product.itemCode || ""}」をdata-item-codeで検索し、1件だけ一致する商品カードを特定する`,
-    `14. itemUrl「${itemUrl}」も照合し、商品名だけで判定しない`,
-    "15. #codex-result-inputを特定し、ITEM_CODEを含む結果全文を入力する",
+    `3. #codex-result-inputでitemCode「${candidate.itemCode || product.itemCode || ""}」に一致する商品カードを1件だけ特定する`,
+    `4. itemUrl「${itemUrl}」も照合し、商品名だけで判定しない`,
+    "5. 作成した紹介文・ハッシュタグをアプリへ先に保存し、結果を反映する",
     `ITEM_CODE:\n${candidate.itemCode || product.itemCode || ""}\n\n紹介文:\n（作成した紹介文）\n\nハッシュタグ:\n（使用したハッシュタグ）\n\n状態:\n確認待ち`,
-    "16. 「Codex結果を反映」を押す（Clipboard APIは使用しない）",
-    "17. itemCode完全一致の商品だけに保存されたことを確認する",
-    "18. アプリ自身が紹介文・ハッシュタグを解析し、localStorageへ保存したことを確認する",
-    "19. 一致しない、複数一致、解析失敗、500文字超過、保存後の値不一致の場合は状態変更せずエラーとして報告する",
-    "20. 正常時だけpostStatusが確認待ちになったことを確認する",
-    "21. SafariのROOM投稿画面へ戻り、「完了」直前で停止する",
+    "6. 「Codex結果を反映」を押す（Clipboard APIは使用しない）",
+    "7. itemCode完全一致の商品だけに保存されたことを確認する",
+    "8. アプリ自身が紹介文・ハッシュタグを解析し、localStorageへ保存したことを確認する",
+    "9. 一致しない、複数一致、解析失敗、500文字超過、保存後の値不一致の場合は状態をエラーにして停止する",
+    "10. 正常時だけpostStatusが確認待ちになったことを確認する",
+    "11. Google Chromeの既存の商品ページタブで商品ページを開く",
+    "12. JavaScript実行後DOMから aria-label=\"ROOMに投稿\" のa要素を探す",
+    "13. そのa要素の実hrefを取得する。商品番号からROOM URLを推測生成しない",
+    "14. 利用者が事前に開いたGoogle Chromeの楽天ROOM固定タブがない場合は処理を開始せず報告する",
+    "15. 固定ROOMタブだけを取得URLへ遷移させる（ROOM用の新規タブは禁止）",
+    "16. ROOM投稿画面で対象商品、#collect-content、「完了」ボタンを確認する。違う商品なら入力せず停止する",
+    "17. 保存済みの紹介文とハッシュタグを#collect-contentへ入力する",
+    "18. 商品、文章、ハッシュタグ、500文字以内を確認する",
+    "19. ROOMの「完了」は絶対にクリックしない",
+    "20. 入力後はROOM固定タブを表示したまま操作を終了し、利用者へ『ROOM投稿準備完了。表示されている「完了」を押してください。』と報告する",
     "",
     "【紹介文条件】",
     "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。",
     "「絶対」「必ず」「最安」「No.1」など根拠のない断定や効果保証は禁止。",
-    "Codex内蔵ブラウザ、Chrome、agent-browser、Playwright、ROOMの完了、自動いいね、フォロー、コメントは使用しない。Safariだけを使用する。",
+    "Safari、Codex内蔵ブラウザ、agent-browser、Playwrightは使用しない。Google Chromeだけを使用する。ROOMの完了、自動いいね、フォロー、コメントは実行しない。",
     "",
     "【必ず受け取り欄へ入力する形式】",
     `ITEM_CODE:\n${candidate.itemCode || product.itemCode || ""}`,
@@ -903,16 +983,16 @@ function buildCodexPostInstructions(candidate) {
     "（使用したハッシュタグを空白区切りで記載）",
     "状態:",
     "確認待ち",
-    "この4項目を含む結果全体を改変せず、Safariの#codex-result-inputへ入力する。Clipboard APIは使用しない。"
+    "この4項目を含む結果全体を改変せず、Google Chromeの#codex-result-inputへ入力する。Clipboard APIは使用しない。"
   ].join("\n");
 }
 
 async function startCodexPost(id) {
   const candidate = data.candidates.find((item) => item.id === id);
   if (!candidate) return;
-  const active = data.candidates.find((item) => item.id !== id && item.postStatus === "Codex処理中");
+  const active = getProcessingBlocker(id);
   if (active) {
-    toast(`別の商品「${active.title}」がCodex処理中です。先に確認待ちまたは投稿済みにしてください。`);
+    toast(`別の商品「${active.title}」が${active.postStatus}です。先にROOM投稿を完了して投稿済みにしてください。`);
     return;
   }
   if (["Codex処理中", "確認待ち", "投稿済み", "スキップ"].includes(candidate.postStatus)) {

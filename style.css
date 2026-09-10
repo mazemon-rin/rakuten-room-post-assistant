@@ -148,6 +148,39 @@ h1 {
   margin: 0;
 }
 
+.queue-control-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 18px 0;
+  padding: 16px;
+  background: #f2f8f4;
+}
+
+.queue-control-panel p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.queue-progress {
+  min-width: 260px;
+  font-weight: 700;
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .queue-control-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .queue-progress {
+    min-width: 0;
+    text-align: left;
+  }
+}
+
 .post-status-line {
   margin: 8px 0;
 }
