@@ -675,14 +675,17 @@ function applyCodexResult() {
 
 function candidateCard(item) {
   const itemUrl = item.itemUrl || item.product?.itemUrl || item.product?.affiliateUrl || "";
+  const itemCode = item.itemCode || item.product?.itemCode || "";
+  const productButtonLabel = `楽天商品ページを開く ${item.title || item.product?.itemName || ""}`;
   const productLink = itemUrl
-    ? `<a class="secondary-button product-link-button" href="${escapeAttr(itemUrl)}" target="_blank" rel="noopener noreferrer">楽天商品ページを開く</a>`
-    : `<button class="secondary-button product-link-button" type="button" disabled>商品URLがありません</button>`;
+    ? `<a class="secondary-button product-link-button" href="${escapeAttr(itemUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeAttr(productButtonLabel)}" data-item-code="${escapeAttr(itemCode)}" data-item-url="${escapeAttr(itemUrl)}">楽天商品ページを開く</a>`
+    : `<button class="secondary-button product-link-button" type="button" disabled aria-label="商品URLなし ${escapeAttr(item.title || "")}" data-item-code="${escapeAttr(itemCode)}">商品URLなし</button>`;
   return `
     <article class="record-card candidate-card" data-candidate-id="${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}">
       <img src="${escapeAttr(item.imageUrl)}" alt="">
       <div>
         <h3>${escapeHtml(item.title)}</h3>
+        <div class="record-actions candidate-product-actions">${productLink}</div>
         <p><span class="badge">${escapeHtml(item.status)}</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
         <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
         <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
@@ -707,7 +710,6 @@ function candidateCard(item) {
           <button class="secondary-button" type="button" onclick="openCandidateForPaste('${item.id}')">紹介文を貼り付け</button>
           <button class="secondary-button" type="button" onclick="pasteCodexResult('${item.id}')">Codex結果を貼り付け</button>
           <button class="secondary-button" type="button" onclick="prepareCandidatePost('${item.id}')">投稿準備</button>
-          ${productLink}
           <button class="secondary-button" type="button" onclick="copyText(${JSON.stringify(`${item.introText}\n${item.hashTags}`)})">全文コピー</button>
           <select aria-label="投稿状態" onchange="setPostStatus('${item.id}', this.value)">${["投稿待ち", "Codex処理中", "確認待ち", "投稿済み", "スキップ", "エラー"].map((status) => `<option ${item.postStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select>
           <select onchange="updateCandidate('${item.id}', 'status', this.value)">${["未作成", "文章作成済み", "投稿待ち", "投稿済み", "保留", "対象外"].map((status) => `<option ${item.status === status ? "selected" : ""}>${status}</option>`).join("")}</select>
@@ -972,16 +974,17 @@ function buildCodexPostInstructions(candidate) {
     "8. アプリ自身が紹介文・ハッシュタグを解析し、localStorageへ保存したことを確認する",
     "9. 一致しない、複数一致、解析失敗、500文字超過、保存後の値不一致の場合は状態をエラーにして停止する",
     "10. 正常時だけpostStatusが確認待ちになったことを確認する",
-    "11. Google Chromeの既存の商品ページタブで商品ページを開く",
-    "12. 商品ページ上の「ROOMに投稿」リンクを通常のChrome操作で認識する（aria-label、リンク文字、role=link、アクセシビリティ上の操作可能リンクの順）",
-    "13. 認識した実在の「ROOMに投稿」リンクを直接クリックする。JavaScript実行は必須にせず、商品番号・itemCode・商品URLからROOM URLを推測生成しない",
-    "14. 既存のGoogle Chrome楽天ROOM固定タブを優先して再利用する。商品ページ上のリンクが同一タブ遷移しかできない場合は、そのタブ内でクリックしてよい。ROOM用の新規タブは作成しない",
-    "15. 遷移後の現在URLがroom.rakuten.co.jpで、可能なら/mixまたは/mix/collectを含むことを確認する",
-    "16. ROOM投稿画面で対象商品、#collect-content、「完了」ボタンを確認する。違う商品なら入力せず停止する",
-    "17. 保存済みの紹介文とハッシュタグを#collect-contentへ入力する",
-    "18. 商品、文章、ハッシュタグ、500文字以内を確認する",
-    "19. ROOMの「完了」は絶対にクリックしない",
-    "20. 入力後はROOM固定タブを表示したまま操作を終了し、利用者へ『ROOM投稿準備完了。表示されている「完了」を押してください。』と報告する",
+    "11. 投稿キューの対象カードにある「楽天商品ページを開く」ボタンを通常のChrome操作で押す（itemCodeを保持する）",
+    "12. 開いた楽天商品ページの商品名・ショップ名などが対象商品と一致することを確認する。不一致ならROOM操作へ進まず停止する",
+    "13. 商品ページ上の「ROOMに投稿」リンクを通常のChrome操作で認識する（aria-label、リンク文字、role=link、アクセシビリティ上の操作可能リンクの順）",
+    "14. 認識した実在の「ROOMに投稿」リンクを直接クリックする。JavaScript実行は必須にせず、商品番号・itemCode・商品URLからROOM URLを推測生成しない",
+    "15. 既存のGoogle Chrome楽天ROOM固定タブを優先して再利用する。商品ページ上のリンクが同一タブ遷移しかできない場合は、そのタブ内でクリックしてよい。ROOM用の新規タブは作成しない",
+    "16. 遷移後の現在URLがroom.rakuten.co.jpで、可能なら/mixまたは/mix/collectを含むことを確認する",
+    "17. ROOM投稿画面で対象商品、#collect-content、「完了」ボタンを確認する。違う商品なら入力せず停止する",
+    "18. 保存済みの紹介文とハッシュタグを#collect-contentへ入力する",
+    "19. 商品、文章、ハッシュタグ、500文字以内を確認する",
+    "20. ROOMの「完了」は絶対にクリックしない",
+    "21. 入力後はROOM固定タブを表示したまま操作を終了し、利用者へ『ROOM投稿準備完了。表示されている「完了」を押してください。』と報告する",
     "",
     "【紹介文条件】",
     "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。",
