@@ -119,6 +119,12 @@
         <h2>投稿キュー</h2>
         <p>採用商品を1件ずつ投稿準備します。ROOMの「完了」は手動で行います。</p>
       </div>
+      <div class="codex-result-panel">
+        <label for="codex-result-input">Codex結果受け取り欄</label>
+        <textarea id="codex-result-input" rows="8" placeholder="ITEM_CODE:\n商品コード\n\n紹介文:\n\nハッシュタグ:\n\n状態:\n確認待ち"></textarea>
+        <button id="apply-codex-result" class="primary-button" type="button">Codex結果を反映</button>
+        <p id="codex-result-message" class="message" role="status" aria-live="polite"></p>
+      </div>
       <div class="toolbar">
         <input id="candidateFilter" type="search" placeholder="商品名・ショップ名・メモで検索">
         <select id="candidateStatusFilter">

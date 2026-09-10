@@ -114,6 +114,7 @@ function bindForms() {
   $("#settingsForm").addEventListener("submit", saveSettings);
   $("#candidateFilter").addEventListener("input", renderCandidates);
   $("#candidateStatusFilter").addEventListener("change", renderCandidates);
+  $("#apply-codex-result").addEventListener("click", applyCodexResult);
   $("#historyFilter").addEventListener("input", renderHistory);
   $("#favoriteFilter").addEventListener("input", renderFavorites);
   $("#favoriteTypeFilter").addEventListener("change", renderFavorites);
@@ -474,6 +475,38 @@ function renderCandidates() {
   $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
 }
 
+function parseCodexResult(rawText) {
+  const itemCode = rawText.match(/(?:^|\n)\s*ITEM_CODE:\s*([^\n]+)/)?.[1]?.trim() || "";
+  const introText = rawText.match(/(?:^|\n)\s*紹介文:\s*([\s\S]*?)(?=\n\s*ハッシュタグ:)/)?.[1]?.trim() || "";
+  const hashTags = rawText.match(/(?:^|\n)\s*ハッシュタグ:\s*([\s\S]*?)(?=\n\s*状態:|$)/)?.[1]?.trim() || "";
+  const isConfirmationReady = /(?:^|\n)\s*状態:\s*確認待ち(?:\s|$)/.test(rawText);
+  return { itemCode, introText, hashTags, isConfirmationReady };
+}
+
+function applyCodexResult() {
+  const message = $("#codex-result-message");
+  const parsed = parseCodexResult($("#codex-result-input").value || "");
+  const fail = (text) => { message.textContent = text; toast(text); };
+  if (!parsed.itemCode) return fail("ITEM_CODEがないため保存していません。");
+  const matches = data.candidates.filter((item) => (item.itemCode || item.product?.itemCode || "") === parsed.itemCode);
+  if (matches.length !== 1) return fail(matches.length ? "ITEM_CODEが複数商品に一致したため保存していません。" : "ITEM_CODEが投稿キューに一致しないため保存していません。");
+  if (!parsed.introText || !parsed.hashTags || !parsed.isConfirmationReady) return fail("紹介文・ハッシュタグ・状態:確認待ちを確認できないため保存していません。");
+  if (`${parsed.introText}\n${parsed.hashTags}`.length > 500) return fail("紹介文とハッシュタグが500文字を超えているため保存していません。");
+  const candidate = matches[0];
+  candidate.introText = parsed.introText;
+  candidate.hashTags = parsed.hashTags;
+  candidate.status = "文章作成済み";
+  candidate.postStatus = "確認待ち";
+  saveData();
+  const saved = data.candidates.find((item) => item.id === candidate.id);
+  if (!saved || saved.introText !== parsed.introText || saved.hashTags !== parsed.hashTags) {
+    if (saved) { saved.postStatus = "エラー"; saveData(); }
+    return fail("保存後の内容確認に失敗したため、確認待ちにしていません。");
+  }
+  message.textContent = `ITEM_CODE ${parsed.itemCode} の商品へ保存しました。状態: 確認待ち`;
+  toast("Codex結果を対象商品へ反映しました。");
+}
+
 function candidateCard(item) {
   const itemUrl = item.itemUrl || item.product?.itemUrl || item.product?.affiliateUrl || "";
   const productLink = itemUrl
@@ -708,26 +741,29 @@ function buildCodexPostInstructions(candidate) {
     "12. Safariの楽天ROOM投稿アシスタントのタブへ戻る",
     `13. itemCode「${candidate.itemCode || product.itemCode || ""}」をdata-item-codeで検索し、1件だけ一致する商品カードを特定する`,
     `14. itemUrl「${itemUrl}」も照合し、商品名だけで判定しない`,
-    "15. ROOMに入力した文章とハッシュタグを指定形式でクリップボードへコピーする",
-    "16. 対象カードの「Codex結果を貼り付け」を押す（textareaへ直接入力しない）",
-    "17. アプリ自身が紹介文・ハッシュタグを解析し、localStorageへ保存したことを確認する",
-    "18. 一致しない、複数一致、500文字超過、保存後の値不一致の場合は状態変更せずエラーとして報告する",
-    "19. 正常時だけpostStatusが確認待ちになったことを確認する",
-    "20. SafariのROOM投稿画面へ戻り、「完了」直前で停止する",
+    "15. #codex-result-inputを特定し、ITEM_CODEを含む結果全文を入力する",
+    `ITEM_CODE:\n${candidate.itemCode || product.itemCode || ""}\n\n紹介文:\n（作成した紹介文）\n\nハッシュタグ:\n（使用したハッシュタグ）\n\n状態:\n確認待ち`,
+    "16. 「Codex結果を反映」を押す（Clipboard APIは使用しない）",
+    "17. itemCode完全一致の商品だけに保存されたことを確認する",
+    "18. アプリ自身が紹介文・ハッシュタグを解析し、localStorageへ保存したことを確認する",
+    "19. 一致しない、複数一致、解析失敗、500文字超過、保存後の値不一致の場合は状態変更せずエラーとして報告する",
+    "20. 正常時だけpostStatusが確認待ちになったことを確認する",
+    "21. SafariのROOM投稿画面へ戻り、「完了」直前で停止する",
     "",
     "【紹介文条件】",
     "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。",
     "「絶対」「必ず」「最安」「No.1」など根拠のない断定や効果保証は禁止。",
     "Codex内蔵ブラウザ、Chrome、agent-browser、Playwright、ROOMの完了、自動いいね、フォロー、コメントは使用しない。Safariだけを使用する。",
     "",
-    "【必ず最後にクリップボードへコピーする形式】",
-    "紹介文：",
+    "【必ず受け取り欄へ入力する形式】",
+    `ITEM_CODE:\n${candidate.itemCode || product.itemCode || ""}`,
+    "紹介文:",
     "（作成した紹介文）",
-    "ハッシュタグ：",
+    "ハッシュタグ:",
     "（使用したハッシュタグを空白区切りで記載）",
-    "状態：",
+    "状態:",
     "確認待ち",
-    "この3項目を含む結果全体を、改変せずクリップボードへコピーする。"
+    "この4項目を含む結果全体を改変せず、Safariの#codex-result-inputへ入力する。Clipboard APIは使用しない。"
   ].join("\n");
 }
 

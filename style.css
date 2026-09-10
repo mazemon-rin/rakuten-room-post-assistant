@@ -125,6 +125,29 @@ h1 {
   box-shadow: 0 2px 0 rgba(167, 63, 37, 0.18);
 }
 
+.codex-result-panel {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+  padding: 16px;
+  border: 2px solid var(--accent);
+  background: #fffaf2;
+}
+
+.codex-result-panel label {
+  font-weight: 700;
+}
+
+#codex-result-input {
+  min-height: 180px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+#codex-result-message {
+  min-height: 1.4em;
+  margin: 0;
+}
+
 .post-status-line {
   margin: 8px 0;
 }
