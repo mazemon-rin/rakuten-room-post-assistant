@@ -219,35 +219,11 @@ async function fetchRankingCategory(category, limit) {
     genreId: category.id
   });
   const url = `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`;
-  // TEMP DEBUG: Never log Application ID or Access Key values.
-  const debugParams = new URLSearchParams(params);
-  debugParams.set("applicationId", "***MASKED***");
-  debugParams.set("accessKey", "***MASKED***");
-  console.log("[Ranking API DEBUG]", {
-    categoryName: category.name,
-    categoryId: category.id,
-    genreId: params.get("genreId"),
-    page: params.get("page"),
-    format: params.get("format"),
-    requestUrl: `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${debugParams.toString()}`
-  });
   let retried = false;
   while (true) {
     const response = await fetch(url);
-    // TEMP DEBUG: Log only response metadata and a small, non-sensitive summary.
-    console.log("[Ranking API DEBUG] HTTP status", response.status);
     if (response.ok) {
       const json = await response.json();
-      const debugItems = normalizeRakutenItems(json).slice(0, 3).map((item) => ({
-        rank: item.rank,
-        itemName: item.itemName,
-        itemCode: item.itemCode
-      }));
-      console.log("[Ranking API DEBUG] response summary", {
-        title: json.title,
-        lastBuildDate: json.lastBuildDate,
-        items: debugItems
-      });
       return normalizeRakutenItems(json).slice(0, limit);
     }
     const retryAfter = response.headers.get("retry-after");
@@ -427,6 +403,10 @@ function quickSave(product) {
     price: productWithUrl.itemPrice,
     shopName: productWithUrl.shopName,
     genreId: productWithUrl.genreId || "",
+    categoryId: productWithUrl.categoryId || "",
+    categoryName: productWithUrl.categoryName || "",
+    rank: productWithUrl.rank || "",
+    fetchedAt: productWithUrl.fetchedAt || "",
     introText: $("#introText")?.value || "",
     hashTags: $("#hashTags")?.value || makeTags(productWithUrl, data.settings.defaultTagCount).join(" "),
     savedAt: new Date().toISOString(),
@@ -577,6 +557,52 @@ function findDuplicate(product, ignoreId = "") {
   });
   if (!found) return "";
   return `この商品は${formatDate(found.postedAt || found.savedAt)}に${found.postedAt ? "投稿済み" : "保存済み"}です。`;
+}
+
+function normalizeItemUrl(url) {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/$/, "").toLowerCase();
+  } catch {
+    return String(url).split("?")[0].replace(/\/$/, "").toLowerCase();
+  }
+}
+
+function rankingIdentity(product) {
+  if (product.itemCode) return `code:${product.itemCode}`;
+  const url = normalizeItemUrl(product.itemUrl || product.affiliateUrl);
+  if (url) return `url:${url}`;
+  return `shop:${product.shopName || ""}|name:${product.itemName || ""}`.toLowerCase();
+}
+
+function postedHistoryMatch(product) {
+  return data.history.some((entry) => rankingIdentity(entry.product || entry) === rankingIdentity(product));
+}
+
+function selectRankingCandidate(categoryItems, context) {
+  const ordered = [...categoryItems].sort((a, b) => (a.rank || 0) - (b.rank || 0));
+  const reasons = [];
+  for (const product of ordered) {
+    const identity = rankingIdentity(product);
+    if (postedHistoryMatch(product)) {
+      product.selectionStatus = "posted_duplicate";
+      product.selectionReason = "投稿済みのため除外";
+      reasons.push(`${product.rank}位は投稿済み`);
+      continue;
+    }
+    if (context.selectedIdentities.has(identity)) {
+      product.selectionStatus = "session_duplicate";
+      product.selectionReason = "今回の他カテゴリーで採用済みのため除外";
+      reasons.push(`${product.rank}位は今回の採用済み`);
+      continue;
+    }
+    product.selectionStatus = "selected";
+    product.selectionReason = reasons.length ? `${reasons.join("、")}のため${product.rank}位を採用` : `${product.rank}位を採用`;
+    context.selectedIdentities.add(identity);
+    return product;
+  }
+  return null;
 }
 
 function exportJson() {
@@ -827,16 +853,26 @@ async function loadRanking(event) {
   saveData();
   const allProducts = [];
   const errors = [];
+  const selectionContext = { selectedIdentities: new Set() };
   for (const category of selectedCategories) {
     try {
       const products = await fetchRankingCategory(category, limit);
-      products.forEach((product, index) => allProducts.push({
+      const categoryProducts = products.map((product, index) => ({
         ...product,
         categoryId: category.id,
         categoryName: category.name,
-        rank: index + 1,
+        rank: product.rank || index + 1,
         fetchedAt: new Date().toISOString()
       }));
+      if (!selectRankingCandidate(categoryProducts, selectionContext)) {
+        categoryProducts.forEach((product) => {
+          if (!product.selectionStatus) {
+            product.selectionStatus = "no_candidate";
+            product.selectionReason = "1〜3位すべて除外";
+          }
+        });
+      }
+      allProducts.push(...categoryProducts);
     } catch (error) {
       errors.push(`${category.name}: ${error.message}`);
     }
@@ -867,7 +903,7 @@ function renderRankingResults(products) {
         const index = searchResults.indexOf(product);
         return `<article class="product-card">
           <img src="${escapeAttr(getImage(product))}" alt="">
-          <div class="product-body"><div class="product-title">${product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p></div>
+          <div class="product-body"><div class="product-title">${product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : "採用候補なし"}</strong><br>${escapeHtml(product.selectionReason)}</p>` : ""}</div>
           <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button><button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
         </article>`;
       }).join("")}</div>

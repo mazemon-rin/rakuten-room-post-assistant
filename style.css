@@ -346,6 +346,19 @@ textarea {
   margin-bottom: 22px;
 }
 
+.ranking-selection {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green);
+  color: var(--muted);
+  background: rgba(221, 239, 231, 0.55);
+  font-size: 0.88rem;
+}
+
+.ranking-selection strong {
+  color: var(--ink);
+}
+
 .product-card {
   display: grid;
   grid-template-rows: auto 1fr auto;
