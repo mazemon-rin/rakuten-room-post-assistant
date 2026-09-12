@@ -333,6 +333,19 @@ function normalizeRakutenItems(json) {
   return items.map((entry) => entry.item || entry.Item || entry);
 }
 
+// 楽天APIの在庫・販売状態を確認し、販売終了商品をランキング候補から除外します。
+// APIによってフィールド名や値の型が異なるため、確認できる状態だけを対象にします。
+function isUnavailableProduct(product) {
+  const availability = product.availability ?? product.itemAvailability;
+  if (availability === 0 || availability === "0" || availability === false) return true;
+  const status = String(product.stockStatus ?? product.saleStatus ?? "").toLowerCase();
+  return /(販売終了|売り切れ|売切れ|sold\s*out|discontinued)/i.test(status);
+}
+
+function filterAvailableProducts(products) {
+  return products.filter((product) => !isUnavailableProduct(product));
+}
+
 function renderResults(products) {
   searchResults = products;
   $("#results").innerHTML = products.map((product) => {
@@ -1454,7 +1467,7 @@ async function loadRanking(event) {
     categoryState.lastTriedAt = new Date().toISOString();
     showRankingProgress(`${category.name}を取得中...`);
     try {
-      const products = await fetchRankingCategory(category, limit, requestInterval);
+      const products = filterAvailableProducts(await fetchRankingCategory(category, limit, requestInterval));
       categoryState.status = "success";
       categoryState.httpStatus = 200;
       categoryState.errorMessage = "";
@@ -1526,7 +1539,7 @@ async function retryFailedRanking() {
     state.lastTriedAt = new Date().toISOString();
     showRankingProgress(`${category.name}を再取得中...`);
     try {
-      const products = await fetchRankingCategory(category, rankingRequestContext.limit, rankingRequestContext.requestInterval);
+      const products = filterAvailableProducts(await fetchRankingCategory(category, rankingRequestContext.limit, rankingRequestContext.requestInterval));
       const categoryProducts = products.map((product, productIndex) => ({
         ...product,
         categoryId: category.id,
@@ -1557,9 +1570,9 @@ async function retryFailedRanking() {
 }
 
 function renderRankingResults(products) {
-  searchResults = products;
+  searchResults = filterAvailableProducts(products);
   const container = $("#rankingResults");
-  const groups = products.reduce((result, product) => {
+  const groups = searchResults.reduce((result, product) => {
     const key = product.categoryId || "総合";
     (result[key] ||= { name: product.categoryName || "総合ランキング", products: [] }).products.push(product);
     return result;
