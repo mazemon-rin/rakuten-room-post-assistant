@@ -698,6 +698,7 @@ function candidateCard(item) {
         <div class="record-actions candidate-primary-actions">
           <button class="primary-button codex-post-button" type="button" onclick="startCodexPost('${item.id}')">Codex投稿開始</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
+          <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '要手動確認')">要手動確認にする</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button>
           ${item.postStatus === "投稿済み" ? `<button class="secondary-button" type="button" onclick="startNextCandidate('${item.id}')">次の商品を処理</button>` : ""}
@@ -711,7 +712,7 @@ function candidateCard(item) {
           <button class="secondary-button" type="button" onclick="pasteCodexResult('${item.id}')">Codex結果を貼り付け</button>
           <button class="secondary-button" type="button" onclick="prepareCandidatePost('${item.id}')">投稿準備</button>
           <button class="secondary-button" type="button" onclick="copyText(${JSON.stringify(`${item.introText}\n${item.hashTags}`)})">全文コピー</button>
-          <select aria-label="投稿状態" onchange="setPostStatus('${item.id}', this.value)">${["投稿待ち", "Codex処理中", "確認待ち", "投稿済み", "スキップ", "エラー"].map((status) => `<option ${item.postStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select>
+          <select aria-label="投稿状態" onchange="setPostStatus('${item.id}', this.value)">${["投稿待ち", "Codex処理中", "確認待ち", "要手動確認", "投稿済み", "スキップ", "エラー"].map((status) => `<option ${item.postStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select>
           <select onchange="updateCandidate('${item.id}', 'status', this.value)">${["未作成", "文章作成済み", "投稿待ち", "投稿済み", "保留", "対象外"].map((status) => `<option ${item.status === status ? "selected" : ""}>${status}</option>`).join("")}</select>
           <button class="danger-button" type="button" onclick="deleteCandidate('${item.id}')">削除</button>
           </div>
@@ -867,7 +868,7 @@ function focusNextCandidate(id) {
 }
 
 function getProcessingBlocker(excludeId = "") {
-  return data.candidates.find((candidate) => candidate.id !== excludeId && ["Codex処理中", "確認待ち"].includes(candidate.postStatus));
+  return data.candidates.find((candidate) => candidate.id !== excludeId && ["Codex処理中", "確認待ち", "要手動確認"].includes(candidate.postStatus));
 }
 
 function startSequentialProcessing() {
@@ -978,13 +979,19 @@ function buildCodexPostInstructions(candidate) {
     "12. 開いた楽天商品ページの商品名・ショップ名などが対象商品と一致することを確認する。不一致ならROOM操作へ進まず停止する",
     "13. 商品ページ上の「ROOMに投稿」リンクを通常のChrome操作で認識する（aria-label、リンク文字、role=link、アクセシビリティ上の操作可能リンクの順）",
     "14. 認識した実在の「ROOMに投稿」リンクを直接クリックする。JavaScript実行は必須にせず、商品番号・itemCode・商品URLからROOM URLを推測生成しない",
+    "14a. クリック後にroom.rakuten.co.jpのROOM投稿画面へ遷移したか確認する。遷移しなければ同じ商品ページで実在する「ROOMに投稿」要素を再取得し、短く待ってから最大2回まで通常クリックを再試行する",
+    "14b. 再試行でも遷移しない場合はリンクやURLを推測せず、『ROOM投稿画面へ遷移できませんでした。商品ページの「ROOMに投稿」リンクを手動で確認してください。』と表示し、アプリの投稿状態を「要手動確認」へ変更して停止する",
+    "14c. 利用者が手動でROOM投稿画面を開いた後は、対象商品一致、#collect-content、保存済み文章、完了ボタンを確認してから処理を再開する",
     "15. 既存のGoogle Chrome楽天ROOM固定タブを優先して再利用する。商品ページ上のリンクが同一タブ遷移しかできない場合は、そのタブ内でクリックしてよい。ROOM用の新規タブは作成しない",
     "16. 遷移後の現在URLがroom.rakuten.co.jpで、可能なら/mixまたは/mix/collectを含むことを確認する",
     "17. ROOM投稿画面で対象商品、#collect-content、「完了」ボタンを確認する。違う商品なら入力せず停止する",
     "18. 保存済みの紹介文とハッシュタグを#collect-contentへ入力する",
     "19. 商品、文章、ハッシュタグ、500文字以内を確認する",
     "20. ROOMの「完了」は絶対にクリックしない",
-    "21. 入力後はROOM固定タブを表示したまま操作を終了し、利用者へ『ROOM投稿準備完了。表示されている「完了」を押してください。』と報告する",
+    "21. 入力内容と対象商品を最終確認したら、ROOM固定タブを最前面にしたまま60秒間、人間の完了操作を待つ",
+    "22. 待機開始時に『投稿準備が完了しました。60秒以内にROOMの「完了」ボタンを押してください。』と表示する",
+    "23. 60秒以内に人間がROOMの「完了」を押したことを利用者から確認できた場合だけ、投稿済み記録へ進む。Codex自身は完了を押さない",
+    "24. 60秒経過後も完了操作が確認できない場合は『60秒以内に完了操作が確認できなかったため停止しました。』と表示して停止する。自動投稿へ切り替えない",
     "",
     "【紹介文条件】",
     "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。",
@@ -1076,7 +1083,9 @@ function prepareCandidatePost(id) {
     candidate.introText.trim(),
     "4. ハッシュタグを紹介文末尾へ追加する",
     candidate.hashTags || "",
-    "5. 内容を確認し、「完了」はクリックせず停止する"
+    "5. 内容を確認し、「完了」はクリックせず、60秒間人間の操作を待つ",
+    "6. 待機開始時に『投稿準備が完了しました。60秒以内にROOMの「完了」ボタンを押してください。』と表示する",
+    "7. 60秒経過後も完了操作が確認できなければ『60秒以内に完了操作が確認できなかったため停止しました。』と表示して停止する"
   ].join("\n");
   candidate.postStatus = "確認待ち";
   candidate.status = "投稿待ち";
