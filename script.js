@@ -342,6 +342,60 @@ function isUnavailableProduct(product) {
   return /(販売終了|売り切れ|売切れ|sold\s*out|discontinued)/i.test(status);
 }
 
+// 商品データに明記されたセール情報だけを紹介文プロンプトへ渡します。
+// 価格差や割引率などを、項目がない状態から推測しないための共通処理です。
+function getSaleInfo(product = {}) {
+  const nested = product.saleInfo || product.campaign || {};
+  const pick = (...keys) => {
+    for (const key of keys) {
+      const value = product[key] ?? nested[key];
+      if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+    }
+    return "";
+  };
+  const entries = [
+    ["セール価格", pick("salePrice", "discountPrice", "campaignPrice")],
+    ["通常価格", pick("regularPrice", "originalPrice", "listPrice")],
+    ["割引率", pick("discountRate", "saleRate")],
+    ["クーポン", pick("coupon", "couponInfo", "couponText")],
+    ["セール期間", pick("salePeriod", "campaignPeriod", "saleStartEnd")],
+    ["ポイント還元", pick("pointBack", "pointRate", "pointCampaign")],
+    ["注意事項", pick("saleNotice", "campaignNotice", "limitedQuantity", "quantityLimit")]
+  ];
+  return entries.filter(([, value]) => value !== "").map(([label, value]) => `${label}：${value}`).join("\n");
+}
+
+function buildGenerationContext(product = {}, usageStatus = "不明") {
+  const text = `${product.itemName || ""} ${stripHtml(product.itemCaption || "")} ${product.categoryName || ""}`;
+  const category = product.categoryName || "このカテゴリーの商品";
+  const rules = [
+    [/(モバイルバッテリー|充電器|USB)/i, "外出先で充電切れが気になる方", "持ち歩きやすさや充電の確保"],
+    [/(収納|ラック|ケース|ボックス|バッグ)/i, "物が散らかりやすく整理したい方", "収納しやすさや必要な物の取り出しやすさ"],
+    [/(美容|コスメ|化粧|まつ毛|スキンケア|セラム|クリーム)/i, "毎日のケアを手軽に続けたい方", "使う部位やケア方法の取り入れやすさ"],
+    [/(キッチン|調理|マグ|水筒|鍋|フライパン)/i, "家事や調理を少し楽にしたい方", "扱いやすさや日常での使いやすさ"],
+    [/(HDD|ハードディスク|パソコン|周辺機器)/i, "データ保存やパソコン周りを整えたい方", "容量や対応機器など用途に合う点"]
+  ];
+  const matched = rules.find(([pattern]) => pattern.test(text));
+  const targetUser = matched?.[1] || `${category}を探している方`;
+  const problem = matched?.[2] || "商品説明に明記された特徴を比較して選びたい方";
+  const mainBenefit = matched?.[2] || (product.itemCaption ? shorten(stripHtml(product.itemCaption), 80) : "商品情報に明記された特徴を確認できること");
+  const usageScene = /(通勤|旅行|防災|デスク|仕事|家事|育児|テレビ録画|パソコン)/.exec(text)?.[1] || "日常の用途に合わせて";
+  const saleInfo = getSaleInfo(product);
+  const saleReason = saleInfo ? saleInfo.split("\n").slice(0, 2).join("、") : "";
+  const safeUsageStatus = usageStatus.includes("実際") || usageStatus.includes("購入") ? "購入・使用済み（入力された体験のみ使用）" : "未使用または不明（使用体験を書かない）";
+  return { targetUser, problem, mainBenefit, usageScene, usageStatus: safeUsageStatus, saleReason, generatedHook: `${targetUser}に。${problem}を確認したい方に向く商品です。` };
+}
+
+function validateGeneratedCopy(introText, product = {}) {
+  const text = String(introText || "");
+  const forbidden = /(絶対お得|最安値|必ず効果|買わないと損|売り切れる前に|残りわずか)/;
+  if (forbidden.test(text)) return "確認できない煽り表現が含まれています。";
+  if (/(使ってみて|愛用しています|買ってよかった|悩みが解決)/.test(text) && !product.usageStatus?.includes("used")) {
+    return "使用状況が未確認のため、使用体験の表現は保存できません。";
+  }
+  return "";
+}
+
 function filterAvailableProducts(products) {
   return products.filter((product) => !isUnavailableProduct(product));
 }
@@ -446,6 +500,7 @@ function openDetail(product, draft = {}) {
 function generatePrompt() {
   if (!currentProduct) return;
   const tagCount = Number(data.settings.defaultTagCount) || 8;
+  const context = buildGenerationContext(currentProduct, $("#postType").value);
   const prompt = `楽天ROOM投稿用の紹介文を作ってください。
 
 【商品情報】
@@ -459,6 +514,16 @@ function generatePrompt() {
 送料情報：${currentProduct.postageFlag ? "送料無料の可能性あり" : "商品ページで確認"}
 商品説明：${stripHtml(currentProduct.itemCaption || "")}
 商品URL：${currentProduct.itemUrl}
+セール情報（商品データに明記された項目のみ）：
+${getSaleInfo(currentProduct) || "記載なし"}
+
+【文章作成用の中間情報】
+対象者：${context.targetUser}
+悩み：${context.problem}
+主なメリット：${context.mainBenefit}
+利用シーン：${context.usageScene}
+商品状態：${context.usageStatus}
+今チェックする理由：${context.saleReason || "明記されたセール情報なし"}
 
 【投稿条件】
 投稿タイプ：${$("#postType").value}
@@ -473,13 +538,14 @@ function generatePrompt() {
 1. ROOM投稿用紹介文
 2. 短い紹介文
 3. ハッシュタグ候補を${tagCount}個
-4. おすすめポイント
-5. 誇張表現・断定表現の注意
+4. セール情報（セール情報がある場合のみ）
+見出しは「紹介文:」「短い紹介文:」「ハッシュタグ:」「セール情報:」「状態:確認待ち」を使用してください。
 
 【必ず守ること】
 商品ページにない内容を勝手に追加しないでください。
 実際に使っていない場合は「使いました」と書かないでください。
-効果、最安値、在庫、セール期限を断定しないでください。`;
+効果、最安値、在庫、セール期限を断定しないでください。
+セール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、数量限定などは、上記のセール情報に明記されている場合だけ自然に紹介文へ反映してください。`;
   $("#promptOutput").value = prompt;
   $("#hashTags").value = makeTags(currentProduct, tagCount).join(" ");
   toast("プロンプトを作成しました。");
@@ -514,6 +580,7 @@ function quickSave(product) {
     introPrompt,
     introText,
     hashTags: hashTags || makeTags(productWithUrl, data.settings.defaultTagCount).join(" "),
+    usageStatus: sameProduct && $("#postType")?.value === "実際に購入した商品" ? "used" : "unknown",
     savedAt: new Date().toISOString(),
     plannedDate: new Date().toISOString().slice(0, 10),
     memo: duplicate ? duplicate : "",
@@ -604,6 +671,7 @@ function buildQueueCandidate(product) {
     introPrompt: "",
     introText: "",
     hashTags: makeTags(productWithUrl, data.settings.defaultTagCount).join(" "),
+    usageStatus: "unknown",
     savedAt: new Date().toISOString(),
     plannedDate: new Date().toISOString().slice(0, 10),
     memo: "",
@@ -654,8 +722,8 @@ function queueSelectedRanking() {
 
 function parseCodexResult(rawText) {
   const itemCode = rawText.match(/(?:^|\n)\s*ITEM_CODE:\s*([^\n]+)/)?.[1]?.trim() || "";
-  const introText = rawText.match(/(?:^|\n)\s*紹介文:\s*([\s\S]*?)(?=\n\s*ハッシュタグ:)/)?.[1]?.trim() || "";
-  const hashTags = rawText.match(/(?:^|\n)\s*ハッシュタグ:\s*([\s\S]*?)(?=\n\s*状態:|$)/)?.[1]?.trim() || "";
+  const introText = rawText.match(/(?:^|\n)\s*紹介文:\s*([\s\S]*?)(?=\n\s*(?:短い紹介文|ハッシュタグ):)/)?.[1]?.trim() || "";
+  const hashTags = rawText.match(/(?:^|\n)\s*ハッシュタグ:\s*([\s\S]*?)(?=\n\s*(?:セール情報|状態):|$)/)?.[1]?.trim() || "";
   const isConfirmationReady = /(?:^|\n)\s*状態:\s*確認待ち(?:\s|$)/.test(rawText);
   return { itemCode, introText, hashTags, isConfirmationReady };
 }
@@ -668,6 +736,8 @@ function applyCodexResult() {
   const matches = data.candidates.filter((item) => (item.itemCode || item.product?.itemCode || "") === parsed.itemCode);
   if (matches.length !== 1) return fail(matches.length ? "ITEM_CODEが複数商品に一致したため保存していません。" : "ITEM_CODEが投稿キューに一致しないため保存していません。");
   if (!parsed.introText || !parsed.hashTags || !parsed.isConfirmationReady) return fail("紹介文・ハッシュタグ・状態:確認待ちを確認できないため保存していません。");
+  const copyError = validateGeneratedCopy(parsed.introText, matches[0]);
+  if (copyError) return fail(copyError);
   if (`${parsed.introText}\n${parsed.hashTags}`.length > 500) return fail("紹介文とハッシュタグが500文字を超えているため保存していません。");
   const candidate = matches[0];
   const blocker = getProcessingBlocker(candidate.id);
@@ -803,8 +873,8 @@ async function pasteCodexResult(id) {
     return;
   }
 
-  const introMatch = rawText.match(/(?:^|\n)\s*紹介文：\s*([\s\S]*?)(?=\n\s*ハッシュタグ：)/);
-  const hashTagsMatch = rawText.match(/(?:^|\n)\s*ハッシュタグ：\s*([\s\S]*?)(?=\n\s*状態：|$)/);
+  const introMatch = rawText.match(/(?:^|\n)\s*紹介文：\s*([\s\S]*?)(?=\n\s*(?:短い紹介文|ハッシュタグ)：)/);
+  const hashTagsMatch = rawText.match(/(?:^|\n)\s*ハッシュタグ：\s*([\s\S]*?)(?=\n\s*(?:セール情報|状態)：|$)/);
   const introText = introMatch?.[1]?.trim() || "";
   const hashTags = hashTagsMatch?.[1]?.trim() || "";
   const isConfirmationReady = /(?:^|\n)\s*状態：\s*確認待ち(?:\s|$)/.test(rawText);
@@ -812,6 +882,13 @@ async function pasteCodexResult(id) {
     codexPasteErrors.set(id, "Codex結果の形式を確認できませんでした。『紹介文：』『ハッシュタグ：』『状態：確認待ち』を含む形式で手動入力してください。");
     renderCandidates();
     toast("Codex結果の形式を確認できません。保存していません。");
+    return;
+  }
+  const copyError = validateGeneratedCopy(introText, candidate);
+  if (copyError) {
+    codexPasteErrors.set(id, copyError);
+    renderCandidates();
+    toast(copyError);
     return;
   }
   if (`${introText}\n${hashTags}`.length > 500) {
@@ -961,6 +1038,7 @@ function generateCandidatePrompt(id) {
 function buildCodexPostInstructions(candidate) {
   const product = candidate.product || candidate;
   const itemUrl = candidate.itemUrl || product.itemUrl || product.affiliateUrl || "";
+  const context = buildGenerationContext(product, "不明");
   return [
     "楽天ROOM投稿準備をしてください。",
     "",
@@ -969,6 +1047,8 @@ function buildCodexPostInstructions(candidate) {
     `価格：${formatYen(candidate.price || product.itemPrice)}`,
     `ショップ名：${candidate.shopName || product.shopName || ""}`,
     `商品説明：${stripHtml(product.itemCaption || "" )}`,
+    `セール情報（明記された項目のみ）：${getSaleInfo(product) || "記載なし"}`,
+    `文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}`,
     `商品URL：${itemUrl}`,
     `itemCode：${candidate.itemCode || product.itemCode || ""}`,
     `categoryId：${candidate.categoryId || product.categoryId || ""}`,
@@ -978,7 +1058,7 @@ function buildCodexPostInstructions(candidate) {
     "",
     "【手順】",
     "1. 商品情報を確認する",
-    "2. 商品情報だけを使い、楽天ROOM向け紹介文とハッシュタグを作成する",
+    "2. 商品情報だけを使い、対象者・悩みを冒頭40〜50文字に含め、悩み→特徴・メリット→利用場面→選ぶ理由→必要ならセール情報→自然なCTAの順で楽天ROOM向け紹介文とハッシュタグを作成する",
     `3. #codex-result-inputでitemCode「${candidate.itemCode || product.itemCode || ""}」に一致する商品カードを1件だけ特定する`,
     `4. itemUrl「${itemUrl}」も照合し、商品名だけで判定しない`,
     "5. 作成した紹介文・ハッシュタグをアプリへ先に保存し、結果を反映する",
@@ -1007,7 +1087,10 @@ function buildCodexPostInstructions(candidate) {
     "24. 60秒経過後も完了操作が確認できない場合は『60秒以内に完了操作が確認できなかったため停止しました。』と表示して停止する。自動投稿へ切り替えない",
     "",
     "【紹介文条件】",
-    "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。",
+    "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項がある場合は紹介文へ反映する。",
+    "未使用または状態不明の商品は、使用体験を書かず『便利そう』『候補に入れてもよさそう』などの表現にする。レビューは取得できた情報だけを使う。",
+    "生成後に、冒頭の具体性、商品固有性、使用状況、効果・レビュー・価格・クーポン・期限の事実性、煽り表現を自己点検し、条件を満たさなければ書き直す。",
+    "出力は『紹介文:』『短い紹介文:』『ハッシュタグ:』『セール情報:（ある場合のみ）』『状態:確認待ち』の見出しを使う。",
     "「絶対」「必ず」「最安」「No.1」など根拠のない断定や効果保証は禁止。",
     "Safari、Codex内蔵ブラウザ、agent-browser、Playwrightは使用しない。Google Chromeだけを使用する。ROOMの完了、自動いいね、フォロー、コメントは実行しない。",
     "",
@@ -1257,8 +1340,12 @@ async function copyText(text, options = {}) {
 }
 
 function makeTags(product, count) {
-  const words = ["#楽天ROOM", "#楽天市場", `#${sanitizeTag(product.shopName)}`, "#買い物メモ", "#おすすめ"];
-  stripHtml(product.itemName).split(/[ 　/・\-]+/).filter((word) => word.length >= 2).slice(0, count).forEach((word) => words.push(`#${sanitizeTag(word)}`));
+  const source = `${stripHtml(product.itemName || "")} ${stripHtml(product.itemCaption || "")} ${product.categoryName || ""}`;
+  const words = [];
+  if (product.categoryName) words.push(`#${sanitizeTag(product.categoryName)}`);
+  stripHtml(product.itemName || "").split(/[ 　/・\-]+/).filter((word) => word.length >= 2).slice(0, count).forEach((word) => words.push(`#${sanitizeTag(word)}`));
+  [[/USB|充電|バッテリー/i, "#充電切れ対策"], [/通勤/i, "#通勤便利"], [/旅行/i, "#旅行準備"], [/防災/i, "#防災用品"], [/収納|ラック|ケース/i, "#収納"], [/美容|コスメ|スキンケア|まつ毛/i, "#美容ケア"], [/セール|クーポン|ポイント/i, "#楽天セール"]].forEach(([pattern, tag]) => { if (pattern.test(source)) words.push(tag); });
+  words.push("#楽天ROOM");
   return [...new Set(words)].slice(0, count);
 }
 
