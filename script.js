@@ -1703,7 +1703,6 @@ function prepareCandidatePost(id) {
 }
 
 function deleteCandidate(id) {
-  if (!confirm("この投稿候補を削除しますか？")) return;
   data.candidates = data.candidates.filter((item) => item.id !== id);
   saveData();
 }
