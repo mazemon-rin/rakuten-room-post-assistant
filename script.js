@@ -1512,7 +1512,8 @@ function markPosted(id) {
     toast("この商品はすでに投稿済みです。");
     return;
   }
-  const roomUrl = prompt("ROOM投稿URLがあれば入力してください。空欄でも記録できます。") || "";
+  // ROOM投稿URLの入力確認は省略し、利用者が完了を伝えた時点で記録する。
+  const roomUrl = "";
   item.status = "投稿済み";
   item.postStatus = "投稿済み";
   data.history.unshift({
