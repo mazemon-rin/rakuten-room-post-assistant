@@ -5,6 +5,7 @@ const RANKING_RETRY_SAFETY_MARGIN_MS = 200;
 const RANKING_MAX_RETRIES = 1;
 const RANKING_REQUEST_TIMEOUT_MS = 15000;
 const SELECTION_SCORE_VERSION = "2.7.1";
+const APP_VERSION = "2.7.1.1";
 const SELECTION_SCORE_CONFIG = Object.freeze({
   ranking: 30, reviewRating: 20, reviewCount: 20, price: 15, category: 10, freshness: 5,
   categories: { "食品": 10, "美容・コスメ・香水": 10, "日用品・生活雑貨": 8, "キッチン用品・食器・調理器具": 8, "家電": 5, "パソコン・周辺機器": 5 }
@@ -2164,8 +2165,20 @@ function renderRankingResults(products) {
   });
   const recommendations = displayProducts.slice().sort((a, b) => getSelectionTotal(b) - getSelectionTotal(a) || (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0)).slice(0, 3);
   const recommendationEl = $("#todayRecommendations");
-  if (recommendationEl) recommendationEl.innerHTML = recommendations.length ? `<h3>今日のおすすめ候補</h3><ol>${recommendations.map((product) => { const targetIndex = searchResults.indexOf(product); return `<li><button type="button" class="text-link" onclick="document.getElementById('ranking-item-${targetIndex}')?.scrollIntoView({behavior:'smooth',block:'center'})">${escapeHtml(product.itemName)}</button> — ${getSelectionTotal(product)}点 / ${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${formatYen(product.itemPrice)}</li>`; }).join("")}</ol>` : "";
+  if (recommendationEl) recommendationEl.innerHTML = recommendations.length ? `<section aria-label="今日のおすすめ候補"><h3>今日のおすすめ候補</h3><ol>${recommendations.map((product, position) => { const targetIndex = searchResults.indexOf(product); return `<li><strong>${position + 1}位</strong> <button type="button" class="text-link" onclick="document.getElementById('ranking-item-${targetIndex}')?.scrollIntoView({behavior:'smooth',block:'center'})">${escapeHtml(product.itemName)}</button> — ${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${formatYen(product.itemPrice)} / 選定スコア ${getSelectionTotal(product)} / 100 / ${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</li>`; }).join("")}</ol></section>` : "";
   const container = $("#rankingResults");
+  const scoreBreakdown = (product) => `<div class="selection-breakdown" aria-label="スコア内訳">ランキング ${product.selectionScore?.ranking || 0} / 30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0} / 20<br>レビュー件数 ${product.selectionScore?.reviewCount || 0} / 20<br>価格 ${product.selectionScore?.price || 0} / 15<br>カテゴリー ${product.selectionScore?.category || 0} / 10<br>新規性 ${product.selectionScore?.freshness || 0} / 5</div>`;
+  const scoreReasons = (product) => `<div class="selection-reasons" aria-label="選定理由">${(product.selectionReason || []).map((reason) => `<div>✓ ${escapeHtml(reason)}</div>`).join("") || "<div>✓ 評価理由を確認中</div>"}</div>`;
+  const productCard = (product, index, overallRank = null) => `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}">
+          <img src="${escapeAttr(getImage(product))}" alt="">
+          <div class="product-body"><div class="product-title">${overallRank ? `${overallRank}位 ` : product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="selection-score" aria-label="選定スコア">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade" aria-label="推薦ランク">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p><details class="selection-details"><summary>スコア内訳・選定理由を見る</summary>${scoreBreakdown(product)}${scoreReasons(product)}</details><p class="trust-status">${product.trustStatus === "通常投稿候補" ? "🟢 通常投稿候補" : product.trustStatus === "要確認" ? "🟡 要確認" : product.trustStatus === "注意喚起候補" ? "🟠 注意喚起候補" : product.trustStatus === "投稿対象外" ? "🔴 投稿対象外" : "信頼性未確認"}</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "投稿キュー登録済みのため除外" : product.trustStatus || "採用候補なし"}</strong><br>${escapeHtml(typeof product.selectionReason === "string" ? product.selectionReason : (product.selectionReason || []).join("、"))}</p>` : ""}</div>
+          <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button>${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
+        </article>`;
+  const isScoreOrder = $("#rankingSortOrder")?.value === "score";
+  if (isScoreOrder) {
+    container.innerHTML = `<section class="ranking-scoreboard"><h3>選定スコアランキング</h3><div class="product-grid">${displayProducts.map((product, position) => productCard(product, searchResults.indexOf(product), position + 1)).join("")}</div></section>`;
+    return;
+  }
   const groups = displayProducts.reduce((result, product) => {
     const key = product.categoryId || "総合";
     (result[key] ||= { name: product.categoryName || "総合ランキング", products: [] }).products.push(product);
@@ -2174,13 +2187,6 @@ function renderRankingResults(products) {
   container.innerHTML = Object.values(groups).map((group) => `
     <section class="ranking-group">
       <h3>${escapeHtml(group.name)}</h3>
-      <div class="product-grid">${group.products.map((product) => {
-        const index = searchResults.indexOf(product);
-        return `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}">
-          <img src="${escapeAttr(getImage(product))}" alt="">
-          <div class="product-body"><div class="product-title">${product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="selection-score">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p><details class="selection-details"><summary>内訳・理由を見る</summary><p>ランキング ${product.selectionScore?.ranking || 0}/30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0}/20<br>レビュー件数 ${product.selectionScore?.reviewCount || 0}/20<br>価格 ${product.selectionScore?.price || 0}/15<br>カテゴリー ${product.selectionScore?.category || 0}/10<br>新規性 ${product.selectionScore?.freshness || 0}/5</p><p>${escapeHtml((product.selectionReason || []).join("\n")).replaceAll("\n", "<br>")}</p></details><p class="trust-status">${product.trustStatus === "通常投稿候補" ? "🟢 通常投稿候補" : product.trustStatus === "要確認" ? "🟡 要確認" : product.trustStatus === "注意喚起候補" ? "🟠 注意喚起候補" : product.trustStatus === "投稿対象外" ? "🔴 投稿対象外" : "信頼性未確認"}</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "投稿キュー登録済みのため除外" : product.trustStatus || "採用候補なし"}</strong><br>${escapeHtml(typeof product.selectionReason === "string" ? product.selectionReason : (product.selectionReason || []).join("、"))}</p>` : ""}</div>
-          <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button>${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
-        </article>`;
-      }).join("")}</div>
+      <div class="product-grid">${group.products.map((product) => productCard(product, searchResults.indexOf(product))).join("")}</div>
     </section>`).join("");
 }

@@ -747,6 +747,27 @@ textarea {
   font-size: 0.9rem;
 }
 
+.app-version {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.ranking-scoreboard {
+  margin-bottom: 14px;
+}
+
+.ranking-scoreboard h3 {
+  margin-bottom: 10px;
+}
+
+.ranking-score-rank {
+  margin: 0 0 4px;
+  color: var(--green);
+  font-weight: 700;
+}
+
 .collection-select {
   display: grid;
   gap: 4px;
