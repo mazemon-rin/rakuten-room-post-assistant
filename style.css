@@ -800,3 +800,4 @@ textarea {
     justify-self: end;
   }
 }
+.trend-search-panel { margin: 12px 0 18px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }

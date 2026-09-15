@@ -7,6 +7,9 @@ const RANKING_REQUEST_TIMEOUT_MS = 15000;
 const SELECTION_SCORE_VERSION = "2.7.1";
 const APP_VERSION = "2.7.1.2";
 const RECOMMENDATION_TITLE_MAX_LENGTH = 40;
+const TREND_KEYWORD_MAX = 5;
+const TREND_PRODUCTS_PER_KEYWORD = 5;
+const OPPORTUNITY_CONFIG = Object.freeze({ priceBands: [[1000, 1999, 6], [2000, 4999, 5], [5000, 9999, 4], [10000, 29999, 3], [30000, Infinity, 1], [0, 999, 2]] });
 const SELECTION_SCORE_CONFIG = Object.freeze({
   ranking: 30, reviewRating: 20, reviewCount: 20, price: 15, category: 10, freshness: 5,
   categories: { "食品": 10, "美容・コスメ・香水": 10, "日用品・生活雑貨": 8, "キッチン用品・食器・調理器具": 8, "家電": 5, "パソコン・周辺機器": 5 }
@@ -101,7 +104,9 @@ const defaultData = {
   },
   candidates: [],
   history: [],
-  favorites: []
+  favorites: [],
+  trendSettings: { keywords: [], updatedAt: null },
+  eventSettings: { eventName: "", startDate: "", endDate: "", enabled: false }
 };
 
 let data = loadData();
@@ -125,7 +130,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function loadData() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return { ...defaultData, ...saved, settings: { ...defaultData.settings, ...(saved?.settings || {}) } };
+    return { ...defaultData, ...saved, settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
   } catch {
     return structuredClone(defaultData);
   }
@@ -158,6 +163,7 @@ function bindForms() {
   $("#favoriteTypeFilter").addEventListener("change", renderFavorites);
   $("#calendarMonth").addEventListener("change", renderCalendar);
   $("#rankingForm").addEventListener("submit", loadRanking);
+  $("#trendSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchTrendProducts(); });
   $("#rankingSortOrder").addEventListener("change", () => renderRankingResults(searchResults));
   $("#queue-selected-ranking").addEventListener("click", queueSelectedRanking);
   $("#start-sequential-processing").addEventListener("click", startSequentialProcessing);
@@ -180,6 +186,11 @@ function fillSettings() {
   $("#defaultTone").value = data.settings.defaultTone;
   $("#defaultEmoji").value = data.settings.defaultEmoji;
   $("#defaultTagCount").value = data.settings.defaultTagCount;
+  $("#eventEnabled").checked = Boolean(data.eventSettings?.enabled);
+  $("#eventName").value = data.eventSettings?.eventName || "";
+  $("#eventStartDate").value = data.eventSettings?.startDate || "";
+  $("#eventEndDate").value = data.eventSettings?.endDate || "";
+  if ($("#trendKeywords")) $("#trendKeywords").value = (data.trendSettings?.keywords || []).join("、");
   const selectedIds = data.settings.rankingCategoryIds || rankingCategories.map((category) => category.id);
   $$("input[name='rankingCategory']").forEach((input) => {
     input.checked = selectedIds.includes(input.value);
@@ -932,10 +943,14 @@ function quickSave(product) {
     memo: duplicate ? duplicate : "",
     status: introText ? "文章作成済み" : "未作成",
     postStatus: introText ? "紹介文作成済み" : "紹介文未作成",
-    favoriteType: "今すぐ投稿"
+    favoriteType: "今すぐ投稿",
+    matchedTrendKeywords: productWithUrl.matchedTrendKeywords || [],
+    trendSearchPosition: productWithUrl.trendSearchPosition || null,
+    performance: productWithUrl.performance || { clicks: null, orders: null, reward: null }
   };
   Object.assign(candidate, checkProductTrust(productWithUrl));
   applySelectionScore(candidate);
+  applyStrategyScores(candidate);
   applyCollectionMetadata(candidate);
   data.candidates.unshift(candidate);
   saveData();
@@ -980,6 +995,10 @@ function renderCandidates() {
     }
     if (item.scoreVersion !== SELECTION_SCORE_VERSION) {
       applySelectionScore(item);
+      trustUpdated = true;
+    }
+    if (!item.trendScore || !item.opportunityScore || typeof item.todayPriorityScore !== "number") {
+      applyStrategyScores(item);
       trustUpdated = true;
     }
     const beforeCollectionState = `${item.postType}|${item.recommendedCollection}|${item.collectionStatus}`;
@@ -1056,10 +1075,14 @@ function buildQueueCandidate(product) {
     memo: "",
     status: "未作成",
     postStatus: "投稿待ち",
-    favoriteType: "今すぐ投稿"
+    favoriteType: "今すぐ投稿",
+    matchedTrendKeywords: productWithUrl.matchedTrendKeywords || [],
+    trendSearchPosition: productWithUrl.trendSearchPosition || null,
+    performance: productWithUrl.performance || { clicks: null, orders: null, reward: null }
   };
   Object.assign(candidate, checkProductTrust(productWithUrl));
   applySelectionScore(candidate);
+  applyStrategyScores(candidate);
   applyCollectionMetadata(candidate);
   return candidate;
 }
@@ -1245,7 +1268,7 @@ function candidateCard(item) {
         <p class="collection-status"><strong>投稿タイプ：</strong>${escapeHtml({ normal: "通常商品", sale: "セール商品", used: "使用済み商品", warning: "注意喚起商品" }[item.postType] || "通常商品")}</p>
         ${item.recommendedCollection ? `<p class="collection-status"><strong>推奨コレクション：</strong>${escapeHtml(getCollectionById(item.recommendedCollection)?.name || item.recommendedCollection)}</p><details class="collection-details"><summary>推奨理由を見る</summary><p>${escapeHtml(item.collectionReason || "既存の信頼性チェック結果に基づく推奨です。")}</p></details>` : ""}
         <label class="collection-select"><strong>選択コレクション</strong><select onchange="updateCandidate('${item.id}', 'selectedCollection', this.value)">${collectionOptions(item.selectedCollection)}</select></label>
-        <p class="selection-score">選定スコア：${getSelectionTotal(item)} / 100</p><p class="selection-grade">${escapeHtml(item.selectionGrade || selectionGrade(getSelectionTotal(item)))}</p><details class="selection-details"><summary>選定理由を見る</summary><p>${escapeHtml((item.selectionReason || item.selectionReasons || []).join("\n")).replaceAll("\n", "<br>")}</p></details>
+        <p class="selection-score">商品基礎力：${getSelectionTotal(item)} / 100</p><p class="selection-score">トレンド適合：${item.trendScore?.total ?? 0} / 20　投稿機会：${item.opportunityScore?.total ?? 0} / 20</p><p class="selection-score"><strong>今日の投稿優先度：${item.todayPriorityScore ?? getSelectionTotal(item)} / 140</strong></p><p class="selection-grade">${escapeHtml(item.selectionGrade || selectionGrade(getSelectionTotal(item)))}</p><details class="selection-details"><summary>選定理由・訴求材料を見る</summary><p>${escapeHtml((item.priorityReasons || item.selectionReason || item.selectionReasons || []).join("\n")).replaceAll("\n", "<br>")}</p><p>${item.buyAroundCandidate ? "買い回り候補" : ""}</p></details>
         ${trustReasonText ? `<details class="trust-details"><summary>判定理由を見る</summary><p>${escapeHtml(trustReasonText).replaceAll("\n", "<br>")}</p></details>` : ""}
         <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
@@ -1693,6 +1716,12 @@ function saveSettings(event) {
     defaultEmoji: $("#defaultEmoji").value,
     defaultTagCount: Number($("#defaultTagCount").value) || 8,
     rankingCategoryIds: data.settings.rankingCategoryIds || rankingCategories.map((category) => category.id)
+  };
+  data.eventSettings = {
+    eventName: $("#eventName").value.trim(),
+    startDate: $("#eventStartDate").value,
+    endDate: $("#eventEndDate").value,
+    enabled: $("#eventEnabled").checked
   };
   saveData();
   toast("設定を保存しました。");
@@ -2157,22 +2186,111 @@ async function retryFailedRanking() {
   showRankingProgress(remaining.length ? `再取得後も${remaining.length}カテゴリーが失敗しています。` : "失敗カテゴリーの再取得が完了しました。");
 }
 
+
+function calculateTrendScore(product = {}, matchedTrendKeywords = []) {
+  const keywords = [...new Set(matchedTrendKeywords)].filter(Boolean);
+  const title = String(product.itemName || "").toLowerCase();
+  const description = stripHtml(product.itemCaption || "").toLowerCase();
+  const keywordMatch = keywords.length ? (keywords.some((word) => title.includes(word.toLowerCase())) ? 10 : keywords.some((word) => description.includes(word.toLowerCase())) ? 6 : 3) : 0;
+  const multiKeyword = keywords.length >= 3 ? 5 : keywords.length === 2 ? 3 : 0;
+  const searchPosition = Number(product.trendSearchPosition) >= 1 && Number(product.trendSearchPosition) <= 5 ? 6 - Number(product.trendSearchPosition) : 0;
+  return { total: Math.min(20, keywordMatch + multiKeyword + searchPosition), keywordMatch, multiKeyword, searchPosition };
+}
+
+function calculateEventTiming(eventSettings = {}, now = new Date()) {
+  if (!eventSettings.enabled || !eventSettings.startDate) return { score: 0, label: "" };
+  const start = new Date(`${eventSettings.startDate}T00:00:00`);
+  const end = eventSettings.endDate ? new Date(`${eventSettings.endDate}T23:59:59`) : null;
+  const days = Math.ceil((start - now) / 86400000);
+  if (days >= 3 && days <= 5) return { score: 8, label: "イベント開始3〜5日前" };
+  if (days >= 1 && days <= 2) return { score: 7, label: "イベント開始1〜2日前" };
+  if (now >= start && (!end || now <= end)) return { score: 6, label: "イベント期間中" };
+  return { score: 0, label: "" };
+}
+
+function calculateOpportunityScore(product = {}, matchedTrendKeywords = [], eventSettings = {}) {
+  const price = Number(product.itemPrice) || 0;
+  const purchaseIntent = OPPORTUNITY_CONFIG.priceBands.find(([min, max]) => price >= min && price <= max)?.[2] || 0;
+  const text = `${product.itemName || ""} ${product.itemCaption || ""}`;
+  const materials = [];
+  if (Number(product.reviewCount) >= 1000) materials.push("レビュー件数が多い");
+  if (Number(product.reviewAverage) >= 4.5) materials.push("レビュー評価が高い");
+  if (/\d+%OFF|\d+円OFF|クーポン/i.test(text)) materials.push("値引き・クーポン表記あり");
+  if (/送料無料/i.test(text) || product.postageFlag === 1) materials.push("送料無料表記あり");
+  if (matchedTrendKeywords.length >= 2) materials.push("複数トレンド一致");
+  const clickPotential = Math.min(6, materials.length * 2);
+  const event = calculateEventTiming(eventSettings);
+  const reasons = [...materials]; if (event.label) reasons.push(event.label);
+  return { total: Math.min(20, event.score + purchaseIntent + clickPotential), eventTiming: event.score, purchaseIntent, clickPotential, reasons };
+}
+
+function applyStrategyScores(product = {}) {
+  const matched = [...new Set(product.matchedTrendKeywords || [])];
+  product.trendScore = calculateTrendScore(product, matched);
+  product.opportunityScore = calculateOpportunityScore(product, matched, data.eventSettings);
+  product.todayPriorityScore = Math.min(140, getSelectionTotal(product) + product.trendScore.total + product.opportunityScore.total);
+  product.priorityReasons = [...(Array.isArray(product.selectionReason) ? product.selectionReason : product.selectionReason ? [product.selectionReason] : []), ...(product.trendScore.total ? [`トレンド一致：${matched.join("、")}`] : []), ...product.opportunityScore.reasons];
+  product.salesPoints = product.opportunityScore.reasons;
+  product.postPerspective = product.postPerspective || (product.usageStatus === "used" ? "owned" : product.trustStatus === "注意喚起候補" ? "warning" : "wanted");
+  product.buyAroundCandidate = Number(product.itemPrice) >= 900 && Number(product.itemPrice) <= 1100;
+  product.trendFetchedAt = product.trendFetchedAt || null;
+  return product;
+}
+
+async function searchTrendProducts() {
+  const keywords = $(`#trendKeywords`)?.value.split(/[,、\n]/).map((word) => word.trim()).filter(Boolean).slice(0, TREND_KEYWORD_MAX) || [];
+  data.trendSettings = { keywords, updatedAt: new Date().toISOString() }; localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  const message = $("#trendMessage"); if (!keywords.length) { if (message) message.textContent = "トレンドワードを入力してください。"; return; }
+  if (!hasRakutenCredentials()) { if (message) message.textContent = "楽天API認証情報が未設定のため検索できません。"; return; }
+  const merged = new Map();
+  for (let i = 0; i < keywords.length; i += 1) {
+    if (i) await sleep(keywords.length <= 3 ? RANKING_INTERVAL_SHORT_MS : RANKING_INTERVAL_LONG_MS);
+    const params = new URLSearchParams({ format: "json", applicationId: data.settings.applicationId, accessKey: data.settings.accessKey, keyword: keywords[i], hits: String(TREND_PRODUCTS_PER_KEYWORD), sort: "standard" });
+    let succeeded = false;
+    for (let attempt = 0; attempt <= 1 && !succeeded; attempt += 1) {
+      try {
+        const response = await fetch(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`);
+        if (response.status === 429 && attempt === 0) {
+          const retryAfter = Number(response.headers.get("Retry-After"));
+          await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : (keywords.length <= 3 ? RANKING_INTERVAL_SHORT_MS : RANKING_INTERVAL_LONG_MS));
+          continue;
+        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const items = normalizeRakutenItems(await response.json());
+        items.slice(0, TREND_PRODUCTS_PER_KEYWORD).forEach((item, index) => {
+          const key = rankingIdentity(item);
+          const current = merged.get(key) || { ...item, matchedTrendKeywords: [], trendSearchPosition: index + 1 };
+          current.matchedTrendKeywords = [...new Set([...current.matchedTrendKeywords, keywords[i]])];
+          current.trendSearchPosition = Math.min(current.trendSearchPosition || index + 1, index + 1);
+          merged.set(key, current);
+        });
+        succeeded = true;
+      } catch (error) {
+        if (attempt === 1 || error.message !== "HTTP 429") {
+          if (message) message.textContent = `${keywords[i]}の検索に失敗しました。成功済みの結果は保持しています。`;
+        }
+      }
+    }
+  }
+  const results = [...merged.values()].map((item) => applyStrategyScores(item)); searchResults = results; renderRankingResults(results); if (message) message.textContent = `${results.length}件のトレンド商品を表示しました。`;
+}
+
 function renderRankingResults(products) {
   searchResults = filterAvailableProducts(products);
-  searchResults.forEach((product) => { if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); applySelectionScore(product); });
+  searchResults.forEach((product) => { if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); applySelectionScore(product); applyStrategyScores(product); });
   const displayProducts = [...searchResults].sort((a, b) => {
     if ($("#rankingSortOrder")?.value === "score") return getSelectionTotal(b) - getSelectionTotal(a) || (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0);
     return (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0);
   });
-  const recommendations = displayProducts.slice().sort((a, b) => getSelectionTotal(b) - getSelectionTotal(a) || (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0)).slice(0, 3);
+  const recommendations = displayProducts.slice().sort((a, b) => (b.todayPriorityScore ?? getSelectionTotal(b)) - (a.todayPriorityScore ?? getSelectionTotal(a)) || (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0)).slice(0, 3);
   const recommendationEl = $("#todayRecommendations");
-  if (recommendationEl) recommendationEl.innerHTML = recommendations.length ? `<section aria-label="今日のおすすめ候補"><h3>今日のおすすめ候補</h3><ol class="recommendation-list">${recommendations.map((product, position) => { const targetIndex = searchResults.indexOf(product); const fullTitle = stripHtml(product.itemName || ""); const shortTitle = fullTitle.length > RECOMMENDATION_TITLE_MAX_LENGTH ? `${fullTitle.slice(0, RECOMMENDATION_TITLE_MAX_LENGTH)}…` : fullTitle; const ariaLabel = `おすすめ${position + 1}位 ${fullTitle} 選定スコア${getSelectionTotal(product)}点 ${product.categoryName || "カテゴリー未設定"} ${formatYen(product.itemPrice)}`; return `<li class="recommendation-item"><strong class="recommendation-rank">${position + 1}位</strong><button type="button" class="text-link recommendation-title" title="${escapeAttr(fullTitle)}" aria-label="${escapeAttr(ariaLabel)}" onclick="document.getElementById('ranking-item-${targetIndex}')?.scrollIntoView({behavior:'smooth',block:'center'})">${escapeHtml(shortTitle)}</button><span class="recommendation-meta">${getSelectionTotal(product)}点 / ${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${formatYen(product.itemPrice)}</span><span class="recommendation-grade">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</span></li>`; }).join("")}</ol></section>` : "";
+  if (recommendationEl) recommendationEl.innerHTML = recommendations.length ? `<section aria-label="今日のおすすめ候補"><h3>今日のおすすめ候補</h3><ol class="recommendation-list">${recommendations.map((product, position) => { const targetIndex = searchResults.indexOf(product); const fullTitle = stripHtml(product.itemName || ""); const shortTitle = fullTitle.length > RECOMMENDATION_TITLE_MAX_LENGTH ? `${fullTitle.slice(0, RECOMMENDATION_TITLE_MAX_LENGTH)}…` : fullTitle; const ariaLabel = `おすすめ${position + 1}位 ${fullTitle} 選定スコア${getSelectionTotal(product)}点 ${product.categoryName || "カテゴリー未設定"} ${formatYen(product.itemPrice)}`; return `<li class="recommendation-item"><strong class="recommendation-rank">${position + 1}位</strong><button type="button" class="text-link recommendation-title" title="${escapeAttr(fullTitle)}" aria-label="${escapeAttr(ariaLabel)}" onclick="document.getElementById('ranking-item-${targetIndex}')?.scrollIntoView({behavior:'smooth',block:'center'})">${escapeHtml(shortTitle)}</button><span class="recommendation-meta">${getSelectionTotal(product)}点 / トレンド${product.trendScore?.total ?? 0}点 / 機会${product.opportunityScore?.total ?? 0}点 / 優先度${product.todayPriorityScore ?? getSelectionTotal(product)}点</span><span class="recommendation-meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${formatYen(product.itemPrice)}</span><span class="recommendation-grade">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</span></li>`; }).join("")}</ol></section>` : "";
   const container = $("#rankingResults");
   const scoreBreakdown = (product) => `<div class="selection-breakdown" aria-label="スコア内訳">ランキング ${product.selectionScore?.ranking || 0} / 30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0} / 20<br>レビュー件数 ${product.selectionScore?.reviewCount || 0} / 20<br>価格 ${product.selectionScore?.price || 0} / 15<br>カテゴリー ${product.selectionScore?.category || 0} / 10<br>新規性 ${product.selectionScore?.freshness || 0} / 5</div>`;
   const scoreReasons = (product) => `<div class="selection-reasons" aria-label="選定理由">${(product.selectionReason || []).map((reason) => `<div>✓ ${escapeHtml(reason)}</div>`).join("") || "<div>✓ 評価理由を確認中</div>"}</div>`;
   const productCard = (product, index, overallRank = null) => `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}">
           <img src="${escapeAttr(getImage(product))}" alt="">
-          <div class="product-body"><div class="product-title">${overallRank ? `${overallRank}位 ` : product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="selection-score" aria-label="選定スコア">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade" aria-label="推薦ランク">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p><details class="selection-details"><summary>スコア内訳・選定理由を見る</summary>${scoreBreakdown(product)}${scoreReasons(product)}</details><p class="trust-status">${product.trustStatus === "通常投稿候補" ? "🟢 通常投稿候補" : product.trustStatus === "要確認" ? "🟡 要確認" : product.trustStatus === "注意喚起候補" ? "🟠 注意喚起候補" : product.trustStatus === "投稿対象外" ? "🔴 投稿対象外" : "信頼性未確認"}</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "投稿キュー登録済みのため除外" : product.trustStatus || "採用候補なし"}</strong><br>${escapeHtml(typeof product.selectionReason === "string" ? product.selectionReason : (product.selectionReason || []).join("、"))}</p>` : ""}</div>
+          <div class="product-body"><div class="product-title">${overallRank ? `${overallRank}位 ` : product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="selection-score" aria-label="選定スコア">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade" aria-label="推薦ランク">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p><p class="selection-score" aria-label="トレンド適合と投稿機会">トレンド適合：${product.trendScore?.total ?? 0} / 20　投稿機会：${product.opportunityScore?.total ?? 0} / 20</p><p class="selection-score" aria-label="今日の投稿優先度"><strong>今日の投稿優先度：${product.todayPriorityScore ?? getSelectionTotal(product)} / 140</strong></p><details class="selection-details"><summary>スコア内訳・選定理由を見る</summary>${scoreBreakdown(product)}${scoreReasons(product)}<p>${escapeHtml((product.opportunityScore?.reasons || []).join("、"))}</p></details><p class="trust-status">${product.trustStatus === "通常投稿候補" ? "🟢 通常投稿候補" : product.trustStatus === "要確認" ? "🟡 要確認" : product.trustStatus === "注意喚起候補" ? "🟠 注意喚起候補" : product.trustStatus === "投稿対象外" ? "🔴 投稿対象外" : "信頼性未確認"}</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "投稿キュー登録済みのため除外" : product.trustStatus || "採用候補なし"}</strong><br>${escapeHtml(typeof product.selectionReason === "string" ? product.selectionReason : (product.selectionReason || []).join("、"))}</p>` : ""}</div>
           <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button>${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
         </article>`;
   const isScoreOrder = $("#rankingSortOrder")?.value === "score";

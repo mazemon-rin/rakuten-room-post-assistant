@@ -201,6 +201,11 @@
         <h2>楽天ランキング</h2>
         <p>楽天アプリIDがある場合はランキングAPIを利用し、未設定時はサンプルを表示します。</p>
       </div>
+      <form id="trendSearchForm" class="search-form trend-search-panel">
+        <label class="wide">トレンド商品を探す（最大5ワード）<textarea id="trendKeywords" rows="2" placeholder="新米、秋コスメ、防災"></textarea></label>
+        <button class="secondary-button" type="submit">トレンド商品を検索</button>
+        <p id="trendMessage" class="message" role="status" aria-live="polite"></p>
+      </form>
       <form id="rankingForm" class="search-form">
         <fieldset class="ranking-category-fieldset">
           <legend>対象カテゴリー</legend>
@@ -275,6 +280,14 @@
           ハッシュタグ数
           <input id="defaultTagCount" type="number" min="3" max="20" value="8">
         </label>
+        <fieldset class="event-settings-fieldset">
+          <legend>イベント設定（手動）</legend>
+          <label><input id="eventEnabled" type="checkbox"> イベント判定を有効にする</label>
+          <label>イベント名<input id="eventName" type="text" placeholder="楽天スーパーSALE"></label>
+          <label>開始日<input id="eventStartDate" type="date"></label>
+          <label>終了日<input id="eventEndDate" type="date"></label>
+          <p class="small-note">開始3〜5日前・1〜2日前・期間中を投稿機会の評価に反映します。</p>
+        </fieldset>
         <button class="primary-button" type="submit">設定を保存</button>
       </form>
       <div class="panel data-panel">
