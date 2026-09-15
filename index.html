@@ -127,6 +127,11 @@
         <button id="start-sequential-processing" class="primary-button" type="button">連続処理開始</button>
         <p id="queue-progress" class="queue-progress" role="status" aria-live="polite"></p>
       </div>
+      <section class="panel collection-panel">
+        <h3>コレクション管理</h3>
+        <p>アルゴリズムの推奨を確認し、必要なら選択コレクションを手動で変更します。</p>
+        <div id="collectionSummary" class="compact-list"></div>
+      </section>
       <div class="codex-result-panel">
         <label for="codex-result-input">Codex結果受け取り欄</label>
         <textarea id="codex-result-input" rows="8" placeholder="ITEM_CODE:\n商品コード\n\n紹介文:\n\nハッシュタグ:\n\n状態:\n確認待ち"></textarea>
@@ -225,6 +230,10 @@
         <button id="retry-failed-ranking" class="secondary-button" type="button" hidden>失敗カテゴリーを再取得</button>
       </form>
       <p id="rankingMessage" class="message"></p>
+      <label class="ranking-sort-control">表示順
+        <select id="rankingSortOrder"><option value="rank">楽天ランキング順</option><option value="score">選定スコア順</option></select>
+      </label>
+      <div id="todayRecommendations" class="today-recommendations" aria-live="polite"></div>
       <div id="rankingResults" class="product-grid"></div>
     </section>
 

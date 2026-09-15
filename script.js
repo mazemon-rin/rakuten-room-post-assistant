@@ -4,6 +4,16 @@ const RANKING_INTERVAL_LONG_MS = 1800;
 const RANKING_RETRY_SAFETY_MARGIN_MS = 200;
 const RANKING_MAX_RETRIES = 1;
 const RANKING_REQUEST_TIMEOUT_MS = 15000;
+const SELECTION_SCORE_VERSION = "2.7.1";
+const SELECTION_SCORE_CONFIG = Object.freeze({
+  ranking: 30, reviewRating: 20, reviewCount: 20, price: 15, category: 10, freshness: 5,
+  categories: { "食品": 10, "美容・コスメ・香水": 10, "日用品・生活雑貨": 8, "キッチン用品・食器・調理器具": 8, "家電": 5, "パソコン・周辺機器": 5 }
+});
+// 既存UIの内訳表示との互換用。新しい選定スコアは上記設定を正本とします。
+const SELECTION_SCORING = Object.freeze({ click: 30, problem: 20, purchase: 15, trust: 15, roomFit: 10, season: 10 });
+const COLLECTIONS = Object.freeze([
+  { id: "pre_purchase_check", name: "🔍 買う前に確認したい商品", type: "warning", enabled: true }
+]);
 
 // These top-level Rakuten market categories were verified from Rakuten category pages.
 const rankingCategories = [
@@ -57,6 +67,24 @@ const sampleProducts = [
     itemCode: "sample-shop:mug-003",
     genreId: "566157",
     mediumImageUrls: [{ imageUrl: "https://placehold.co/600x450/f6e3ab/24302f?text=Mug" }]
+  }
+];
+
+// 信頼性チェックの回帰確認用。実際の検索結果や投稿候補には混ぜません。
+const trustCheckTestCases = [
+  {
+    name: "大容量SSD・低価格・メーカー型番不明",
+    product: {
+      itemName: "8TB SSD 超高速 大容量",
+      itemPrice: 3980,
+      shopName: "テストショップ",
+      itemCaption: "大容量で高速転送に対応。メーカー名、型番、保証内容の記載なし。",
+      itemUrl: "https://www.rakuten.co.jp/",
+      categoryName: "パソコン・周辺機器",
+      reviewAverage: 4.8,
+      reviewCount: 1200
+    },
+    expectedStatus: "注意喚起候補"
   }
 ];
 
@@ -128,6 +156,7 @@ function bindForms() {
   $("#favoriteTypeFilter").addEventListener("change", renderFavorites);
   $("#calendarMonth").addEventListener("change", renderCalendar);
   $("#rankingForm").addEventListener("submit", loadRanking);
+  $("#rankingSortOrder").addEventListener("change", () => renderRankingResults(searchResults));
   $("#queue-selected-ranking").addEventListener("click", queueSelectedRanking);
   $("#start-sequential-processing").addEventListener("click", startSequentialProcessing);
   $("#retry-failed-ranking").addEventListener("click", retryFailedRanking);
@@ -342,6 +371,68 @@ function isUnavailableProduct(product) {
   return /(販売終了|売り切れ|売切れ|sold\s*out|discontinued)/i.test(status);
 }
 
+function checkProductTrust(product = {}) {
+  const text = stripHtml(`${product.itemName || ""} ${product.itemCaption || ""}`);
+  const reasons = [];
+  const add = (code, label, detail, severity = "info") => reasons.push({ code, label, detail, severity });
+  const isStorage = /(SSD|USBメモリ|microSD|SDカード|ハードディスク|HDD)/i.test(text);
+  const isPower = /(モバイルバッテリー|充電器|電源|ACアダプター)/i.test(text);
+  const capacity = text.match(/(?:大容量|容量)?\s*(\d+(?:\.\d+)?)\s*(TB|GB|MB)/i);
+  const manufacturer = product.manufacturer || text.match(/(?:メーカー|ブランド)[:：]?\s*([^\s、,。]+)/i)?.[1] || "";
+  const modelNumber = product.modelNumber || product.model || text.match(/\b[A-Z]{1,6}[-_]?[A-Z0-9]{2,}\b/)?.[0] || "";
+
+  if (!manufacturer) add("manufacturer_missing", "メーカー不明", "メーカー名を商品情報から確認できません。", "warning");
+  if (!modelNumber) add("model_missing", "型番不明", "正確な型番を商品情報から確認できません。", "warning");
+  if (!String(product.itemName || "").trim() || !String(product.itemUrl || product.affiliateUrl || "").trim()) add("critical_identity_missing", "商品識別情報不足", "商品名または商品ページURLを確認できません。", "high");
+  if (!String(product.itemCaption || "").trim()) add("description_missing", "商品説明不足", "商品説明が空または不足しています。", "warning");
+  if (/(超高速|業界最高|最強|永久保証|無制限)/i.test(text)) add("spec_excessive", "過剰なスペック表現", "商品名・説明に確認が必要な強い表現があります。", "warning");
+  if (/(メーカー|型番|保証).*(なし|不明|記載なし)/i.test(text)) add("warranty_or_identity_missing", "識別・保証情報不足", "メーカー、型番、保証に関する不足記載があります。", "warning");
+  if (capacity && (isStorage || isPower) && Number(product.itemPrice) > 0) {
+    const amount = Number(capacity[1]);
+    const unit = capacity[2].toUpperCase();
+    const tb = unit === "TB" ? amount : amount / 1024;
+    if (tb >= 4 && Number(product.itemPrice) < 10000) add("capacity_price_balance", "容量と価格のバランス要確認", "大容量・高性能の記載に対して価格が極端に安く見えるため、型番・実容量・保証を確認してください。", "high");
+  }
+  if (/(SSD|USBメモリ|microSD|SDカード)/i.test(text) && /(防水|耐衝撃|高速|超高速)/i.test(text) && !modelNumber) add("storage_spec_consistency", "記憶媒体の仕様要確認", "記憶媒体の性能表現と型番を確認できません。", "high");
+  if (/(\b[A-Za-z]+\b.*){2,}/.test(text) && /[ぁ-ん一-龯]/.test(text) && /送料無料|即納/.test(text)) add("description_mixture", "商品説明の整合性要確認", "異なる説明や定型句の混在がないか商品ページで確認してください。", "warning");
+  if (product.reviewAverage && product.reviewCount) add("review_only_evidence", "レビュー情報のみ", "評価・件数は確認できますが、レビュー本文がないため安全性の根拠にはしません。", "info");
+
+  const highCount = reasons.filter((reason) => reason.severity === "high").length;
+  const warningCount = reasons.filter((reason) => reason.severity === "warning" || reason.severity === "high").length;
+  const trustStatus = highCount >= 2 || (highCount >= 1 && warningCount >= 3)
+    ? "注意喚起候補"
+    : warningCount >= 1 ? "要確認" : "通常投稿候補";
+  if (!String(product.itemName || "").trim() || !String(product.itemUrl || product.affiliateUrl || "").trim()) {
+    return {
+      trustStatus: "投稿対象外",
+      trustScore: 0,
+      trustReasons: reasons,
+      manufacturer,
+      modelNumber,
+      specWarnings: [],
+      priceWarning: null,
+      descriptionWarnings: reasons,
+      needsManualReview: true,
+      warningContentCandidate: false,
+      alternativeProductCandidate: false
+    };
+  }
+  const trustScore = Math.max(0, Math.min(100, 100 - warningCount * 15 - highCount * 20));
+  return {
+    trustStatus,
+    trustScore,
+    trustReasons: reasons,
+    manufacturer,
+    modelNumber,
+    specWarnings: reasons.filter((reason) => ["spec_excessive", "storage_spec_consistency", "capacity_price_balance"].includes(reason.code)),
+    priceWarning: reasons.find((reason) => reason.code === "capacity_price_balance") || null,
+    descriptionWarnings: reasons.filter((reason) => ["description_missing", "description_mixture", "warranty_or_identity_missing"].includes(reason.code)),
+    needsManualReview: trustStatus !== "通常投稿候補",
+    warningContentCandidate: trustStatus === "注意喚起候補",
+    alternativeProductCandidate: trustStatus === "注意喚起候補"
+  };
+}
+
 // 商品データに明記されたセール情報だけを紹介文プロンプトへ渡します。
 // 価格差や割引率などを、項目がない状態から推測しないための共通処理です。
 function getSaleInfo(product = {}) {
@@ -386,6 +477,236 @@ function buildGenerationContext(product = {}, usageStatus = "不明") {
   return { targetUser, problem, mainBenefit, usageScene, usageStatus: safeUsageStatus, saleReason, generatedHook: `${targetUser}に。${problem}を確認したい方に向く商品です。` };
 }
 
+function addSelectionReason(reasons, text) {
+  if (text && !reasons.includes(text)) reasons.push(text);
+}
+
+function calculateRankingScore(product = {}) {
+  const sourceRank = Number(product.sourceRank ?? product.rank);
+  if (!Number.isFinite(sourceRank) || sourceRank <= 0) return 0;
+  if (sourceRank === 1) return 30;
+  if (sourceRank === 2) return 27;
+  if (sourceRank === 3) return 24;
+  if (sourceRank <= 10) return 20;
+  if (sourceRank <= 20) return 15;
+  return 10;
+}
+
+function calculateReviewRatingScore(value) {
+  const rating = Number(value);
+  if (!Number.isFinite(rating)) return 0;
+  if (rating >= 4.5) return 20;
+  if (rating >= 4.3) return 16;
+  if (rating >= 4) return 12;
+  if (rating >= 3.5) return 6;
+  return 2;
+}
+
+function calculateReviewCountScore(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  if (count >= 1000) return 20;
+  if (count >= 500) return 16;
+  if (count >= 100) return 12;
+  if (count >= 30) return 8;
+  return 4;
+}
+
+function calculatePriceScore(value) {
+  const price = Number(value);
+  if (!Number.isFinite(price) || price <= 0) return 0;
+  if (price <= 1000) return 5;
+  if (price <= 3000) return 12;
+  if (price <= 10000) return 15;
+  if (price <= 30000) return 10;
+  return 5;
+}
+
+function calculateCategoryScore(categoryName = "") {
+  return SELECTION_SCORE_CONFIG.categories[categoryName] ?? 5;
+}
+
+function calculateFreshnessScore(product = {}, context = {}) {
+  const identity = rankingIdentity(product);
+  const isDuplicate = context.postedIdentities?.has(identity) || context.queuedIdentities?.has(identity);
+  return isDuplicate ? 0 : 5;
+}
+
+function selectionGrade(total) {
+  if (total >= 90) return "★★★★★ 最優先";
+  if (total >= 80) return "★★★★★ 強くおすすめ";
+  if (total >= 70) return "★★★★☆ おすすめ";
+  if (total >= 60) return "★★★☆☆ 候補";
+  return "★★☆☆☆ 優先度低";
+}
+
+function getSelectionTotal(item = {}) {
+  return Number(item.selectionScore?.total ?? item.selectionScoreTotal ?? (typeof item.selectionScore === "number" ? item.selectionScore : 0)) || 0;
+}
+
+function calculateSelectionScore(product = {}, context = {}) {
+  const ranking = calculateRankingScore(product);
+  const reviewRating = calculateReviewRatingScore(product.reviewAverage);
+  const reviewCount = calculateReviewCountScore(product.reviewCount);
+  const price = calculatePriceScore(product.itemPrice);
+  const category = calculateCategoryScore(product.categoryName);
+  const freshness = calculateFreshnessScore(product, context);
+  const total = ranking + reviewRating + reviewCount + price + category + freshness;
+  const selectionReason = [];
+  if (ranking >= 24) selectionReason.push("ランキング上位");
+  else if (ranking > 0) selectionReason.push("ランキング情報あり");
+  if (reviewRating >= 16) selectionReason.push("レビュー評価が高い");
+  if (reviewCount >= 16) selectionReason.push("レビュー件数が多い");
+  if (price >= 12) selectionReason.push("購入しやすい価格帯");
+  if (category >= 8) selectionReason.push("優先カテゴリー");
+  if (freshness === 5) selectionReason.push("未投稿商品");
+  if (!Number(product.reviewAverage) && !Number(product.reviewCount)) selectionReason.push("レビュー情報なし");
+  return {
+    selectionScore: { total, ranking, reviewRating, reviewCount, price, category, freshness },
+    selectionReason,
+    selectionVersion: SELECTION_SCORE_VERSION,
+    selectionGrade: selectionGrade(total),
+    selectionScoreTotal: total,
+    selectionBreakdown: { ranking, reviewRating, reviewCount, price, category, freshness },
+    selectionReasons: selectionReason
+  };
+}
+
+function scoreProductSelection(product = {}) {
+  return calculateSelectionScore(product, {
+    postedIdentities: new Set(data.history.map((item) => rankingIdentity(item.product || item))),
+    queuedIdentities: new Set(data.candidates.map((item) => rankingIdentity(item.product || item)))
+  });
+  /* legacy scoring fields retained below for backward-compatible saved data. */
+  const trust = product.trustStatus ? product : { ...product, ...checkProductTrust(product) };
+  const context = buildGenerationContext(product);
+  const text = `${product.itemName || ""} ${stripHtml(product.itemCaption || "")} ${product.categoryName || ""}`;
+  const saleInfo = getSaleInfo(product);
+  const reasons = [];
+  const warnings = [];
+  const purchaseReasons = [];
+  const selectionReasons = [];
+  const selectionWarnings = [];
+
+  if (trust.trustStatus !== "通常投稿候補") {
+    return {
+      selectionScore: null,
+      selectionBreakdown: { click: 0, problem: 0, purchase: 0, trust: 0, roomFit: 0, season: 0 },
+      clickScore: 0, problemScore: 0, purchaseScore: 0, trustSelectionScore: 0, roomFitScore: 0, seasonScore: 0,
+      targetUser: context.targetUser, problem: context.problem, mainBenefit: context.mainBenefit, usageScene: context.usageScene,
+      clickReason: "通常商品スコアの対象外：商品信頼性チェックで要確認",
+      purchaseReasons: [], selectionReasons: [`${trust.trustStatus}のため通常商品スコアから分離`],
+      selectionWarnings: (trust.trustReasons || []).map((reason) => reason.detail || reason.label),
+      selectionStatus: trust.trustStatus === "投稿対象外" ? "excluded" : "review",
+      scoreVersion: SELECTION_SCORE_VERSION
+    };
+  }
+
+  let click = 0;
+  if (product.itemName && product.itemCaption) { click += 7; addSelectionReason(reasons, "商品名と説明から用途を確認できる"); }
+  if (context.targetUser && !context.targetUser.includes("カテゴリーの商品")) { click += 6; addSelectionReason(reasons, `対象者を整理できる：${context.targetUser}`); }
+  if (context.usageScene !== "日常の用途に合わせて") { click += 5; addSelectionReason(reasons, `利用場面を整理できる：${context.usageScene}`); }
+  if (context.problem && !context.problem.includes("特徴を比較")) { click += 5; addSelectionReason(reasons, `悩みを整理できる：${context.problem}`); }
+  if (/(比較|違い|対応|軽量|大容量|折りたたみ|時短|収納|防災|送料無料)/i.test(text)) { click += 4; addSelectionReason(reasons, "比較・用途につながる特徴が商品情報にある"); }
+  if (saleInfo) { click += 3; addSelectionReason(reasons, "商品データにセール関連情報がある"); }
+  const clickScore = Math.min(SELECTION_SCORING.click, click);
+
+  let problem = 0;
+  if (context.targetUser && !context.targetUser.includes("カテゴリーの商品")) problem += 6;
+  if (context.problem && !context.problem.includes("特徴を比較")) problem += 6;
+  if (context.mainBenefit && product.itemCaption) problem += 4;
+  if (context.usageScene !== "日常の用途に合わせて") problem += 4;
+  const problemScore = Math.min(SELECTION_SCORING.problem, problem);
+  if (problemScore >= 12) addSelectionReason(selectionReasons, "誰のどんな困りごとに役立つかを説明しやすい");
+  else addSelectionReason(selectionWarnings, "対象者や悩みを商品情報から十分に整理できない");
+
+  let purchase = 0;
+  if (Number(product.itemPrice) > 0) { purchase += 3; purchaseReasons.push("価格を確認できる"); }
+  if (saleInfo) { purchase += Math.min(5, saleInfo.split("\n").length); purchaseReasons.push("明記されたセール・クーポン等がある"); }
+  if (product.postageFlag === 1) { purchase += 2; purchaseReasons.push("送料無料フラグを確認できる"); }
+  if (Number(product.reviewAverage) > 0) { purchase += 2; purchaseReasons.push("レビュー評価を確認できる"); }
+  if (Number(product.reviewCount) > 0) { purchase += 2; purchaseReasons.push("レビュー件数を確認できる"); }
+  const purchaseScore = Math.min(SELECTION_SCORING.purchase, purchase);
+
+  const trustSelectionScore = Math.min(SELECTION_SCORING.trust, Math.max(0, Math.round(Number(trust.trustScore ?? 0) * SELECTION_SCORING.trust / 100)));
+  if (trustSelectionScore >= 12) selectionReasons.push("メーカー・型番・説明などの確認材料がそろっている");
+  if (trust.needsManualReview) selectionWarnings.push("信頼性の手動確認が必要");
+
+  let roomFit = 0;
+  if (/(収納|家事|仕事|通勤|旅行|防災|美容|キッチン|パソコン|充電|バッグ|水筒|マグ)/i.test(text)) roomFit += 5;
+  if (context.problem && !context.problem.includes("特徴を比較")) roomFit += 3;
+  if (context.mainBenefit && product.itemCaption) roomFit += 2;
+  const roomFitScore = Math.min(SELECTION_SCORING.roomFit, roomFit);
+  if (roomFitScore >= 7) selectionReasons.push("暮らしの困りごとと関連し、購入理由を説明しやすい");
+
+  let season = 0;
+  if (saleInfo) season += 5;
+  if (/(新生活|旅行|防災|暑さ|寒さ|年末|母の日|父の日|スーパーSALE|お買い物マラソン|5と0のつく日)/i.test(`${text} ${saleInfo}`)) season += 5;
+  const seasonScore = Math.min(SELECTION_SCORING.season, season);
+  if (!saleInfo && season === 0) warnings.push("季節・セール情報は取得できないため未評価");
+
+  const selectionScore = clickScore + problemScore + purchaseScore + trustSelectionScore + roomFitScore + seasonScore;
+  return {
+    selectionScore,
+    selectionBreakdown: { click: clickScore, problem: problemScore, purchase: purchaseScore, trust: trustSelectionScore, roomFit: roomFitScore, season: seasonScore },
+    clickScore, problemScore, purchaseScore, trustSelectionScore, roomFitScore, seasonScore,
+    targetUser: context.targetUser, problem: context.problem, mainBenefit: context.mainBenefit, usageScene: context.usageScene,
+    clickReason: reasons.join("、") || "クリック理由を商品情報から整理できない",
+    purchaseReasons,
+    selectionReasons: [...selectionReasons, ...reasons],
+    selectionWarnings: [...selectionWarnings, ...warnings],
+    selectionStatus: selectionScore >= 70 ? "priority" : selectionScore >= 50 ? "review" : "low",
+    scoreVersion: SELECTION_SCORE_VERSION
+  };
+}
+
+function applySelectionScore(product = {}) {
+  const source = product.product || product;
+  Object.assign(product, scoreProductSelection(source));
+  return product;
+}
+
+function getCollectionById(id) {
+  return COLLECTIONS.find((collection) => collection.id === id) || null;
+}
+
+function getRecommendedCollection(product = {}) {
+  const trust = product.trustStatus ? product : checkProductTrust(product);
+  if (trust.trustStatus !== "注意喚起候補") return null;
+  return COLLECTIONS.find((collection) => collection.enabled && collection.type === "warning") || null;
+}
+
+function classifyPostType(product = {}) {
+  const trust = product.trustStatus ? product : checkProductTrust(product);
+  if (trust.trustStatus === "注意喚起候補") return "warning";
+  if (getSaleInfo(product)) return "sale";
+  if (product.usageStatus === "used" || product.usageStatus === "購入・使用済み") return "used";
+  return "normal";
+}
+
+function applyCollectionMetadata(record = {}) {
+  const product = record.product || record;
+  const trust = record.trustStatus ? record : checkProductTrust(product);
+  const recommended = getRecommendedCollection(trust);
+  const reasons = (trust.trustReasons || [])
+    .filter((reason) => reason.severity === "high" || reason.severity === "warning")
+    .slice(0, 4)
+    .map((reason) => reason.detail || reason.label)
+    .filter(Boolean);
+  record.postType = trust.trustStatus === "注意喚起候補"
+    ? "warning"
+    : (record.postType || classifyPostType({ ...product, ...record }));
+  record.recommendedCollection = record.recommendedCollection || (recommended?.id || "");
+  record.collectionReason = record.collectionReason || (recommended ? reasons.join(" / ") || "購入前に商品情報を確認したい項目があります。" : "");
+  record.collectionStatus = record.collectionStatus || (recommended ? "recommended" : "none");
+  if (!record.selectedCollection) record.selectedCollection = "";
+  return record;
+}
+
+function collectionOptions(selected = "") {
+  return `<option value="">未選択</option>${COLLECTIONS.filter((collection) => collection.enabled).map((collection) => `<option value="${escapeAttr(collection.id)}" ${selected === collection.id ? "selected" : ""}>${escapeHtml(collection.name)}</option>`).join("")}`;
+}
+
 function validateGeneratedCopy(introText, product = {}) {
   const text = String(introText || "");
   const forbidden = /(絶対お得|最安値|必ず効果|買わないと損|売り切れる前に|残りわずか)/;
@@ -402,6 +723,7 @@ function filterAvailableProducts(products) {
 
 function renderResults(products) {
   searchResults = products;
+  products.forEach((product) => { if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); applySelectionScore(product); });
   $("#results").innerHTML = products.map((product) => {
     const index = searchResults.indexOf(product);
     const duplicate = findDuplicate(product);
@@ -412,6 +734,7 @@ function renderResults(products) {
           <div class="product-title">${escapeHtml(product.itemName)}</div>
           <p class="price">${formatYen(product.itemPrice)}</p>
           <p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>
+          <p class="selection-score">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p>
           <p>${escapeHtml(shorten(product.itemCaption || "", 90))}</p>
           ${duplicate ? `<p class="warning">${escapeHtml(duplicate)}</p>` : ""}
         </div>
@@ -439,6 +762,24 @@ function openDetailByCandidate(id) {
 function quickSaveByIndex(index) {
   const product = searchResults[index];
   if (product) quickSave(product);
+}
+
+function saveWarningCandidateByIndex(index) {
+  const product = searchResults[index];
+  if (!product) return;
+  const trust = checkProductTrust(product);
+  if (!["要確認", "注意喚起候補"].includes(trust.trustStatus)) {
+    toast("この商品は注意喚起候補ではありません。");
+    return;
+  }
+  quickSave(product);
+  const candidate = data.candidates[0];
+  if (candidate && rankingIdentity(candidate.product || candidate) === rankingIdentity(product)) {
+    candidate.warningContentCandidate = true;
+    candidate.favoriteType = "注意喚起候補";
+    saveData();
+    toast("注意喚起候補として保存しました。");
+  }
 }
 
 function openDetail(product, draft = {}) {
@@ -524,6 +865,9 @@ ${getSaleInfo(currentProduct) || "記載なし"}
 利用シーン：${context.usageScene}
 商品状態：${context.usageStatus}
 今チェックする理由：${context.saleReason || "明記されたセール情報なし"}
+クリック理由：${currentProduct.clickReason || "選定前のため未評価"}
+購入材料：${(currentProduct.purchaseReasons || []).join("、") || "選定前のため未評価"}
+信頼性判定：${currentProduct.trustStatus || "未確認"}
 
 【投稿条件】
 投稿タイプ：${$("#postType").value}
@@ -588,6 +932,9 @@ function quickSave(product) {
     postStatus: introText ? "紹介文作成済み" : "紹介文未作成",
     favoriteType: "今すぐ投稿"
   };
+  Object.assign(candidate, checkProductTrust(productWithUrl));
+  applySelectionScore(candidate);
+  applyCollectionMetadata(candidate);
   data.candidates.unshift(candidate);
   saveData();
   toast("投稿候補に保存しました。");
@@ -623,6 +970,21 @@ function compactItems(items) {
 }
 
 function renderCandidates() {
+  let trustUpdated = false;
+  data.candidates.forEach((item) => {
+    if (!item.trustStatus) {
+      Object.assign(item, checkProductTrust(item.product || item));
+      trustUpdated = true;
+    }
+    if (item.scoreVersion !== SELECTION_SCORE_VERSION) {
+      applySelectionScore(item);
+      trustUpdated = true;
+    }
+    const beforeCollectionState = `${item.postType}|${item.recommendedCollection}|${item.collectionStatus}`;
+    applyCollectionMetadata(item);
+    if (beforeCollectionState !== `${item.postType}|${item.recommendedCollection}|${item.collectionStatus}`) trustUpdated = true;
+  });
+  if (trustUpdated) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   const keyword = $("#candidateFilter")?.value?.trim() || "";
   const status = $("#candidateStatusFilter")?.value || "";
   const items = data.candidates.filter((item) => {
@@ -632,6 +994,21 @@ function renderCandidates() {
   });
   $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
   renderQueueProgress();
+  renderCollectionSummary();
+}
+
+function renderCollectionSummary() {
+  const element = $("#collectionSummary");
+  if (!element) return;
+  const counts = new Map(COLLECTIONS.filter((collection) => collection.enabled).map((collection) => [collection.id, { recommended: 0, selected: 0 }]));
+  data.candidates.forEach((item) => {
+    if (counts.has(item.recommendedCollection)) counts.get(item.recommendedCollection).recommended += 1;
+    if (counts.has(item.selectedCollection)) counts.get(item.selectedCollection).selected += 1;
+  });
+  element.innerHTML = COLLECTIONS.filter((collection) => collection.enabled).map((collection) => {
+    const count = counts.get(collection.id);
+    return `<p><strong>${escapeHtml(collection.name)}</strong><br>推奨 ${count.recommended}件 / 選択 ${count.selected}件</p>`;
+  }).join("") || `<p class="message">有効なコレクションはありません。</p>`;
 }
 
 function renderQueueProgress() {
@@ -654,7 +1031,7 @@ function renderQueueProgress() {
 function buildQueueCandidate(product) {
   const itemUrl = product.itemUrl || product.affiliateUrl || "";
   const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
-  return {
+  const candidate = {
     id: crypto.randomUUID(),
     product: productWithUrl,
     title: productWithUrl.itemName,
@@ -679,6 +1056,10 @@ function buildQueueCandidate(product) {
     postStatus: "投稿待ち",
     favoriteType: "今すぐ投稿"
   };
+  Object.assign(candidate, checkProductTrust(productWithUrl));
+  applySelectionScore(candidate);
+  applyCollectionMetadata(candidate);
+  return candidate;
 }
 
 function queueSelectedRanking() {
@@ -756,7 +1137,94 @@ function applyCodexResult() {
   toast("Codex結果を対象商品へ反映しました。");
 }
 
+function selectWarningReasons(trust = {}) {
+  const reasons = Array.isArray(trust.trustReasons) ? trust.trustReasons : [];
+  const severityOrder = { high: 0, warning: 1, info: 2 };
+  return reasons
+    .filter((reason) => reason && (reason.label || reason.detail))
+    .sort((a, b) => (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3))
+    .slice(0, 4);
+}
+
+function warningEmojiFor(product = {}) {
+  const text = stripHtml(`${product.itemName || ""} ${product.itemCaption || ""}`);
+  if (/(SSD|USBメモリ|microSD|SDカード|ハードディスク|HDD)/i.test(text)) return "💾";
+  if (/(モバイルバッテリー|充電器|電源|ACアダプター)/i.test(text)) return "🔋";
+  if (/(スマホ|携帯|iPhone|Android)/i.test(text)) return "📱";
+  if (/(旅行|スーツケース|キャリー)/i.test(text)) return "✈️";
+  if (/(美容|コスメ|化粧)/i.test(text)) return "✨";
+  if (/(キッチン|調理|フライパン|マグ)/i.test(text)) return "🍳";
+  return "🛍️";
+}
+
+function generateWarningPrompt(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate) return;
+  const trust = candidate.trustStatus ? candidate : { ...candidate, ...checkProductTrust(candidate.product || candidate) };
+  const product = candidate.product || candidate;
+  const selectedReasons = selectWarningReasons(trust);
+  const reasons = selectedReasons.map((reason) => `- code=${reason.code || "未設定"} / severity=${reason.severity || "info"} / ${reason.label || "確認事項"}：${reason.detail || "詳細なし"}`).join("\n") || "- 商品情報だけでは判断材料が不足しています。";
+  const reviewText = trust.reviewAverage && trust.reviewCount
+    ? `${trust.reviewAverage} / ${trust.reviewCount}件`
+    : "取得できたレビュー情報なし";
+  const warningSources = [
+    `trustReasons（重要度順・最大4件）：\n${reasons}`,
+    `manufacturer：${trust.manufacturer || "取得情報から確認できない"}`,
+    `modelNumber：${trust.modelNumber || "取得情報から確認できない"}`,
+    `specWarnings：${JSON.stringify(trust.specWarnings || [])}`,
+    `priceWarning：${JSON.stringify(trust.priceWarning || null)}`,
+    `descriptionWarnings：${JSON.stringify(trust.descriptionWarnings || [])}`,
+    `reviewAverage / reviewCount：${reviewText}`
+  ].join("\n");
+  const emoji = warningEmojiFor(product);
+  candidate.warningContentCandidate = true;
+  candidate.introPrompt = [
+    "楽天ROOM向けの注意喚起文章を作成してください。",
+    "目的は商品を攻撃することではなく、商品ページから確認できた事項を使って、購入前の確認を促すことです。",
+    "",
+    `商品名：${candidate.title || product.itemName || ""}`,
+    `価格：${formatYen(candidate.price ?? product.itemPrice)}`,
+    `ショップ名：${candidate.shopName || product.shopName || ""}`,
+    `商品説明：${stripHtml(product.itemCaption || "")}`,
+    "",
+    "【使用してよい根拠】",
+    warningSources,
+    "",
+    "【本文の構成】",
+    "1. 冒頭40〜50文字：誰が何を買う前に確認した方がよいか。例『大容量SSDを安く探している方、容量と価格だけで決める前に少し確認を💾』。過度に煽らない。",
+    "2. 気になる理由",
+    "3. 確認できた事実",
+    "4. 購入前に確認してほしい項目",
+    "5. 中立的な締め：確認して、他の商品とも比較して判断する流れ。将来の代替商品紹介につなげやすくする。",
+    "",
+    "【事実と推測のルール】",
+    "・上記の使用してよい根拠にない問題点を追加しない。trustReasonsから重要度がhigh→warning→infoの順に、存在する範囲で2〜4項目だけ自然に使う。",
+    "・確認できない場合は『商品ページ上ではメーカー名を確認できませんでした』『取得情報から型番を確認できませんでした』と書く。『メーカー不明』『型番が存在しない』とは断定しない。",
+    "・レビュー評価がある場合は隠さず書いてよいが、『レビューが高いから安全』とは書かない。",
+    `・本文に商品カテゴリーの絵文字を1〜3個だけ自然に入れる。今回の候補：${emoji}。⚠️ 🚨 ❌ 🔥 😱 は使わない。絵文字で危険性を強調しない。`,
+    "",
+    "【禁止表現】",
+    "『偽物』『詐欺』『詐欺商品』『危険商品』『粗悪品』『絶対買わない方がいい』『絶対に買ってはいけない』『容量偽装している』『騙されないで』『悪質ショップ』は禁止。実機検証していない容量や性能を断定しない。",
+    "",
+    "【出力形式】",
+    "【注意喚起文】",
+    "本文",
+    "",
+    "【確認ポイント】",
+    "・購入前に確認する項目を2〜4個",
+    "",
+    "【ハッシュタグ】",
+    "商品カテゴリーに合う中立的なタグを5〜7個。煽り系タグは禁止。ROOM投稿では注意喚起文とハッシュタグを使用する。"
+  ].join("\n");
+  saveData();
+  copyText(candidate.introPrompt, { silent: true });
+  toast("注意喚起文章の指示文を作成しました。");
+}
+
 function candidateCard(item) {
+  const trust = item.trustStatus ? item : { ...item, ...checkProductTrust(item.product || item) };
+  const trustLabels = { "通常投稿候補": "🟢 通常投稿候補", "要確認": "🟡 要確認", "注意喚起候補": "🟠 注意喚起候補", "投稿対象外": "🔴 投稿対象外" };
+  const trustReasonText = (trust.trustReasons || []).map((reason) => `${reason.label}：${reason.detail}`).join("\n");
   const itemUrl = item.itemUrl || item.product?.itemUrl || item.product?.affiliateUrl || "";
   const itemCode = item.itemCode || item.product?.itemCode || "";
   const productButtonLabel = `楽天商品ページを開く ${item.title || item.product?.itemName || ""}`;
@@ -771,6 +1239,12 @@ function candidateCard(item) {
         <div class="record-actions candidate-product-actions">${productLink}</div>
         <p><span class="badge">${escapeHtml(item.status)}</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
         <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
+        <p class="trust-status" aria-label="商品信頼性判定">${trustLabels[trust.trustStatus] || "🟡 要確認"}（${trust.trustScore ?? "-"}点・検証中）</p>
+        <p class="collection-status"><strong>投稿タイプ：</strong>${escapeHtml({ normal: "通常商品", sale: "セール商品", used: "使用済み商品", warning: "注意喚起商品" }[item.postType] || "通常商品")}</p>
+        ${item.recommendedCollection ? `<p class="collection-status"><strong>推奨コレクション：</strong>${escapeHtml(getCollectionById(item.recommendedCollection)?.name || item.recommendedCollection)}</p><details class="collection-details"><summary>推奨理由を見る</summary><p>${escapeHtml(item.collectionReason || "既存の信頼性チェック結果に基づく推奨です。")}</p></details>` : ""}
+        <label class="collection-select"><strong>選択コレクション</strong><select onchange="updateCandidate('${item.id}', 'selectedCollection', this.value)">${collectionOptions(item.selectedCollection)}</select></label>
+        <p class="selection-score">選定スコア：${getSelectionTotal(item)} / 100</p><p class="selection-grade">${escapeHtml(item.selectionGrade || selectionGrade(getSelectionTotal(item)))}</p><details class="selection-details"><summary>選定理由を見る</summary><p>${escapeHtml((item.selectionReason || item.selectionReasons || []).join("\n")).replaceAll("\n", "<br>")}</p></details>
+        ${trustReasonText ? `<details class="trust-details"><summary>判定理由を見る</summary><p>${escapeHtml(trustReasonText).replaceAll("\n", "<br>")}</p></details>` : ""}
         <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
@@ -784,6 +1258,7 @@ function candidateCard(item) {
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '要手動確認')">要手動確認にする</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button>
+          ${["注意喚起候補", "要確認"].includes(trust.trustStatus) ? `<button class="secondary-button" type="button" onclick="generateWarningPrompt('${item.id}')">注意喚起文を生成</button>` : ""}
           ${item.postStatus === "投稿済み" ? `<button class="secondary-button" type="button" onclick="startNextCandidate('${item.id}')">次の商品を処理</button>` : ""}
         </div>
         <details class="candidate-tools">
@@ -815,6 +1290,8 @@ function renderHistory() {
       <div>
         <h3>${escapeHtml(item.title)}</h3>
         <p><span class="badge">投稿済み</span> ${formatDate(item.postedAt)} / ${escapeHtml(item.genreId || "ジャンル未設定")}</p>
+        <p class="collection-status">投稿タイプ：${escapeHtml({ normal: "通常商品", sale: "セール商品", used: "使用済み商品", warning: "注意喚起商品" }[item.postType] || "通常商品")} / 信頼性：${escapeHtml(item.trustStatus || "未確認")}</p>
+        ${item.selectedCollection || item.recommendedCollection ? `<p class="collection-status">コレクション：${escapeHtml(getCollectionById(item.selectedCollection || item.recommendedCollection)?.name || item.selectedCollection || item.recommendedCollection)}</p>` : ""}
         <p>${escapeHtml(shorten(item.introText || "", 140))}</p>
         ${item.roomUrl ? `<a href="${escapeAttr(item.roomUrl)}" target="_blank" rel="noopener noreferrer">ROOM投稿URL</a>` : ""}
       </div>
@@ -828,7 +1305,9 @@ function updateCandidate(id, field, value) {
   item[field] = value;
   if (field === "introText" && value && item.status === "未作成") item.status = "文章作成済み";
   if (field === "introText") item.postStatus = value ? "紹介文作成済み" : "紹介文未作成";
+  if (field === "selectedCollection") item.collectionStatus = value ? "selected" : (item.recommendedCollection ? "recommended" : "none");
   saveData();
+  renderCandidates();
 }
 
 function setPostStatus(id, status) {
@@ -1025,6 +1504,11 @@ function markPosted(id) {
 function generateCandidatePrompt(id) {
   const candidate = data.candidates.find((item) => item.id === id);
   if (!candidate?.product) return;
+  applyCollectionMetadata(candidate);
+  if (candidate.postType === "warning") {
+    generateWarningPrompt(id);
+    return;
+  }
   currentProduct = candidate.product;
   openDetail(currentProduct);
   generatePrompt();
@@ -1049,6 +1533,7 @@ function buildCodexPostInstructions(candidate) {
     `商品説明：${stripHtml(product.itemCaption || "" )}`,
     `セール情報（明記された項目のみ）：${getSaleInfo(product) || "記載なし"}`,
     `文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}`,
+    `商品選定情報：スコア=${getSelectionTotal(candidate)} / ${candidate.selectionGrade || "評価中"} / 選定理由=${(candidate.selectionReason || candidate.selectionReasons || []).join("、") || "未評価"} / 信頼性=${candidate.trustStatus || "未確認"}`,
     `商品URL：${itemUrl}`,
     `itemCode：${candidate.itemCode || product.itemCode || ""}`,
     `categoryId：${candidate.categoryId || product.categoryId || ""}`,
@@ -1245,9 +1730,22 @@ function queuedCandidateMatch(product) {
 }
 
 function selectRankingCandidate(categoryItems, context) {
-  const ordered = [...categoryItems].sort((a, b) => (a.rank || 0) - (b.rank || 0));
+  const ordered = [...categoryItems].map((product) => {
+    Object.assign(product, checkProductTrust(product));
+    return applySelectionScore(product);
+  }).sort((a, b) => {
+    const aScore = getSelectionTotal(a);
+    const bScore = getSelectionTotal(b);
+    return bScore - aScore || (a.rank || 0) - (b.rank || 0);
+  });
   const reasons = [];
   for (const product of ordered) {
+    if (product.trustStatus !== "通常投稿候補") {
+      product.selectionStatus = product.trustStatus === "投稿対象外" ? "trust_excluded" : "trust_review";
+      product.selectionReason = `商品信頼性チェック：${product.trustStatus}`;
+      reasons.push(`${product.rank}位は${product.trustStatus}`);
+      continue;
+    }
     const identity = rankingIdentity(product);
     if (postedHistoryMatch(product)) {
       product.selectionStatus = "posted_duplicate";
@@ -1268,7 +1766,7 @@ function selectRankingCandidate(categoryItems, context) {
       continue;
     }
     product.selectionStatus = "selected";
-    product.selectionReason = reasons.length ? `${reasons.join("、")}のため${product.rank}位を採用` : `${product.rank}位を採用`;
+    product.selectionReason = `${getSelectionTotal(product)}点：${(product.selectionReason || product.selectionReasons || []).join("、")}`;
     context.selectedIdentities.add(identity);
     return product;
   }
@@ -1301,8 +1799,8 @@ function importJson(event) {
 }
 
 function exportCsv() {
-  const rows = [["投稿日", "商品名", "ジャンル", "ショップ名", "投稿文", "ハッシュタグ", "ROOM投稿URL", "メモ"]];
-  data.history.forEach((item) => rows.push([formatDate(item.postedAt), item.title, item.genreId, item.shopName, item.introText, item.hashTags, item.roomUrl, item.memo]));
+  const rows = [["投稿日", "商品名", "ジャンル", "ショップ名", "投稿タイプ", "信頼性", "選定スコア", "選定バージョン", "コレクション", "投稿文", "ハッシュタグ", "ROOM投稿URL", "メモ"]];
+  data.history.forEach((item) => rows.push([formatDate(item.postedAt), item.title, item.genreId, item.shopName, item.postType, item.trustStatus, getSelectionTotal(item), item.selectionVersion || "", getCollectionById(item.selectedCollection || item.recommendedCollection)?.name || "", item.introText, item.hashTags, item.roomUrl, item.memo]));
   const csv = rows.map((row) => row.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(",")).join("\n");
   downloadFile(`room-history-${dateStamp()}.csv`, `\uFEFF${csv}`, "text/csv");
 }
@@ -1563,8 +2061,9 @@ async function loadRanking(event) {
         ...product,
         categoryId: category.id,
         categoryName: category.name,
-        // ランキングAPIのrankはカテゴリ内の表示順位と一致しない場合があるため、
-        // この取得結果の並び順をカテゴリ内順位として扱う。
+        apiRank: product.rank ?? null,
+        sourceRank: index + 1,
+        // 既存表示・重複除外との互換性のためrankは取得順を維持する。
         rank: index + 1,
         fetchedAt: new Date().toISOString()
       })).filter((product) => product.rank >= rankStart && product.rank <= rankEnd);
@@ -1658,8 +2157,16 @@ async function retryFailedRanking() {
 
 function renderRankingResults(products) {
   searchResults = filterAvailableProducts(products);
+  searchResults.forEach((product) => { if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); applySelectionScore(product); });
+  const displayProducts = [...searchResults].sort((a, b) => {
+    if ($("#rankingSortOrder")?.value === "score") return getSelectionTotal(b) - getSelectionTotal(a) || (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0);
+    return (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0);
+  });
+  const recommendations = displayProducts.slice().sort((a, b) => getSelectionTotal(b) - getSelectionTotal(a) || (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0)).slice(0, 3);
+  const recommendationEl = $("#todayRecommendations");
+  if (recommendationEl) recommendationEl.innerHTML = recommendations.length ? `<h3>今日のおすすめ候補</h3><ol>${recommendations.map((product) => { const targetIndex = searchResults.indexOf(product); return `<li><button type="button" class="text-link" onclick="document.getElementById('ranking-item-${targetIndex}')?.scrollIntoView({behavior:'smooth',block:'center'})">${escapeHtml(product.itemName)}</button> — ${getSelectionTotal(product)}点 / ${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${formatYen(product.itemPrice)}</li>`; }).join("")}</ol>` : "";
   const container = $("#rankingResults");
-  const groups = searchResults.reduce((result, product) => {
+  const groups = displayProducts.reduce((result, product) => {
     const key = product.categoryId || "総合";
     (result[key] ||= { name: product.categoryName || "総合ランキング", products: [] }).products.push(product);
     return result;
@@ -1669,10 +2176,10 @@ function renderRankingResults(products) {
       <h3>${escapeHtml(group.name)}</h3>
       <div class="product-grid">${group.products.map((product) => {
         const index = searchResults.indexOf(product);
-        return `<article class="product-card">
+        return `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}">
           <img src="${escapeAttr(getImage(product))}" alt="">
-          <div class="product-body"><div class="product-title">${product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "登録済みのため除外" : "採用候補なし"}</strong><br>${escapeHtml(product.selectionReason)}</p>` : ""}</div>
-          <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button><button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
+          <div class="product-body"><div class="product-title">${product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="selection-score">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p><details class="selection-details"><summary>内訳・理由を見る</summary><p>ランキング ${product.selectionScore?.ranking || 0}/30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0}/20<br>レビュー件数 ${product.selectionScore?.reviewCount || 0}/20<br>価格 ${product.selectionScore?.price || 0}/15<br>カテゴリー ${product.selectionScore?.category || 0}/10<br>新規性 ${product.selectionScore?.freshness || 0}/5</p><p>${escapeHtml((product.selectionReason || []).join("\n")).replaceAll("\n", "<br>")}</p></details><p class="trust-status">${product.trustStatus === "通常投稿候補" ? "🟢 通常投稿候補" : product.trustStatus === "要確認" ? "🟡 要確認" : product.trustStatus === "注意喚起候補" ? "🟠 注意喚起候補" : product.trustStatus === "投稿対象外" ? "🔴 投稿対象外" : "信頼性未確認"}</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "投稿キュー登録済みのため除外" : product.trustStatus || "採用候補なし"}</strong><br>${escapeHtml(typeof product.selectionReason === "string" ? product.selectionReason : (product.selectionReason || []).join("、"))}</p>` : ""}</div>
+          <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button>${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
         </article>`;
       }).join("")}</div>
     </section>`).join("");

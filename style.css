@@ -434,6 +434,26 @@ textarea {
   color: var(--ink);
 }
 
+.ranking-sort-control {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 14px;
+  color: var(--muted);
+}
+
+.today-recommendations {
+  margin: 0 0 18px;
+  padding: 12px 16px;
+  border-left: 4px solid var(--green);
+  background: rgba(221, 239, 231, 0.55);
+}
+
+.today-recommendations h3 { margin: 0 0 6px; color: var(--green); }
+.today-recommendations ol { margin: 0; padding-left: 22px; }
+.text-link { border: 0; padding: 0; color: var(--accent-dark); background: transparent; text-align: left; text-decoration: underline; cursor: pointer; }
+.selection-grade { margin: 2px 0 8px; color: var(--accent-dark); font-weight: 700; }
+
 .product-card {
   display: grid;
   grid-template-rows: auto 1fr auto;
@@ -718,6 +738,23 @@ textarea {
 .calendar-item span {
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.collection-status,
+.selection-score {
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.collection-select {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.collection-panel {
+  margin-top: 16px;
 }
 
 @media (max-width: 900px) {
