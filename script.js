@@ -5,7 +5,8 @@ const RANKING_RETRY_SAFETY_MARGIN_MS = 200;
 const RANKING_MAX_RETRIES = 1;
 const RANKING_REQUEST_TIMEOUT_MS = 15000;
 const SELECTION_SCORE_VERSION = "2.7.1";
-const APP_VERSION = "2.7.1.1";
+const APP_VERSION = "2.7.1.2";
+const RECOMMENDATION_TITLE_MAX_LENGTH = 40;
 const SELECTION_SCORE_CONFIG = Object.freeze({
   ranking: 30, reviewRating: 20, reviewCount: 20, price: 15, category: 10, freshness: 5,
   categories: { "食品": 10, "美容・コスメ・香水": 10, "日用品・生活雑貨": 8, "キッチン用品・食器・調理器具": 8, "家電": 5, "パソコン・周辺機器": 5 }
@@ -2165,7 +2166,7 @@ function renderRankingResults(products) {
   });
   const recommendations = displayProducts.slice().sort((a, b) => getSelectionTotal(b) - getSelectionTotal(a) || (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0)).slice(0, 3);
   const recommendationEl = $("#todayRecommendations");
-  if (recommendationEl) recommendationEl.innerHTML = recommendations.length ? `<section aria-label="今日のおすすめ候補"><h3>今日のおすすめ候補</h3><ol>${recommendations.map((product, position) => { const targetIndex = searchResults.indexOf(product); return `<li><strong>${position + 1}位</strong> <button type="button" class="text-link" onclick="document.getElementById('ranking-item-${targetIndex}')?.scrollIntoView({behavior:'smooth',block:'center'})">${escapeHtml(product.itemName)}</button> — ${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${formatYen(product.itemPrice)} / 選定スコア ${getSelectionTotal(product)} / 100 / ${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</li>`; }).join("")}</ol></section>` : "";
+  if (recommendationEl) recommendationEl.innerHTML = recommendations.length ? `<section aria-label="今日のおすすめ候補"><h3>今日のおすすめ候補</h3><ol class="recommendation-list">${recommendations.map((product, position) => { const targetIndex = searchResults.indexOf(product); const fullTitle = stripHtml(product.itemName || ""); const shortTitle = fullTitle.length > RECOMMENDATION_TITLE_MAX_LENGTH ? `${fullTitle.slice(0, RECOMMENDATION_TITLE_MAX_LENGTH)}…` : fullTitle; const ariaLabel = `おすすめ${position + 1}位 ${fullTitle} 選定スコア${getSelectionTotal(product)}点 ${product.categoryName || "カテゴリー未設定"} ${formatYen(product.itemPrice)}`; return `<li class="recommendation-item"><strong class="recommendation-rank">${position + 1}位</strong><button type="button" class="text-link recommendation-title" title="${escapeAttr(fullTitle)}" aria-label="${escapeAttr(ariaLabel)}" onclick="document.getElementById('ranking-item-${targetIndex}')?.scrollIntoView({behavior:'smooth',block:'center'})">${escapeHtml(shortTitle)}</button><span class="recommendation-meta">${getSelectionTotal(product)}点 / ${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${formatYen(product.itemPrice)}</span><span class="recommendation-grade">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</span></li>`; }).join("")}</ol></section>` : "";
   const container = $("#rankingResults");
   const scoreBreakdown = (product) => `<div class="selection-breakdown" aria-label="スコア内訳">ランキング ${product.selectionScore?.ranking || 0} / 30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0} / 20<br>レビュー件数 ${product.selectionScore?.reviewCount || 0} / 20<br>価格 ${product.selectionScore?.price || 0} / 15<br>カテゴリー ${product.selectionScore?.category || 0} / 10<br>新規性 ${product.selectionScore?.freshness || 0} / 5</div>`;
   const scoreReasons = (product) => `<div class="selection-reasons" aria-label="選定理由">${(product.selectionReason || []).map((reason) => `<div>✓ ${escapeHtml(reason)}</div>`).join("") || "<div>✓ 評価理由を確認中</div>"}</div>`;
