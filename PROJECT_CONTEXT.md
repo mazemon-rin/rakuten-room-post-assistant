@@ -101,6 +101,7 @@ README記載のVersionを作業開始時に確認する。
 ## Known Issues
 
 - 公開環境、APIキーの保存方式、バックアップ復元は要確認。
+- 31〜50位は実APIで取得・表示確認済み。ただし、実APIレスポンスにおける各商品の `rank` / `apiRank` / `sourceRank` の個別値は直接確認できていない。
 
 ## Recent Work
 

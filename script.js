@@ -291,7 +291,6 @@ async function fetchRankingCategory(category, page = 1, fallbackWaitMs = RANKING
     }
     if (response.ok) {
       const json = await response.json();
-      logRakutenRankingRawStructure({ json, requestedPage: page, genreId: category.id });
       return normalizeRakutenItems(json);
     }
     const rawBody = await response.text().catch(() => "");
@@ -320,37 +319,6 @@ function applyOfficialRankingRank(product = {}) {
     return { ...product, apiRank: null, sourceRank: null, rank: null };
   }
   return { ...product, apiRank: officialRank, sourceRank: officialRank, rank: officialRank };
-}
-
-// 開発用の一時診断。順位ロジックへ渡す前のJSON構造だけを確認します。
-// 認証情報、URL、商品名、商品コード、商品内容は出力しません。
-function logRakutenRankingRawStructure({ json, requestedPage, genreId }) {
-  const listKey = Array.isArray(json?.items) ? "items" : Array.isArray(json?.Items) ? "Items" : null;
-  const entries = listKey ? json[listKey] : [];
-  const findRankCandidates = (value, path = "") => {
-    if (!value || typeof value !== "object") return [];
-    return Object.entries(value).flatMap(([key, child]) => {
-      const childPath = path ? `${path}.${key}` : key;
-      const results = /rank/i.test(key) ? [{ path: childPath, value: typeof child === "string" || typeof child === "number" ? child : "[non-scalar]" }] : [];
-      return results.concat(child && typeof child === "object" ? findRankCandidates(child, childPath) : []);
-    });
-  };
-  const inspectEntry = (entry) => ({
-    entryKeys: entry && typeof entry === "object" ? Object.keys(entry) : [],
-    hasItem: Boolean(entry && typeof entry === "object" && entry.item && typeof entry.item === "object"),
-    hasItemUpper: Boolean(entry && typeof entry === "object" && entry.Item && typeof entry.Item === "object"),
-    itemKeys: entry?.item && typeof entry.item === "object" ? Object.keys(entry.item) : [],
-    itemUpperKeys: entry?.Item && typeof entry.Item === "object" ? Object.keys(entry.Item) : [],
-    rankCandidates: findRankCandidates(entry)
-  });
-  console.warn("[Rakuten Ranking Debug]", {
-    requestedPage,
-    genreId,
-    listKey,
-    itemsLength: entries.length,
-    topLevelKeys: json && typeof json === "object" ? Object.keys(json) : [],
-    firstThree: entries.slice(0, 3).map(inspectEntry)
-  });
 }
 
 function getRankingRequestInterval(categoryCount) {
