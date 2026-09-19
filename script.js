@@ -553,6 +553,14 @@ function selectionGrade(total) {
   return "★★☆☆☆ 優先度低";
 }
 
+function trendSelectionGrade(total) {
+  if (total >= 80) return "★★★★★ 最優先候補";
+  if (total >= 70) return "★★★★☆ 有力候補";
+  if (total >= 60) return "★★★☆☆ 候補";
+  if (total >= 50) return "★★☆☆☆ 要確認";
+  return "★☆☆☆☆ 優先度低";
+}
+
 function getSelectionTotal(item = {}) {
   return Number(item.selectionScore?.total ?? item.selectionScoreTotal ?? (typeof item.selectionScore === "number" ? item.selectionScore : 0)) || 0;
 }
@@ -582,6 +590,100 @@ function calculateSelectionScore(product = {}, context = {}) {
     selectionScoreTotal: total,
     selectionBreakdown: { ranking, reviewRating, reviewCount, price, category, freshness },
     selectionReasons: selectionReason
+  };
+}
+
+function normalizeTrendText(value = "") {
+  return String(value)
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s\-_‐‑‒–—―・/\\.,、。()[\]{}「」『』【】]/g, "");
+}
+
+function tokenizeTrendKeyword(keyword = "") {
+  const original = String(keyword).trim();
+  const normalized = normalizeTrendText(original);
+  const rawTokens = original
+    .normalize("NFKC")
+    .toLowerCase()
+    .split(/[\s\-_‐‑‒–—―・/\\.,、。()[\]{}「」『』【】]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const tokens = rawTokens.length > 1 ? rawTokens : (normalized.match(/[a-z]+\d+[a-z]*|\d+[a-z]+|[a-z]+|\d+|[ぁ-んァ-ヶ一-龯ー]+/g) || [normalized]);
+  return { original, normalized, tokens: [...new Set(tokens.filter(Boolean))] };
+}
+
+function isTrendProductTypeToken(token = "") {
+  return /(ケース|フィルム|ガラス|充電器|ケーブル|バッテリー|イヤホン|バッグ|ラック|マスク|クリーム|セラム|ギフト|水筒|フライパン|鍋)/i.test(token);
+}
+
+function calculateTrendFitScore(product = {}, matchedTrendKeywords = []) {
+  const source = normalizeTrendText(`${product.itemName || ""} ${stripHtml(product.itemCaption || "")}`);
+  const keywordDetails = [...new Set(matchedTrendKeywords)].filter(Boolean).map(tokenizeTrendKeyword);
+  if (!keywordDetails.length || !source) return { total: 0, matchedKeywords: [], matchedTokenRatio: 0, typeMatch: false, exactMatch: false };
+  let best = { total: 0, matchedKeywords: [], matchedTokenRatio: 0, typeMatch: false, exactMatch: false };
+  keywordDetails.forEach((keyword) => {
+    const matchedTokens = keyword.tokens.filter((token) => source.includes(normalizeTrendText(token)));
+    const ratio = keyword.tokens.length ? matchedTokens.length / keyword.tokens.length : 0;
+    const keywordType = keyword.tokens.find(isTrendProductTypeToken);
+    const typeMatch = Boolean(keywordType && source.includes(normalizeTrendText(keywordType)));
+    const exactMatch = keyword.normalized.length >= 4 && source.includes(keyword.normalized);
+    const modelTokens = keyword.tokens.filter((token) => /[a-z]+\d+|\d+[a-z]+/i.test(token));
+    const modelMatch = modelTokens.length > 0 && modelTokens.every((token) => source.includes(normalizeTrendText(token)));
+    let score = 0;
+    if (exactMatch && typeMatch) score = 30;
+    else if (ratio >= 0.9 && typeMatch) score = 27;
+    else if (modelMatch && typeMatch) score = 25;
+    else if (ratio >= 0.75 && typeMatch) score = 23;
+    else if (modelMatch || ratio >= 0.75) score = 18;
+    else if (ratio >= 0.5) score = 12;
+    else if (ratio > 0) score = 6;
+    if (!typeMatch && keywordType && modelMatch) score = Math.min(score, 18);
+    const candidate = { total: score, matchedKeywords: score ? [keyword.original] : [], matchedTokenRatio: ratio, typeMatch, exactMatch };
+    if (candidate.total > best.total) best = candidate;
+  });
+  return best;
+}
+
+function calculateTrendReviewEvidenceScore(product = {}, trendFit = {}) {
+  const count = Number(product.reviewCount);
+  const rating = Number(product.reviewAverage);
+  if (count >= 1000 && rating >= 4.5) return 15;
+  if (count >= 500 && rating >= 4.3) return 13;
+  if (count >= 100 && rating >= 4.3) return 11;
+  if (count >= 30 && rating >= 4) return 8;
+  if (count > 0 && rating >= 4) return 6;
+  // A strong product/keyword match should not be treated as a major negative
+  // merely because a newly launched product has not accumulated reviews yet.
+  if (trendFit.total >= 27 && (product.releaseDate || product.isNewProduct || product.newProduct)) return 7;
+  if (trendFit.total >= 27 && count <= 10) return 6;
+  return count > 0 ? 4 : 3;
+}
+
+function calculateTrendSelectionScore(product = {}, context = {}) {
+  const matched = [...new Set(product.matchedTrendKeywords || context.matchedTrendKeywords || [])];
+  const trendFit = calculateTrendFitScore(product, matched);
+  const reviewRating = calculateReviewRatingScore(product.reviewAverage);
+  const reviewEvidence = calculateTrendReviewEvidenceScore(product, trendFit);
+  const price = calculatePriceScore(product.itemPrice);
+  const opportunity = calculateTrendOpportunityScore(product, matched, data.eventSettings);
+  const freshness = calculateFreshnessScore(product, context);
+  const total = trendFit.total + reviewRating + reviewEvidence + Math.round(price * (10 / 15)) + opportunity.total + freshness;
+  const selectionReason = [];
+  if (trendFit.total >= 23) selectionReason.push("検索意図と商品情報が強く一致");
+  else if (trendFit.total >= 12) selectionReason.push("検索キーワードと商品情報が部分一致");
+  if (opportunity.total >= 13) selectionReason.push("今投稿する材料がある");
+  if (freshness === 5) selectionReason.push("未投稿商品");
+  return {
+    selectionScore: { total, trendFit: trendFit.total, reviewRating, reviewEvidence, price: Math.round(price * (10 / 15)), opportunity: opportunity.total, freshness },
+    selectionReason,
+    selectionVersion: `${SELECTION_SCORE_VERSION}-trend-v2`,
+    selectionGrade: trendSelectionGrade(total),
+    selectionScoreTotal: total,
+    selectionBreakdown: { trendFit: trendFit.total, reviewRating, reviewEvidence, price: Math.round(price * (10 / 15)), opportunity: opportunity.total, freshness },
+    selectionReasons: selectionReason,
+    trendScore: { total: trendFit.total, keywordMatch: trendFit.total, matchedTokenRatio: trendFit.matchedTokenRatio, typeMatch: trendFit.typeMatch, exactMatch: trendFit.exactMatch },
+    opportunityScore: opportunity
   };
 }
 
@@ -675,7 +777,12 @@ function scoreProductSelection(product = {}) {
 
 function applySelectionScore(product = {}) {
   const source = product.product || product;
-  Object.assign(product, scoreProductSelection(source));
+  const isTrendProduct = Array.isArray(source.matchedTrendKeywords) && source.matchedTrendKeywords.length > 0;
+  Object.assign(product, isTrendProduct ? calculateTrendSelectionScore(source, {
+    postedIdentities: new Set(data.history.map((item) => rankingIdentity(item.product || item))),
+    queuedIdentities: new Set(data.candidates.map((item) => rankingIdentity(item.product || item))),
+    matchedTrendKeywords: source.matchedTrendKeywords
+  }) : scoreProductSelection(source));
   return product;
 }
 
@@ -2224,11 +2331,44 @@ function calculateOpportunityScore(product = {}, matchedTrendKeywords = [], even
   return { total: Math.min(20, event.score + purchaseIntent + clickPotential), eventTiming: event.score, purchaseIntent, clickPotential, reasons };
 }
 
+function calculateTrendOpportunityScore(product = {}, matchedTrendKeywords = [], eventSettings = {}) {
+  const saleInfo = getSaleInfo(product);
+  const text = `${product.itemName || ""} ${stripHtml(product.itemCaption || "")}`;
+  const reasons = [];
+  let score = 0;
+  const discountRate = Number(product.discountRate ?? product.saleRate);
+  if (Number.isFinite(discountRate) && discountRate >= 30) { score += 5; reasons.push("明記された割引率が高い"); }
+  else if (Number.isFinite(discountRate) && discountRate > 0) { score += 3; reasons.push("明記された割引率あり"); }
+  else if (saleInfo && /セール価格|通常価格/i.test(saleInfo)) { score += 3; reasons.push("セール価格を確認できる"); }
+  if (saleInfo && /クーポン/i.test(saleInfo)) { score += 5; reasons.push("クーポン情報あり"); }
+  if (saleInfo && /ポイント還元/i.test(saleInfo)) { score += 3; reasons.push("ポイント還元情報あり"); }
+  if (saleInfo && /セール期間/i.test(saleInfo)) { score += 2; reasons.push("セール期間を確認できる"); }
+  if (product.isNewProduct || product.newProduct || product.releaseDate || /新発売|発売直後|新商品/i.test(`${text} ${saleInfo}`)) { score += 3; reasons.push("新商品・発売直後の情報あり"); }
+  const event = calculateEventTiming(eventSettings);
+  if (event.score) { score += Math.min(4, event.score); reasons.push(event.label); }
+  if (matchedTrendKeywords.length >= 2) { score += 2; reasons.push("複数トレンド一致"); }
+  if (product.rank || product.sourceRank) { score += Number(product.sourceRank ?? product.rank) <= 10 ? 3 : 1; reasons.push("楽天ランキング情報あり"); }
+  if (Number(product.reviewCount) >= 1000 && Number(product.reviewAverage) >= 4.5) { score += 3; reasons.push("レビュー実績あり"); }
+  return { total: Math.min(20, score), reasons, eventTiming: event.score };
+}
+
 function applyStrategyScores(product = {}) {
   const matched = [...new Set(product.matchedTrendKeywords || [])];
-  product.trendScore = calculateTrendScore(product, matched);
-  product.opportunityScore = calculateOpportunityScore(product, matched, data.eventSettings);
-  product.todayPriorityScore = Math.min(140, getSelectionTotal(product) + product.trendScore.total + product.opportunityScore.total);
+  const isTrendProduct = matched.length > 0;
+  if (isTrendProduct) {
+    const trendSelection = calculateTrendSelectionScore(product, {
+      postedIdentities: new Set(data.history.map((item) => rankingIdentity(item.product || item))),
+      queuedIdentities: new Set(data.candidates.map((item) => rankingIdentity(item.product || item))),
+      matchedTrendKeywords: matched
+    });
+    product.trendScore = trendSelection.trendScore;
+    product.opportunityScore = trendSelection.opportunityScore;
+    product.todayPriorityScore = getSelectionTotal(trendSelection);
+  } else {
+    product.trendScore = calculateTrendScore(product, matched);
+    product.opportunityScore = calculateOpportunityScore(product, matched, data.eventSettings);
+    product.todayPriorityScore = Math.min(140, getSelectionTotal(product) + product.trendScore.total + product.opportunityScore.total);
+  }
   product.priorityReasons = [...(Array.isArray(product.selectionReason) ? product.selectionReason : product.selectionReason ? [product.selectionReason] : []), ...(product.trendScore.total ? [`トレンド一致：${matched.join("、")}`] : []), ...product.opportunityScore.reasons];
   product.salesPoints = product.opportunityScore.reasons;
   product.postPerspective = product.postPerspective || (product.usageStatus === "used" ? "owned" : product.trustStatus === "注意喚起候補" ? "warning" : "wanted");
@@ -2287,7 +2427,9 @@ function renderRankingResults(products) {
   const recommendationEl = $("#todayRecommendations");
   if (recommendationEl) recommendationEl.innerHTML = recommendations.length ? `<section aria-label="今日のおすすめ候補"><h3>今日のおすすめ候補</h3><ol class="recommendation-list">${recommendations.map((product, position) => { const targetIndex = searchResults.indexOf(product); const fullTitle = stripHtml(product.itemName || ""); const shortTitle = fullTitle.length > RECOMMENDATION_TITLE_MAX_LENGTH ? `${fullTitle.slice(0, RECOMMENDATION_TITLE_MAX_LENGTH)}…` : fullTitle; const ariaLabel = `おすすめ${position + 1}位 ${fullTitle} 選定スコア${getSelectionTotal(product)}点 ${product.categoryName || "カテゴリー未設定"} ${formatYen(product.itemPrice)}`; return `<li class="recommendation-item"><strong class="recommendation-rank">${position + 1}位</strong><button type="button" class="text-link recommendation-title" title="${escapeAttr(fullTitle)}" aria-label="${escapeAttr(ariaLabel)}" onclick="document.getElementById('ranking-item-${targetIndex}')?.scrollIntoView({behavior:'smooth',block:'center'})">${escapeHtml(shortTitle)}</button><span class="recommendation-meta">${getSelectionTotal(product)}点 / トレンド${product.trendScore?.total ?? 0}点 / 機会${product.opportunityScore?.total ?? 0}点 / 優先度${product.todayPriorityScore ?? getSelectionTotal(product)}点</span><span class="recommendation-meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${formatYen(product.itemPrice)}</span><span class="recommendation-grade">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</span></li>`; }).join("")}</ol></section>` : "";
   const container = $("#rankingResults");
-  const scoreBreakdown = (product) => `<div class="selection-breakdown" aria-label="スコア内訳">ランキング ${product.selectionScore?.ranking || 0} / 30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0} / 20<br>レビュー件数 ${product.selectionScore?.reviewCount || 0} / 20<br>価格 ${product.selectionScore?.price || 0} / 15<br>カテゴリー ${product.selectionScore?.category || 0} / 10<br>新規性 ${product.selectionScore?.freshness || 0} / 5</div>`;
+  const scoreBreakdown = (product) => product.matchedTrendKeywords?.length
+    ? `<div class="selection-breakdown" aria-label="スコア内訳">購買トレンド適合 ${product.selectionScore?.trendFit || 0} / 30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0} / 20<br>レビュー実績 ${product.selectionScore?.reviewEvidence || 0} / 15<br>価格 ${product.selectionScore?.price || 0} / 10<br>投稿機会 ${product.selectionScore?.opportunity || 0} / 20<br>新規性 ${product.selectionScore?.freshness || 0} / 5</div>`
+    : `<div class="selection-breakdown" aria-label="スコア内訳">ランキング ${product.selectionScore?.ranking || 0} / 30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0} / 20<br>レビュー件数 ${product.selectionScore?.reviewCount || 0} / 20<br>価格 ${product.selectionScore?.price || 0} / 15<br>カテゴリー ${product.selectionScore?.category || 0} / 10<br>新規性 ${product.selectionScore?.freshness || 0} / 5</div>`;
   const scoreReasons = (product) => `<div class="selection-reasons" aria-label="選定理由">${(product.selectionReason || []).map((reason) => `<div>✓ ${escapeHtml(reason)}</div>`).join("") || "<div>✓ 評価理由を確認中</div>"}</div>`;
   const productCard = (product, index, overallRank = null) => { const alreadyPosted = product.selectionStatus === "posted_duplicate" || postedHistoryMatch(product); return `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}" data-post-status="${alreadyPosted ? "投稿済み" : "未投稿"}">
           <img src="${escapeAttr(getImage(product))}" alt="">
