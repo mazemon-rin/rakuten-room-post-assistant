@@ -1091,7 +1091,7 @@ function queueSelectedRanking() {
   const message = $("#rankingMessage");
   const selected = searchResults.filter((product) => product.selectionStatus === "selected");
   if (!selected.length) {
-    message.textContent = "1〜3位に投稿可能な商品がありません。先にランキングを取得してください。";
+    message.textContent = "選択した順位帯に投稿可能な商品がありません。先にランキングを取得してください。";
     toast("投稿キューへ追加できる採用商品がありません。");
     return;
   }
@@ -1121,7 +1121,7 @@ function queueSelectedRanking() {
     toast(`${added.length}件を投稿キューへ追加しました。`);
   } else {
     renderRankingResults(searchResults);
-    message.textContent = "1〜3位に投稿可能な商品がありません。登録済みの商品は除外しました。";
+    message.textContent = "選択した順位帯に投稿可能な商品がありません。登録済みの商品は除外しました。";
     toast("登録済みの商品は投稿キューへ追加しませんでした。");
   }
 }
@@ -2057,7 +2057,7 @@ async function loadRanking(event) {
   const legacyGenreId = $("#rankingGenreId").value.trim();
   if (legacyGenreId) selectedCategories.unshift({ id: legacyGenreId, name: `ジャンルID ${legacyGenreId}` });
   const rankStart = Number($("#rankingRangeStart").value || 1);
-  const rankEnd = rankStart + 2;
+  const rankEnd = rankStart + 4;
   const limit = rankEnd;
   const requestInterval = getRankingRequestInterval(selectedCategories.length);
   rankingRequestContext = { categories: selectedCategories, limit, requestInterval, rankStart, rankEnd };
