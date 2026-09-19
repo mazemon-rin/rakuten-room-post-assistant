@@ -265,12 +265,12 @@ async function readRakutenApiError(response) {
   }
 }
 
-async function fetchRankingCategory(category, limit, fallbackWaitMs = RANKING_INTERVAL_SHORT_MS) {
+async function fetchRankingCategory(category, page = 1, fallbackWaitMs = RANKING_INTERVAL_SHORT_MS) {
   const params = new URLSearchParams({
     format: "json",
     applicationId: data.settings.applicationId,
     accessKey: data.settings.accessKey,
-    page: "1",
+    page: String(page),
     genreId: category.id
   });
   const url = `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`;
@@ -291,7 +291,7 @@ async function fetchRankingCategory(category, limit, fallbackWaitMs = RANKING_IN
     }
     if (response.ok) {
       const json = await response.json();
-      return normalizeRakutenItems(json).slice(0, limit);
+      return normalizeRakutenItems(json);
     }
     const rawBody = await response.text().catch(() => "");
     if (response.status === 429 && retryCount < RANKING_MAX_RETRIES) {
@@ -307,6 +307,18 @@ async function fetchRankingCategory(category, limit, fallbackWaitMs = RANKING_IN
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function getRankingPageForRange(rankStart) {
+  return Number(rankStart) >= 31 ? 2 : 1;
+}
+
+function applyOfficialRankingRank(product = {}) {
+  const officialRank = Number(product.rank);
+  if (!Number.isFinite(officialRank) || officialRank <= 0) {
+    return { ...product, apiRank: null, sourceRank: null, rank: null };
+  }
+  return { ...product, apiRank: officialRank, sourceRank: officialRank, rank: officialRank };
 }
 
 function getRankingRequestInterval(categoryCount) {
@@ -2165,9 +2177,9 @@ async function loadRanking(event) {
   if (legacyGenreId) selectedCategories.unshift({ id: legacyGenreId, name: `ジャンルID ${legacyGenreId}` });
   const rankStart = Number($("#rankingRangeStart").value || 1);
   const rankEnd = rankStart + 4;
-  const limit = rankEnd;
+  const page = getRankingPageForRange(rankStart);
   const requestInterval = getRankingRequestInterval(selectedCategories.length);
-  rankingRequestContext = { categories: selectedCategories, limit, requestInterval, rankStart, rankEnd };
+  rankingRequestContext = { categories: selectedCategories, page, requestInterval, rankStart, rankEnd };
   rankingCategoryStates = new Map(selectedCategories.map((category) => [category.id, {
     categoryId: category.id,
     categoryName: category.name,
@@ -2190,22 +2202,20 @@ async function loadRanking(event) {
     categoryState.lastTriedAt = new Date().toISOString();
     showRankingProgress(`${category.name}を取得中...`);
     try {
-      const products = filterAvailableProducts(await fetchRankingCategory(category, limit, requestInterval));
+      const products = filterAvailableProducts(await fetchRankingCategory(category, page, requestInterval));
       categoryState.status = "success";
       categoryState.httpStatus = 200;
       categoryState.errorMessage = "";
       categoryState.retryCount = 0;
-      const categoryProducts = products.map((product, index) => ({
+      const categoryProducts = products.map((product) => applyOfficialRankingRank({
         ...product,
         categoryId: category.id,
         categoryName: category.name,
-        apiRank: product.rank ?? null,
-        sourceRank: index + 1,
-        // 既存表示・重複除外との互換性のためrankは取得順を維持する。
-        rank: index + 1,
         fetchedAt: new Date().toISOString()
-      })).filter((product) => product.rank >= rankStart && product.rank <= rankEnd);
-      diagnostics.push(`${category.name}: API取得${products.length}件 / ${rankStart}〜${rankEnd}位の対象${categoryProducts.length}件`);
+      })).filter((product) => product.rank !== null && product.rank >= rankStart && product.rank <= rankEnd);
+      const actualRanks = categoryProducts.map((product) => product.rank);
+      const actualRange = actualRanks.length ? `${Math.min(...actualRanks)}〜${Math.max(...actualRanks)}位` : "該当なし";
+      diagnostics.push(`${category.name}(genreId:${category.id}, page:${page}): API取得${products.length}件 / 要求${rankStart}〜${rankEnd}位 / 実取得${actualRange}（${categoryProducts.length}件）`);
       if (!selectRankingCandidate(categoryProducts, selectionContext)) {
         categoryProducts.forEach((product) => {
           if (!product.selectionStatus) {
@@ -2263,14 +2273,13 @@ async function retryFailedRanking() {
     state.lastTriedAt = new Date().toISOString();
     showRankingProgress(`${category.name}を再取得中...`);
     try {
-      const products = filterAvailableProducts(await fetchRankingCategory(category, rankingRequestContext.limit, rankingRequestContext.requestInterval));
-      const categoryProducts = products.map((product, productIndex) => ({
+      const products = filterAvailableProducts(await fetchRankingCategory(category, rankingRequestContext.page, rankingRequestContext.requestInterval));
+      const categoryProducts = products.map((product) => applyOfficialRankingRank({
         ...product,
         categoryId: category.id,
         categoryName: category.name,
-        rank: productIndex + 1,
         fetchedAt: new Date().toISOString()
-      })).filter((product) => product.rank >= rankingRequestContext.rankStart && product.rank <= rankingRequestContext.rankEnd);
+      })).filter((product) => product.rank !== null && product.rank >= rankingRequestContext.rankStart && product.rank <= rankingRequestContext.rankEnd);
       selectRankingCandidate(categoryProducts, selectionContext);
       searchResults = [...searchResults.filter((product) => product.categoryId !== category.id), ...categoryProducts];
       state.status = "success";

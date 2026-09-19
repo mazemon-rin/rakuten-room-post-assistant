@@ -27,7 +27,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -56,6 +56,19 @@ assert(caseD.selectionScore.total >= 70, "H: strong trend product should be at l
 assert(caseB.selectionScore.trendFit !== caseA.selectionScore.trendFit, "I: accessory type mismatch must not equal exact case match");
 assert(caseA.selectionScore.total === scoring.getSelectionTotal(caseA) && caseA.selectionScore.total <= 100, "J: trend score is one 100-point total without duplicate priority add-on");
 
+const rankingRanges = [
+  [1, 1], [6, 1], [11, 1], [16, 1], [21, 1], [26, 1],
+  [31, 2], [36, 2], [41, 2], [46, 2]
+];
+rankingRanges.forEach(([start, expectedPage]) => assert(scoring.getRankingPageForRange(start) === expectedPage, `ranking page: ${start} should use page ${expectedPage}`));
+const page2First = scoring.applyOfficialRankingRank({ itemName: "page2 first", rank: 31 });
+assert(page2First.rank === 31 && page2First.apiRank === 31 && page2First.sourceRank === 31, "E: page 2 official rank remains 31");
+assert(scoring.calculateRankingScore(page2First) === 10, "E: rank 31 is not scored as rank 1");
+const sparseRanks = [31, 32, 34, 35].map((rank) => scoring.applyOfficialRankingRank({ rank }));
+assert(sparseRanks.length === 4 && sparseRanks.map((item) => item.rank).join(",") === "31,32,34,35", "F: ranking gaps are preserved");
+const unknownRank = scoring.applyOfficialRankingRank({ itemName: "unknown" });
+assert(unknownRank.rank === null && unknownRank.apiRank === null && unknownRank.sourceRank === null, "safe handling: missing API rank is not guessed");
+
 console.log(JSON.stringify({
   caseA: { trendFit: caseA.selectionScore.trendFit, opportunity: caseA.selectionScore.opportunity, total: caseA.selectionScore.total },
   caseB: { trendFit: caseB.selectionScore.trendFit, opportunity: caseB.selectionScore.opportunity, total: caseB.selectionScore.total },
@@ -64,4 +77,4 @@ console.log(JSON.stringify({
   caseE: { trendFit: caseE.selectionScore.trendFit, reviewEvidence: caseE.selectionScore.reviewEvidence, total: caseE.selectionScore.total },
   regularRankingOne: regularBefore.selectionScore.total
 }, null, 2));
-console.log("scoring cases A-J: passed");
+console.log("scoring cases A-J and ranking page cases: passed");
