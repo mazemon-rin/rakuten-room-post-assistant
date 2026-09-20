@@ -329,6 +329,28 @@ main {
   margin-bottom: 18px;
 }
 
+.affiliate-import-panel {
+  margin: 18px 0;
+}
+
+.affiliate-preview-list {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 18px;
+}
+
+.affiliate-preview-card {
+  padding: 14px 16px;
+  border-left: 5px solid var(--line);
+  background: #fffdf8;
+}
+
+.affiliate-preview-card.introduced { border-left-color: var(--green); }
+.affiliate-preview-card.other { border-left-color: #4c88c7; }
+.affiliate-preview-card.review { border-left-color: var(--yellow); }
+.affiliate-preview-card p { margin: 4px 0; }
+.affiliate-preview-card label { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
+
 .ranking-category-fieldset {
   grid-column: 1 / -1;
   min-width: 0;

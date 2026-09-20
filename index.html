@@ -166,7 +166,20 @@
       <div class="toolbar">
         <input id="historyFilter" type="search" placeholder="商品名・ジャンル・メモで検索">
         <button id="exportCsv" class="secondary-button" type="button">CSV出力</button>
+        <button id="exportSalesCsv" class="secondary-button" type="button">売上実績CSV</button>
+        <label class="file-button">楽天成果CSVを読み込む<input id="affiliateCsvInput" type="file" accept=".csv,text/csv"></label>
       </div>
+      <section id="affiliateImportPanel" class="panel affiliate-import-panel" hidden aria-labelledby="affiliateImportTitle">
+        <div class="section-heading">
+          <h3 id="affiliateImportTitle">楽天成果CSVの照合結果</h3>
+          <p id="affiliateImportMessage" class="message" role="status"></p>
+        </div>
+        <div id="affiliateImportPreview"></div>
+        <div class="button-row">
+          <button id="saveAffiliateImport" class="primary-button" type="button" disabled>確認した売上を保存</button>
+          <button id="cancelAffiliateImport" class="secondary-button" type="button">閉じる</button>
+        </div>
+      </section>
       <div id="historyList" class="record-list"></div>
     </section>
 

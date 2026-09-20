@@ -104,6 +104,7 @@ const defaultData = {
   },
   candidates: [],
   history: [],
+  sales: [],
   favorites: [],
   trendSettings: { keywords: [], updatedAt: null },
   eventSettings: { eventName: "", startDate: "", endDate: "", enabled: false }
@@ -116,6 +117,7 @@ let rankingCategoryStates = new Map();
 let rankingRequestContext = null;
 let rankingRetryInProgress = false;
 const codexPasteErrors = new Map();
+let affiliateImportDraft = [];
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -130,7 +132,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function loadData() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return { ...defaultData, ...saved, settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
+    return { ...defaultData, ...saved, sales: Array.isArray(saved?.sales) ? saved.sales : [], settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
   } catch {
     return structuredClone(defaultData);
   }
@@ -172,6 +174,10 @@ function bindForms() {
   $("#exportJson").addEventListener("click", exportJson);
   $("#importJson").addEventListener("change", importJson);
   $("#exportCsv").addEventListener("click", exportCsv);
+  $("#exportSalesCsv").addEventListener("click", exportSalesCsv);
+  $("#affiliateCsvInput").addEventListener("change", importAffiliateCsv);
+  $("#saveAffiliateImport").addEventListener("click", saveAffiliateImport);
+  $("#cancelAffiliateImport").addEventListener("click", closeAffiliateImport);
   $("#clearData").addEventListener("click", clearData);
 }
 
@@ -1437,10 +1443,263 @@ function renderHistory() {
         <p class="collection-status">投稿タイプ：${escapeHtml({ normal: "通常商品", sale: "セール商品", used: "使用済み商品", warning: "注意喚起商品" }[item.postType] || "通常商品")} / 信頼性：${escapeHtml(item.trustStatus || "未確認")}</p>
         ${item.selectedCollection || item.recommendedCollection ? `<p class="collection-status">コレクション：${escapeHtml(getCollectionById(item.selectedCollection || item.recommendedCollection)?.name || item.selectedCollection || item.recommendedCollection)}</p>` : ""}
         <p>${escapeHtml(shorten(item.introText || "", 140))}</p>
+        ${renderSalesSummary(item)}
+        ${getSalesForHistory(item.id).length ? `<div class="record-actions"><button class="secondary-button" type="button" onclick="toggleSaleHistory('${escapeAttr(item.id)}')">売上履歴を見る</button></div>` : ""}
+        <div id="sale-history-${escapeAttr(item.id)}" class="sale-history" hidden>${renderSaleHistory(item.id)}</div>
         ${item.roomUrl ? `<a href="${escapeAttr(item.roomUrl)}" target="_blank" rel="noopener noreferrer">ROOM投稿URL</a>` : ""}
       </div>
     </article>
   `).join("") : `<p class="message">投稿履歴はまだありません。</p>`;
+}
+
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [], cell = "", quoted = false;
+  const source = String(text || "").replace(/^\uFEFF/, "");
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === '"') {
+      if (quoted && source[i + 1] === '"') { cell += '"'; i += 1; }
+      else quoted = !quoted;
+    } else if (char === "," && !quoted) { row.push(cell); cell = ""; }
+    else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && source[i + 1] === "\n") i += 1;
+      row.push(cell); cell = "";
+      if (row.some((value) => value !== "")) rows.push(row);
+      row = [];
+    } else cell += char;
+  }
+  if (cell || row.length) { row.push(cell); if (row.some((value) => value !== "")) rows.push(row); }
+  return rows;
+}
+
+function normalizeAffiliateHeader(value) { return String(value || "").trim().replace(/^\uFEFF/, "").toLowerCase(); }
+function normalizeAffiliateStatus(value) {
+  const text = String(value || "").trim();
+  if (text === "0" || text.startsWith("0 -") || text.includes("未確定")) return "未確定";
+  if (text === "1" || text.startsWith("1 -") || text.includes("確定")) return "確定";
+  if (text === "2" || text.startsWith("2 -") || text.includes("破棄") || text.includes("キャンセル")) return "キャンセル";
+  return text;
+}
+
+function parseAffiliateCsv(text) {
+  const rows = parseCsvRows(text);
+  const headerIndex = rows.findIndex((row) => row.some((cell) => normalizeAffiliateHeader(cell) === "発生日"));
+  if (headerIndex < 0) throw new Error("成果CSVの実データヘッダー（発生日）が見つかりません。");
+  const headers = rows[headerIndex].map(normalizeAffiliateHeader);
+  const dataRows = rows.slice(headerIndex + 1).filter((row) => /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/.test(String(row[headers.indexOf("発生日")] || "").trim()));
+  const get = (row, name) => row[headers.indexOf(normalizeAffiliateHeader(name))] || "";
+  return dataRows.map((row) => ({
+    occurredAt: get(row, "発生日"), reward: Number(String(get(row, "成果報酬")).replace(/,/g, "")) || 0,
+    rewardRate: Number(String(get(row, "料率")).replace(/,/g, "")) || 0,
+    amount: Number(String(get(row, "売上金額")).replace(/,/g, "")) || 0,
+    category: get(row, "ジャンル名"), shopName: get(row, "ショップ名"), productName: get(row, "商品名"),
+    affiliateStatus: normalizeAffiliateStatus(get(row, "ステータス")), linkType: get(row, "リンクタイプ"), device: get(row, "デバイスタイプ"), measurementId: get(row, "計測ID")
+  }));
+}
+
+function normalizeAffiliateText(value) { return String(value || "").toLowerCase().normalize("NFKC").replace(/[\s　\-ー―‐]/g, "").replace(/[「」『』【】［］\[\]()（）]/g, ""); }
+
+function getAffiliateImportKey(row) {
+  return [row.occurredAt, row.reward, row.amount, row.shopName, row.productName, row.affiliateStatus, row.measurementId].map((value) => String(value || "").trim()).join("|");
+}
+
+function classifyAffiliateSale(row, history) {
+  const productName = normalizeAffiliateText(row.productName);
+  const shopName = normalizeAffiliateText(row.shopName);
+  const candidates = (history || []).map((item) => {
+    const title = normalizeAffiliateText(item.title || item.product?.itemName);
+    const shop = normalizeAffiliateText(item.shopName || item.product?.shopName);
+    const titleMatch = Boolean(productName && title && (productName === title || productName.includes(title) || title.includes(productName)));
+    const sharedName = !titleMatch && productName && title && [...productName].some((_, index) => productName.slice(index, index + 10).length === 10 && title.includes(productName.slice(index, index + 10)));
+    const shopMatch = Boolean(shopName && shop && shopName === shop);
+    return { item, titleMatch, shopMatch, score: (titleMatch ? 2 : 0) + (sharedName ? 1 : 0) + (shopMatch ? 1 : 0) };
+  }).filter((candidate) => candidate.score > 0).sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  let classification = "other";
+  let reason = "投稿履歴に一致する商品を確認できません。";
+  if (best?.titleMatch && best?.shopMatch) { classification = "introduced"; reason = "商品名とショップ名が投稿履歴と一致しました。"; }
+  else if (best?.score >= 1) { classification = "review"; reason = "投稿履歴に似た商品があるため、同一商品か確認してください。"; }
+  const source = normalizeAffiliateText(row.measurementId).includes("楽天room") ? "rakuten_room" : "unknown";
+  return { ...row, importKey: getAffiliateImportKey(row), classification, source, reason, matchedHistoryId: classification === "introduced" ? best.item.id : "", matchedItemCode: classification === "introduced" ? (best.item.itemCode || best.item.product?.itemCode || "") : "", candidateHistoryId: best?.item.id || "" };
+}
+
+function buildAffiliateImportPreview(rows, history) { return rows.map((row) => classifyAffiliateSale(row, history)); }
+
+function affiliateClassificationLabel(value) { return ({ introduced: "🟢 紹介商品", other: "🔵 その他購入", review: "🟡 要確認" })[value] || value; }
+
+function renderAffiliateImportPreview() {
+  const panel = $("#affiliateImportPanel");
+  const preview = $("#affiliateImportPreview");
+  panel.hidden = !affiliateImportDraft.length;
+  if (!affiliateImportDraft.length) { preview.innerHTML = ""; $("#saveAffiliateImport").disabled = true; return; }
+  preview.innerHTML = `<div class="affiliate-preview-list">${affiliateImportDraft.map((row, index) => `<article class="affiliate-preview-card ${escapeAttr(row.classification)}"><strong>${affiliateClassificationLabel(row.classification)}</strong><p>${escapeHtml(row.productName)}</p><p>${escapeHtml(row.shopName)} / ${formatYen(row.amount)} / 報酬 ${formatYen(row.reward)} / ${escapeHtml(row.affiliateStatus)}</p><p>${escapeHtml(row.reason)}${row.candidateHistoryId ? " 候補を確認できます。" : ""}</p><label>保存分類<select data-affiliate-classification="${index}"><option value="introduced" ${row.classification === "introduced" ? "selected" : ""}>紹介商品</option><option value="other" ${row.classification === "other" ? "selected" : ""}>その他購入</option><option value="review" ${row.classification === "review" ? "selected" : ""}>要確認</option></select></label>${row.candidateHistoryId ? `<label>投稿履歴候補<select data-affiliate-history="${index}"><option value="">未紐付け</option><option value="${escapeAttr(row.candidateHistoryId)}" ${row.matchedHistoryId === row.candidateHistoryId ? "selected" : ""}>候補に紐付ける</option></select></label>` : ""}</article>`).join("")}</div>`;
+  preview.querySelectorAll("[data-affiliate-classification]").forEach((select) => select.addEventListener("change", (event) => { affiliateImportDraft[Number(event.target.dataset.affiliateClassification)].classification = event.target.value; renderAffiliateImportPreview(); }));
+  preview.querySelectorAll("[data-affiliate-history]").forEach((select) => select.addEventListener("change", (event) => { const row = affiliateImportDraft[Number(event.target.dataset.affiliateHistory)]; row.matchedHistoryId = event.target.value; const item = data.history.find((historyItem) => historyItem.id === event.target.value); row.matchedItemCode = item?.itemCode || item?.product?.itemCode || ""; renderAffiliateImportPreview(); }));
+  $("#saveAffiliateImport").disabled = false;
+}
+
+function importAffiliateCsv(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      affiliateImportDraft = buildAffiliateImportPreview(parseAffiliateCsv(reader.result), data.history);
+      $("#affiliateImportMessage").textContent = `${affiliateImportDraft.length}件を解析しました。内容を確認してから保存してください。`;
+      renderAffiliateImportPreview();
+    } catch (error) { $("#affiliateImportMessage").textContent = error.message; affiliateImportDraft = []; renderAffiliateImportPreview(); }
+  };
+  reader.readAsText(file, "UTF-8");
+}
+
+function saveAffiliateImport() {
+  if (!affiliateImportDraft.length) return;
+  const existing = new Map((data.sales || []).map((sale) => [sale.importKey, sale]));
+  affiliateImportDraft.forEach((row) => {
+    const historyItem = row.matchedHistoryId ? data.history.find((item) => item.id === row.matchedHistoryId) : null;
+    const record = existing.get(row.importKey) || { id: crypto.randomUUID(), createdAt: new Date().toISOString() };
+    Object.assign(record, { importKey: row.importKey, source: row.source, classification: row.classification, historyId: row.classification === "introduced" ? row.matchedHistoryId : "", itemCode: row.classification === "introduced" ? row.matchedItemCode : "", occurredAt: row.occurredAt, amount: row.amount, reward: row.reward, rewardRate: row.rewardRate, quantity: 1, status: row.affiliateStatus, category: row.category, shopName: row.shopName, productName: row.productName, linkType: row.linkType, device: row.device, measurementId: row.measurementId, productSnapshot: historyItem ? getHistoryProductSnapshot(historyItem) : { title: row.productName, shopName: row.shopName, categoryName: row.category, postedAt: "" }, daysFromPostToSale: historyItem ? calculateDaysFromPostToSale(historyItem.postedAt, row.occurredAt) : "" });
+    if (!existing.has(row.importKey)) data.sales.unshift(record);
+  });
+  saveData(); closeAffiliateImport(); toast("確認した売上を保存しました。");
+}
+
+function closeAffiliateImport() { affiliateImportDraft = []; $("#affiliateCsvInput").value = ""; $("#affiliateImportMessage").textContent = ""; renderAffiliateImportPreview(); }
+
+const SALE_STATUSES = ["未確定", "確定", "キャンセル"];
+
+function getSalesForHistory(historyId) {
+  return (data.sales || []).filter((sale) => sale.historyId === historyId);
+}
+
+function getValidSalesSummary(historyId) {
+  return getSalesForHistory(historyId).filter((sale) => sale.status !== "キャンセル").reduce((summary, sale) => ({
+    amount: summary.amount + Number(sale.amount || 0),
+    reward: summary.reward + Number(sale.reward || 0),
+    quantity: summary.quantity + Number(sale.quantity || 0)
+  }), { amount: 0, reward: 0, quantity: 0 });
+}
+
+function renderSalesSummary(item) {
+  const sales = getSalesForHistory(item.id);
+  if (!sales.length) return "";
+  const summary = getValidSalesSummary(item.id);
+  return `<div class="sales-summary"><strong>✓ 売上実績あり</strong><br>売上合計：${formatYen(summary.amount)}<br>成果報酬：${formatYen(summary.reward)}<br>売上件数：${summary.quantity}件</div>`;
+}
+
+function renderSaleHistory(historyId) {
+  const sales = getSalesForHistory(historyId);
+  return sales.length ? `<h4>売上履歴</h4><ul>${sales.map((sale) => `<li>${escapeHtml(formatSaleDate(sale.occurredAt))} / 売上 ${formatYen(sale.amount)} / 報酬 ${formatYen(sale.reward)} / ${sale.quantity}件 / ${escapeHtml(sale.status)}</li>`).join("")}</ul>` : "";
+}
+
+function formatSaleDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("ja-JP", { dateStyle: "short", timeStyle: "short" });
+}
+
+function toDateTimeLocalValue(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function getHistoryProductSnapshot(historyItem) {
+  const product = historyItem.product || {};
+  const rank = historyItem.rank ?? historyItem.apiRank ?? historyItem.sourceRank ?? product.rank ?? product.apiRank ?? product.sourceRank ?? "";
+  const selectionScore = getSelectionTotal(historyItem) || getSelectionTotal(product);
+  return {
+    title: historyItem.title || product.itemName || "",
+    shopName: historyItem.shopName || product.shopName || "",
+    itemUrl: historyItem.itemUrl || product.itemUrl || product.affiliateUrl || "",
+    categoryName: historyItem.categoryName || product.categoryName || "",
+    postedAt: historyItem.postedAt || "",
+    rank,
+    apiRank: historyItem.apiRank ?? product.apiRank ?? "",
+    sourceRank: historyItem.sourceRank ?? product.sourceRank ?? "",
+    selectionScore,
+    selectionScoreTotal: historyItem.selectionScoreTotal ?? product.selectionScoreTotal ?? selectionScore,
+    selectionGrade: historyItem.selectionGrade || product.selectionGrade || "",
+    selectionVersion: historyItem.selectionVersion || product.selectionVersion || "",
+    productType: (historyItem.matchedTrendKeywords || product.matchedTrendKeywords || []).length ? "trend" : "regular",
+    matchedTrendKeywords: [...(historyItem.matchedTrendKeywords || product.matchedTrendKeywords || [])],
+    postType: historyItem.postType || "",
+    selectedCollection: historyItem.selectedCollection || "",
+    price: historyItem.price ?? product.itemPrice ?? ""
+  };
+}
+
+function openSaleForm(historyId) {
+  const item = data.history.find((historyItem) => historyItem.id === historyId);
+  if (!item) return;
+  const itemCode = item.itemCode || item.product?.itemCode || "";
+  if (!itemCode) {
+    toast("ITEM_CODEがないため、安全に売上を紐付けできません。");
+    return;
+  }
+  $("#saleHistoryId").value = historyId;
+  $("#saleOccurredAt").value = toDateTimeLocalValue();
+  $("#saleAmount").value = "";
+  $("#saleReward").value = "";
+  $("#saleQuantity").value = "1";
+  $("#saleStatus").value = "未確定";
+  $("#saleProductSummary").innerHTML = `<strong>${escapeHtml(item.title || item.product?.itemName || "")}</strong><br>ショップ：${escapeHtml(item.shopName || item.product?.shopName || "")}<br>ITEM_CODE：${escapeHtml(itemCode)}<br>投稿日：${escapeHtml(formatDate(item.postedAt))}`;
+  $("#saleFormMessage").textContent = "";
+  $("#saleFormPanel").hidden = false;
+  $("#saleFormPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeSaleForm() {
+  $("#saleFormPanel").hidden = true;
+  $("#saleForm").reset();
+}
+
+function calculateDaysFromPostToSale(postedAt, occurredAt) {
+  const posted = new Date(postedAt);
+  const occurred = new Date(occurredAt);
+  if (!postedAt || !occurredAt || Number.isNaN(posted.getTime()) || Number.isNaN(occurred.getTime())) return "";
+  return Math.max(0, Math.floor((occurred.getTime() - posted.getTime()) / 86400000));
+}
+
+function saveSaleRecord(event) {
+  event.preventDefault();
+  const historyId = $("#saleHistoryId").value;
+  const item = data.history.find((historyItem) => historyItem.id === historyId);
+  const itemCode = item?.itemCode || item?.product?.itemCode || "";
+  const occurredAt = $("#saleOccurredAt").value;
+  const amount = Number($("#saleAmount").value);
+  const reward = Number($("#saleReward").value);
+  const quantity = Number($("#saleQuantity").value);
+  const status = $("#saleStatus").value;
+  const invalid = !item || !itemCode || !occurredAt || !Number.isFinite(amount) || amount < 0 || !Number.isFinite(reward) || reward < 0 || !Number.isInteger(quantity) || quantity < 1 || !SALE_STATUSES.includes(status);
+  if (invalid) {
+    $("#saleFormMessage").textContent = "売上発生日時、金額、報酬、件数、ステータスを確認してください。ITEM_CODEがない商品には登録できません。";
+    return;
+  }
+  const occurredIso = new Date(occurredAt).toISOString();
+  data.sales.unshift({
+    id: crypto.randomUUID(),
+    historyId,
+    itemCode,
+    occurredAt: occurredIso,
+    amount,
+    reward,
+    quantity,
+    status,
+    createdAt: new Date().toISOString(),
+    productSnapshot: getHistoryProductSnapshot(item),
+    daysFromPostToSale: calculateDaysFromPostToSale(item.postedAt, occurredIso)
+  });
+  saveData();
+  closeSaleForm();
+  toast("売上実績を保存しました。");
+}
+
+function toggleSaleHistory(historyId) {
+  const element = $(`#sale-history-${historyId}`);
+  if (element) element.hidden = !element.hidden;
 }
 
 function updateCandidate(id, field, value) {
@@ -1937,7 +2196,7 @@ function importJson(event) {
       if (!Array.isArray(imported.candidates) || !Array.isArray(imported.history) || typeof imported.settings !== "object") {
         throw new Error("バックアップ形式が違います。");
       }
-      data = { ...defaultData, ...imported };
+      data = { ...defaultData, ...imported, sales: Array.isArray(imported.sales) ? imported.sales : [] };
       saveData();
       fillSettings();
       toast("バックアップを復元しました。");
@@ -1953,6 +2212,29 @@ function exportCsv() {
   data.history.forEach((item) => rows.push([formatDate(item.postedAt), item.title, item.genreId, item.shopName, item.postType, item.trustStatus, getSelectionTotal(item), item.selectionVersion || "", getCollectionById(item.selectedCollection || item.recommendedCollection)?.name || "", item.introText, item.hashTags, item.roomUrl, item.memo]));
   const csv = rows.map((row) => row.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(",")).join("\n");
   downloadFile(`room-history-${dateStamp()}.csv`, `\uFEFF${csv}`, "text/csv");
+}
+
+function getSalesRank(sale) {
+  return sale.productSnapshot?.sourceRank || sale.productSnapshot?.apiRank || sale.productSnapshot?.rank || "";
+}
+
+function getSalesRankBand(rank) {
+  const value = Number(rank);
+  if (!Number.isFinite(value) || value <= 0) return "順位なし";
+  if (value <= 30) return "1〜30位";
+  if (value <= 50) return "31〜50位";
+  return "その他";
+}
+
+function exportSalesCsv() {
+  const rows = [["売上発生日時", "ITEM_CODE", "商品名", "ショップ名", "商品URL", "売上金額", "成果報酬", "売上件数", "成果ステータス", "投稿日", "投稿から購入までの日数", "カテゴリー", "投稿タイプ", "選定スコア", "ランキング順位", "ランキング区分", "トレンド商品", "トレンドキーワード"]];
+  (data.sales || []).forEach((sale) => {
+    const snapshot = sale.productSnapshot || {};
+    const rank = getSalesRank(sale);
+    rows.push([sale.occurredAt, sale.itemCode, snapshot.title, snapshot.shopName, snapshot.itemUrl, sale.amount, sale.reward, sale.quantity, sale.status, snapshot.postedAt, sale.daysFromPostToSale ?? calculateDaysFromPostToSale(snapshot.postedAt, sale.occurredAt), snapshot.categoryName, snapshot.postType, snapshot.selectionScoreTotal ?? snapshot.selectionScore ?? "", rank, getSalesRankBand(rank), snapshot.productType === "trend" ? "はい" : "いいえ", (snapshot.matchedTrendKeywords || []).join("、")]);
+  });
+  const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+  downloadFile(`room-sales-${dateStamp()}.csv`, `\uFEFF${csv}`, "text/csv");
 }
 
 function clearData() {
