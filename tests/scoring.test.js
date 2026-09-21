@@ -27,7 +27,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, validateCombinedSnsLinks, isLikelyRoomUrl, getRoomUrlNotice, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -89,6 +89,7 @@ assert(scoring.buildSnsPrompt(withRoomUrl, "x", "discovery").includes(roomUrl), 
 assert(scoring.buildSnsPrompt(withRoomUrl, "threads", "problem").includes(roomUrl), "SNS URL: Threads prompt includes saved ROOM URL");
 const withRoomUrlCombinedPrompt = scoring.buildCombinedContentPrompt({ ...withRoomUrl, snsPosts: scoring.createSnsPosts() });
 assert(withRoomUrlCombinedPrompt.includes(roomUrl) && withRoomUrlCombinedPrompt.includes("X_POST") && withRoomUrlCombinedPrompt.includes("THREADS_POST"), "SNS URL: combined prompt includes saved ROOM URL for both posts");
+assert(scoring.buildCombinedSnsPrompt({ ...withRoomUrl, snsPosts: scoring.createSnsPosts() }).includes("===X_POST===") && scoring.buildCombinedSnsPrompt({ ...withRoomUrl, snsPosts: scoring.createSnsPosts() }).includes("===END_THREADS_POST==="), "SNS workflow: combined SNS prompt uses X and Threads markers");
 assert(scoring.buildSnsPrompt(withRoomUrl, "x", "discovery").includes("必ず1回だけそのまま記載") && scoring.buildSnsPrompt(withRoomUrl, "threads", "problem").includes("省略・変更・短縮・推測は禁止"), "SNS URL: individual prompts require the exact URL once");
 assert(withRoomUrlCombinedPrompt.includes("X_POSTとTHREADS_POSTの両方") && withRoomUrlCombinedPrompt.includes("1回だけそのまま記載"), "SNS URL: combined prompt requires the exact URL in both posts");
 assert(withRoomUrlCombinedPrompt.includes("変動する可能性") && withRoomUrlCombinedPrompt.includes("現在有効であることが確認できない場合"), "SNS sale: changing sale data must not be asserted without confirmation");
@@ -100,6 +101,25 @@ assert(missingUrlPrompt.includes("投稿本文には「ROOM個別URL未設定」
 assert(scoring.validateCombinedSnsLinks(snsItem, { xText: "本文", threadsText: "本文" }) === "" && scoring.validateCombinedSnsLinks(snsItem, { xText: "ROOM個別URL未設定", threadsText: "本文" }).includes("URL導線"), "SNS URL: missing URL does not create placeholder text");
 assert(scoring.isLikelyRoomUrl(roomUrl) && !scoring.isLikelyRoomUrl("https://example.com/item"), "SNS URL: format check");
 assert(scoring.getRoomUrlNotice({ postStatus: "投稿済み", roomUrl: "" })[0].includes("未登録"), "SNS URL: posted item without URL is clearly indicated");
+assert(scoring.getRoomUrlNotice({ postStatus: "投稿待ち", roomUrl: "" })[0].includes("商品個別URLを入力"), "SNS workflow: URL is requested before registration");
+const xPromptWithUrl = scoring.buildSnsPrompt(withRoomUrl, "x", "discovery");
+assert(xPromptWithUrl.includes("140文字以内") && xPromptWithUrl.includes("改行を含む"), "SNS workflow: X prompt includes the full 140-character limit");
+const threadsPromptWithUrl = scoring.buildSnsPrompt(withRoomUrl, "threads", "problem");
+assert(!threadsPromptWithUrl.includes("140文字以内"), "SNS workflow: Threads has no X character limit");
+const shortX = `発見ポイント\n${roomUrl}\n#PR`;
+const shortThreads = `困りごとから紹介\n${roomUrl}\n#PR`;
+assert(scoring.validateSnsPostText(withRoomUrl, "x", shortX) === "", "SNS workflow: valid X text passes URL, PR, and length checks");
+assert(scoring.validateSnsPostText(withRoomUrl, "threads", shortThreads) === "", "SNS workflow: valid Threads text passes URL and PR checks");
+assert(scoring.validateSnsPostText(withRoomUrl, "x", `${"あ".repeat(141)}\n${roomUrl}\n#PR`).includes("/140"), "SNS workflow: overlong X text is rejected");
+assert(scoring.validateSnsPostText(withRoomUrl, "x", "本文\n#PR").includes("ROOM個別URL"), "SNS workflow: X without saved URL is rejected");
+assert(scoring.validateSnsPostText(withRoomUrl, "x", `本文\n${roomUrl}`).includes("#PR"), "SNS workflow: X without PR disclosure is rejected");
+assert(scoring.validateSnsPostText(withRoomUrl, "threads", `本文\n${roomUrl}\n#PR\n${roomUrl}`).includes("1回だけ"), "SNS workflow: duplicate Threads URL is rejected");
+const snsOnlyResult = scoring.parseSnsPostsResult(`===X_POST===\n${shortX}\n===END_X_POST===\n===THREADS_POST===\n${shortThreads}\n===END_THREADS_POST===`);
+assert(snsOnlyResult.xText === shortX && snsOnlyResult.threadsText === shortThreads && scoring.validateSnsPostsResult(withRoomUrl, snsOnlyResult) === "", "SNS workflow: X and Threads result format parses and validates");
+assert(scoring.validateSnsPostsResult(withRoomUrl, { xText: "本文\n#PR", threadsText: shortThreads }).includes("ROOM個別URL"), "SNS workflow: incomplete X result is rejected without overwrite");
+const preservedCopyItem = { ...withRoomUrl, introText: "保存済みROOM紹介文", hashTags: "#保存済み", snsPosts: scoring.createSnsPosts() };
+scoring.applySnsPostsToItem(preservedCopyItem, snsOnlyResult);
+assert(preservedCopyItem.introText === "保存済みROOM紹介文" && preservedCopyItem.hashTags === "#保存済み" && preservedCopyItem.snsPosts.x.text === shortX && preservedCopyItem.snsPosts.threads.text === shortThreads, "SNS workflow: SNS-only apply preserves ROOM copy and hashtags");
 const combinedItem = { ...snsItem, snsPosts: { x: { postType: "info" }, threads: { postType: "problem" } } };
 const combinedPrompt = scoring.buildCombinedContentPrompt(combinedItem);
 assert(combinedPrompt.includes("ROOM紹介文") && combinedPrompt.includes("ROOMハッシュタグ") && combinedPrompt.includes("X投稿文") && combinedPrompt.includes("Threads投稿文"), "SNS combined: all four generation instructions are included");

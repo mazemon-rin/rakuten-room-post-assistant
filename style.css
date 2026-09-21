@@ -696,8 +696,23 @@ textarea {
   color: #a83d2a;
 }
 
+.room-url-status-pending {
+  color: #9a5b13;
+}
+
 .room-url-status-saved {
   color: #216b4b;
+}
+
+.room-url-ready {
+  margin: 8px 0 0;
+  color: #216b4b;
+  font-weight: 700;
+}
+
+.sns-count-warning {
+  color: #a83d2a;
+  font-weight: 700;
 }
 
 .combined-content-generator textarea {

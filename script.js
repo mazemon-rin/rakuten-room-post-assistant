@@ -121,6 +121,7 @@ const SNS_POST_TYPES = Object.freeze({
   sale: "セール型",
   experience: "体験型"
 });
+const SNS_X_MAX_LENGTH = 140;
 
 function createSnsPosts(existing = {}) {
   const makePost = (post = {}, defaultType) => ({
@@ -1182,13 +1183,16 @@ function renderSnsPostEditor(item, medium, label) {
   const options = Object.entries(SNS_POST_TYPES).map(([value, text]) => `<option value="${value}" ${post.postType === value ? "selected" : ""} ${value === "experience" && item.usageStatus !== "used" ? "disabled" : ""}>${text}</option>`).join("");
   const promptId = `sns-prompt-${medium}-${item.id}`;
   const textId = `sns-text-${medium}-${item.id}`;
+  const textLength = Array.from(post.text || "").length;
+  const lengthLabel = medium === "x" ? `${textLength} / ${SNS_X_MAX_LENGTH}` : textLength;
+  const lengthWarning = medium === "x" && textLength > SNS_X_MAX_LENGTH ? "140文字を超えています" : "";
   return `<section class="sns-post-editor" data-sns-medium="${medium}">
     <h4>${label}</h4>
     <label>投稿タイプ<select onchange="saveSnsPost('${item.id}', '${medium}', 'postType', this.value); generateSnsPrompt('${item.id}', '${medium}')">${options}</select></label>
     <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(post.prompt || "")}</textarea></label>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="generateSnsPrompt('${item.id}', '${medium}')">生成プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">生成プロンプトをコピー</button></div>
     <label>生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', '${medium}', 'text', this.value)">${escapeHtml(post.text || "")}</textarea></label>
-    <p>文字数：<span data-sns-count="${textId}">${Array.from(post.text || "").length}</span></p>
+    <p>文字数：<span data-sns-count="${textId}" class="${lengthWarning ? "sns-count-warning" : ""}">${lengthLabel}</span> <span data-sns-warning="${textId}" class="sns-count-warning">${lengthWarning}</span></p>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${textId}')">文章をコピー</button><button class="secondary-button" type="button" onclick="markSnsPosted('${item.id}', '${medium}')">投稿済みにする</button></div>
   </section>`;
 }
@@ -1214,10 +1218,12 @@ function renderSnsStatusSummary(item) {
 
 function renderSnsEditor(item) {
   const posts = item.snsPosts || createSnsPosts();
-  return `<details class="sns-posts"><summary>SNS文章（X：${getSnsPostStatus(posts.x)} / Threads：${getSnsPostStatus(posts.threads)}）</summary>
+  return `<details id="sns-editor-${escapeAttr(item.id)}" class="sns-posts"><summary>SNS文章（X：${getSnsPostStatus(posts.x)} / Threads：${getSnsPostStatus(posts.threads)}）</summary>
     ${renderSnsPostEditor(item, "x", "X")}
     ${renderSnsPostEditor(item, "threads", "Threads")}
     <button class="primary-button" type="button" onclick="generateCombinedSnsPrompt('${item.id}')">X・Threads生成プロンプトをまとめてコピー</button>
+    <label>AI生成結果をまとめて貼り付け<textarea id="sns-posts-result-${item.id}" placeholder="===X_POST===\n...\n===END_X_POST===\n\n===THREADS_POST===\n...\n===END_THREADS_POST==="></textarea></label>
+    <button class="secondary-button" type="button" onclick="applySnsPostsResult('${item.id}')">X・Threadsに反映</button>
   </details>`;
 }
 
@@ -1227,7 +1233,9 @@ function renderRoomUrlEditor(item) {
   return `<div class="room-url-editor" aria-label="ROOM個別URL設定">
     <strong>ROOM個別URL</strong>
     <p id="room-url-status-${escapeAttr(item.id)}" class="room-url-status room-url-status-${noticeType}">${escapeHtml(notice)}</p>
-    <label>ROOM個別URLを入力<input type="url" value="${escapeAttr(roomUrl)}" placeholder="https://room.rakuten.co.jp/room_xxxxx/1700..." oninput="saveRoomUrl('${item.id}', this.value)"></label>
+    <label>ROOM個別URLを入力<input id="room-url-input-${escapeAttr(item.id)}" type="url" value="${escapeAttr(roomUrl)}" placeholder="https://room.rakuten.co.jp/room_xxxxx/1700..." oninput="updateRoomUrlInputState('${item.id}', this.value)"></label>
+    <div class="record-actions"><button id="room-url-register-${escapeAttr(item.id)}" class="secondary-button" type="button" onclick="registerRoomUrl('${item.id}')" ${roomUrl ? "" : "disabled"}>登録完了</button></div>
+    ${roomUrl && item.snsPosts?.x?.prompt && item.snsPosts?.threads?.prompt ? `<p class="room-url-ready">X・Threads文章生成準備完了</p>` : ""}
   </div>`;
 }
 
@@ -1903,7 +1911,7 @@ function isLikelyRoomUrl(value = "") {
 
 function getRoomUrlNotice(item = {}) {
   const roomUrl = String(item.roomUrl || "").trim();
-  if (!roomUrl) return [item.status === "投稿済み" || item.postStatus === "投稿済み" ? "ROOM投稿済みですが、個別URLが未登録です" : "ROOM個別URL未設定", "missing"];
+  if (!roomUrl) return [item.status === "投稿済み" || item.postStatus === "投稿済み" ? "ROOM投稿済みですが、個別URLが未登録です。商品個別URLを入力してください" : "ROOM投稿後、商品個別URLを入力してください", "missing"];
   if (!isLikelyRoomUrl(roomUrl)) return ["楽天ROOMの個別URLではない可能性があります。形式を確認してください。", "warning"];
   return ["ROOM個別URL登録済み", "saved"];
 }
@@ -1917,6 +1925,10 @@ function getSalePromptRule() {
   return "価格、クーポン、ポイント倍率、セール情報は変動する可能性がある。現在有効であることが確認できない場合は、SNS投稿文へ積極的に使用しない。商品名に含まれているだけのセール表現を、現在有効な情報として断定しない。アプリ側で確認済みとして保持された情報がある場合だけ、事実として自然に反映する。";
 }
 
+function getXLengthPromptRule() {
+  return `Xの投稿全文（本文、導線文、ROOM個別URL、#PR、#楽天ROOMなどのハッシュタグ、改行を含む）を${SNS_X_MAX_LENGTH}文字以内にする。登録済みROOM個別URLと#PRは削除せず、超過しそうな場合は不要なハッシュタグ、セール情報、補足説明、特徴の数、導線文の順に短くする。`;
+}
+
 function getSnsTypeSpecificRule(medium, postType) {
   if (postType === "problem") return "商品説明から合理的に導ける、日常の具体的な小さな困りごとを1つだけ抽出し、冒頭1〜2文に置く。商品説明の単純な言い換えや一般論ではなく、「〜って意外と困りますよね」「〜になることありませんか」のような一般的な日常場面にする。「私は困っていました」「いつもこうなります」など、生成者自身の実体験を作らない。";
   if (postType === "discovery") return "商品情報の中から、知らなかった・そんな方法があるのか・そこまで対応しているのかと思える発見性の高い特徴を1つだけ選び、冒頭のフック候補にする。商品名やスペックの羅列から始めず、特徴は商品情報に明記された範囲に限定する。";
@@ -1927,7 +1939,7 @@ function buildSnsPrompt(item, medium, postType) {
   const typeLabel = SNS_POST_TYPES[postType] || SNS_POST_TYPES.discovery;
   const isX = medium === "x";
   const baseRules = isX
-    ? "X向け。短めにし、最初の1〜2行で興味を引く。商品名の羅列から始めず、広告っぽさを抑える。絵文字は少なめ。#PRを付け、必要に応じて#楽天ROOMを付ける。"
+    ? `X向け。短めにし、最初の1〜2行で興味を引く。商品名の羅列から始めず、広告っぽさを抑える。絵文字は少なめ。#PRを付け、必要に応じて#楽天ROOMを付ける。${getXLengthPromptRule()}`
     : "Threads向け。Xより少し長めで会話調にする。共感・困りごと・発見から入り、なぜ気になったかを伝える。売り込み感を弱くし、X文章の単純な長文化にしない。絵文字は少なめ。#PRを付ける。";
   const rules = `${baseRules} ${getSnsTypeSpecificRule(medium, postType)} ${getRoomUrlPromptRule(item.roomUrl || "")}`;
   const usageRule = item.usageStatus === "used"
@@ -1938,7 +1950,7 @@ function buildSnsPrompt(item, medium, postType) {
 
 function buildCombinedSnsPrompt(item) {
   const posts = item.snsPosts || createSnsPosts();
-  return `次の商品について、X用とThreads用のSNS投稿文章を別々に作成してください。\n\n【X】投稿タイプ：${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}\n${buildSnsPrompt(item, "x", posts.x.postType)}\n\n【Threads】投稿タイプ：${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}\n${buildSnsPrompt(item, "threads", posts.threads.postType)}\n\n出力形式：X:（X本文）\n\nThreads:（Threads本文）`;
+  return `次の商品について、X用とThreads用のSNS投稿文章を別々に作成してください。\n\n【X】投稿タイプ：${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}\n${buildSnsPrompt(item, "x", posts.x.postType)}\n\n【Threads】投稿タイプ：${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}\n${buildSnsPrompt(item, "threads", posts.threads.postType)}\n\n次の区切りをそのまま使って、XとThreadsだけを返してください。ROOM紹介文とハッシュタグは返さないでください。\n===X_POST===\nX本文\n===END_X_POST===\n\n===THREADS_POST===\nThreads本文\n===END_THREADS_POST===`;
 }
 
 function buildCombinedContentPrompt(item) {
@@ -1946,11 +1958,11 @@ function buildCombinedContentPrompt(item) {
   const posts = item.snsPosts || createSnsPosts();
   const context = buildGenerationContext(product, item.usageStatus || "不明");
   const itemUrl = item.itemUrl || product.itemUrl || product.affiliateUrl || "";
-  const roomUrl = item.roomUrl || "ROOM個別URL未設定";
+  const roomUrl = item.roomUrl || "";
   const usageRule = item.usageStatus === "used"
     ? "usageStatusはused。使用体験を書く場合も、利用者が入力した事実の範囲だけに限定する。"
     : "usageStatusはusedではない。使ってみた、買ってみた、愛用しています、使いやすかった、おすすめです、買ってよかった等の使用経験・断定を絶対に書かない。便利そう、気になりました、チェックしておきたい等の安全な表現を使う。";
-  const xRules = `Xは短め、冒頭の1〜2行を重視し、商品名の羅列から始めない。${getSnsTypeSpecificRule("x", posts.x.postType)} 投稿タイプは${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}（${posts.x.postType}）。絵文字は少なめ、#PRを付け、必要なら#楽天ROOMを付ける。`;
+  const xRules = `Xは短め、冒頭の1〜2行を重視し、商品名の羅列から始めない。${getSnsTypeSpecificRule("x", posts.x.postType)} 投稿タイプは${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}（${posts.x.postType}）。絵文字は少なめ、#PRを付け、必要なら#楽天ROOMを付ける。${getXLengthPromptRule()}`;
   const threadsRules = `ThreadsはXより少し長めの会話調にし、共感・困りごと・発見から始める。商品名や価格だけで始めず、なぜ気になったかを伝え、売り込み感を弱くする。Xの単純な長文化にしない。${getSnsTypeSpecificRule("threads", posts.threads.postType)} 投稿タイプは${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}（${posts.threads.postType}）。絵文字は少なめ、#PRを付ける。`;
   return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\n${getRoomUrlPromptRule(roomUrl)}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、対象者・困りごと・特徴・利用場面が伝わる自然な紹介文を作る。未使用または不明の商品は体験談を書かない。\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\n${getSalePromptRule()}\nURL未設定時は、投稿本文に「ROOM個別URL未設定」と書かず、URL部分を省略する。登録済みURLがある場合は、X_POSTとTHREADS_POSTの両方へ登録URLを1回だけそのまま記載する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_THREADS_POST===`;
 }
@@ -1984,6 +1996,60 @@ function validateCombinedSnsLinks(item, parsed) {
   return "";
 }
 
+function validateSnsPostText(item, medium, text) {
+  const value = String(text || "").trim();
+  if (!value) return `${medium === "x" ? "X" : "Threads"}投稿文が空です。`;
+  if (!value.includes("#PR")) return `${medium === "x" ? "X" : "Threads"}投稿に#PRがありません。`;
+  if (medium === "x" && Array.from(value).length > SNS_X_MAX_LENGTH) {
+    return `X投稿が${Array.from(value).length}文字を超えています（${Array.from(value).length}/${SNS_X_MAX_LENGTH}）。`;
+  }
+  const roomUrl = String(item.roomUrl || "").trim();
+  if (roomUrl && countTextOccurrences(value, roomUrl) !== 1) {
+    return `${medium === "x" ? "X" : "Threads"}投稿に登録済みROOM個別URLを1回だけ含めてください。`;
+  }
+  if (!roomUrl && value.includes("ROOM個別URL未設定")) {
+    return "ROOM個別URL未設定という文言をSNS本文へ入れず、URL導線を省略してください。";
+  }
+  return "";
+}
+
+function parseSnsPostsResult(rawText = "") {
+  const readBlock = (name) => rawText.match(new RegExp(`===${name}===\\s*([\\s\\S]*?)\\s*===END_${name}===`))?.[1]?.trim() || "";
+  return { xText: readBlock("X_POST"), threadsText: readBlock("THREADS_POST") };
+}
+
+function validateSnsPostsResult(item, parsed) {
+  return validateSnsPostText(item, "x", parsed.xText) || validateSnsPostText(item, "threads", parsed.threadsText);
+}
+
+function applySnsPostsToItem(item, parsed) {
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts.x.text = parsed.xText;
+  item.snsPosts.x.status = "draft";
+  item.snsPosts.threads.text = parsed.threadsText;
+  item.snsPosts.threads.status = "draft";
+  return item;
+}
+
+function applySnsPostsResult(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  const input = document.querySelector(`#sns-posts-result-${id}`);
+  if (!item || !input) return;
+  const parsed = parseSnsPostsResult(input.value || "");
+  if (!parsed.xText || !parsed.threadsText) {
+    toast("X_POSTとTHREADS_POSTを確認できません。既存のSNS文章は保存していません。");
+    return;
+  }
+  const validationError = validateSnsPostsResult(item, parsed);
+  if (validationError) {
+    toast(`${validationError} 既存のSNS文章は保存していません。`);
+    return;
+  }
+  applySnsPostsToItem(item, parsed);
+  saveData();
+  toast("X・Threads文章を保存しました。ROOM紹介文とハッシュタグは変更していません。");
+}
+
 function generateCombinedContentPrompt(id) {
   const candidate = data.candidates.find((item) => item.id === id);
   if (!candidate) return;
@@ -2011,6 +2077,13 @@ function applyCombinedSnsResult(id) {
     codexPasteErrors.set(id, linkError);
     renderCandidates();
     toast(linkError);
+    return;
+  }
+  const snsResultError = validateSnsPostsResult(candidate, parsed);
+  if (snsResultError) {
+    codexPasteErrors.set(id, snsResultError);
+    renderCandidates();
+    toast(`${snsResultError} 既存データは保存していません。`);
     return;
   }
   const copyError = validateGeneratedCopy(parsed.introText, candidate);
@@ -2049,33 +2122,56 @@ function saveSnsPost(id, medium, field, value) {
     item.snsPosts[medium].status = "draft";
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     const counter = document.querySelector(`[data-sns-count="sns-text-${medium}-${id}"]`);
-    if (counter) counter.textContent = Array.from(value || "").length;
+    const length = Array.from(value || "").length;
+    if (counter) {
+      counter.textContent = medium === "x" ? `${length} / ${SNS_X_MAX_LENGTH}` : length;
+      counter.classList.toggle("sns-count-warning", medium === "x" && length > SNS_X_MAX_LENGTH);
+    }
+    const warning = document.querySelector(`[data-sns-warning="sns-text-${medium}-${id}"]`);
+    if (warning) warning.textContent = medium === "x" && length > SNS_X_MAX_LENGTH ? "140文字を超えています" : "";
     return;
   }
   saveData();
 }
 
-function saveRoomUrl(id, value) {
+function updateRoomUrlInputState(id, value) {
   const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
   if (!item) return;
-  item.roomUrl = String(value || "").trim();
-  item.snsPosts = createSnsPosts(item.snsPosts);
-  if (item.snsPosts.x.prompt) item.snsPosts.x.prompt = buildSnsPrompt(item, "x", item.snsPosts.x.postType);
-  if (item.snsPosts.threads.prompt) item.snsPosts.threads.prompt = buildSnsPrompt(item, "threads", item.snsPosts.threads.postType);
-  if (item.combinedPrompt) item.combinedPrompt = buildCombinedContentPrompt(item);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  const inputValue = String(value || "").trim();
+  const registerButton = document.querySelector(`#room-url-register-${id}`);
   const status = document.querySelector(`#room-url-status-${id}`);
+  if (registerButton) registerButton.disabled = !inputValue;
   if (status) {
-    const [notice, noticeType] = getRoomUrlNotice(item);
+    const isSavedValue = inputValue && inputValue === String(item.roomUrl || "").trim();
+    const notice = isSavedValue ? getRoomUrlNotice(item)[0] : inputValue ? "ROOM個別URL入力済み・未登録" : getRoomUrlNotice(item)[0];
+    const noticeType = isSavedValue ? getRoomUrlNotice(item)[1] : inputValue ? "pending" : "missing";
     status.textContent = notice;
     status.className = `room-url-status room-url-status-${noticeType}`;
   }
-  const xPrompt = document.querySelector(`#sns-prompt-x-${id}`);
-  const threadsPrompt = document.querySelector(`#sns-prompt-threads-${id}`);
-  const combinedPrompt = document.querySelector(`#combined-sns-prompt-${id}`);
-  if (xPrompt) xPrompt.value = item.snsPosts.x.prompt;
-  if (threadsPrompt) threadsPrompt.value = item.snsPosts.threads.prompt;
-  if (combinedPrompt) combinedPrompt.value = item.combinedPrompt || "";
+}
+
+function registerRoomUrl(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  if (!item) return;
+  const input = document.querySelector(`#room-url-input-${id}`);
+  const roomUrl = String(input?.value || "").trim();
+  if (!roomUrl) {
+    toast("ROOM個別URLを入力してください。");
+    return;
+  }
+  item.roomUrl = roomUrl;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts.x.prompt = buildSnsPrompt(item, "x", item.snsPosts.x.postType);
+  item.snsPosts.threads.prompt = buildSnsPrompt(item, "threads", item.snsPosts.threads.postType);
+  item.snsPosts.x.generatedAt = item.snsPosts.threads.generatedAt = new Date().toISOString();
+  saveData();
+  const snsEditor = document.querySelector(`#sns-editor-${id}`);
+  if (snsEditor) {
+    snsEditor.open = true;
+    snsEditor.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  const [notice, noticeType] = getRoomUrlNotice(item);
+  toast(noticeType === "warning" ? `${notice} URLは保存しました。` : "ROOM個別URLを登録し、X・Threads文章生成の準備が完了しました。");
 }
 
 function generateSnsPrompt(id, medium) {
@@ -2105,6 +2201,11 @@ function markSnsPosted(id, medium) {
   const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
   if (!item) return;
   item.snsPosts = createSnsPosts(item.snsPosts);
+  const validationError = validateSnsPostText(item, medium, item.snsPosts[medium].text);
+  if (validationError) {
+    toast(`${validationError} 投稿済みには変更していません。`);
+    return;
+  }
   item.snsPosts[medium].status = "posted";
   item.snsPosts[medium].postedAt = new Date().toISOString();
   saveData();
