@@ -167,7 +167,7 @@ function bindForms() {
   $("#apply-codex-result").addEventListener("click", applyCodexResult);
   $("#historyFilter").addEventListener("input", renderHistory);
   $("#favoriteFilter").addEventListener("input", renderFavorites);
-  $("#favoriteTypeFilter").addEventListener("change", renderFavorites);
+  $("#favoriteTypeFilter")?.addEventListener("change", renderFavorites);
   $("#calendarMonth").addEventListener("change", renderCalendar);
   $("#rankingForm").addEventListener("submit", loadRanking);
   $("#trendSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchTrendProducts(); });
