@@ -32,9 +32,11 @@ README記載のVersionを作業開始時に確認する。
 
 ## 正式なROOM→X→Threads運用
 
-正式な工程は `ROOM紹介文・ハッシュタグ作成 → ROOM投稿 → ROOM投稿完了確認 → 確定したROOM個別URL取得 → アプリでURL入力・「登録完了」 → ROOM投稿済み・投稿履歴・postedAt・URLを同時保存 → CodexでX・Threads文章作成 → Codexがアプリへ直接反映 → 内容確認 → X投稿 → Threads投稿 → 実投稿が完了した媒体だけSNSを投稿済みにする` とする。アプリは外部AI APIへ接続せず、Codexが既存のChrome操作と結果反映欄を使う。
+正式な工程は `商品選定 → CodexでROOM紹介文＋ハッシュタグ作成 → アプリへ反映 → ROOM投稿 → ROOM投稿完了確認 → SNS展開対象だけ確定ROOM個別URL取得 → アプリでURL入力・「登録完了」 → ROOM投稿済み・投稿履歴・postedAt・URLを同時保存 → Codexが続けてX・Threads文章作成 → Codexがアプリへ直接反映 → 内容確認待ち → X投稿 → Threads投稿 → 実投稿が完了した媒体だけSNSを投稿済みにする` とする。ROOMだけに投稿する商品はROOM個別URLを登録せず、SNS文章を作成しない。CodexがChromeを操作できる環境を正式経路とし、ChatGPT Workは利用可能な場合の選択肢であって必須条件ではない。アプリは外部AI APIやCodex APIへ接続せず、Codexが既存のChrome操作と結果反映欄を使う。
 
 - ROOM投稿後のSNS生成では、保存済みの`introText`と`hashTags`を再生成せず、XとThreadsだけを生成する。
+- 「登録完了」はSNS展開対象のX・Threads文章作成へ続けるトリガーとして扱う。Codex運用中は「X・Threads文章生成準備完了」で停止せず、本文作成・アプリ反映・検証後の人間確認待ちまで続ける。
+- UIの「CodexでX・Threads作成」は補助・再実行用であり、通常の日次運用ではURL登録完了後に人間が改めて押す必要はない。
 - ROOM URLは確定した実URLだけを使い、`itemCode`等から推測・生成・短縮しない。入力だけでは登録完了にせず、アプリの「登録完了」で保存・検証する。
 - 「登録完了」は実際のROOM投稿完了後にだけ行い、候補の`status` / `postStatus`を投稿済みにし、同一履歴を`postedAt`・確定URL付きで作成または更新する。既存の「投稿済みにする」を先に使った場合も、後のURL登録は履歴を重複作成せず同一履歴へURLを反映する。
 - Xは`discovery`を基本とし、ROOM URL、`#PR`、ハッシュタグ、改行を含む全文140文字以内とする。Threadsは`problem`を基本とし、140文字制限は設けない。
