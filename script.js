@@ -1193,10 +1193,29 @@ function renderSnsPostEditor(item, medium, label) {
   </section>`;
 }
 
+function getSnsPostStatus(post) {
+  if (!post) return "未作成";
+  if (post.status === "posted") return "投稿済み";
+  if (post.text?.trim()) return "文章作成済み";
+  if (post.prompt?.trim()) return "プロンプト作成済み";
+  return "未作成";
+}
+
+function renderSnsStatusSummary(item) {
+  const posts = item.snsPosts || createSnsPosts();
+  const xStatus = getSnsPostStatus(posts.x);
+  const threadsStatus = getSnsPostStatus(posts.threads);
+  return `<div class="sns-status-summary" aria-label="SNS文章の作成状況">
+    <strong>SNS文章の作成状況</strong>
+    <span class="sns-status sns-status-${xStatus === "文章作成済み" || xStatus === "投稿済み" ? "done" : "pending"}">X：${xStatus}</span>
+    <span class="sns-status sns-status-${threadsStatus === "文章作成済み" || threadsStatus === "投稿済み" ? "done" : "pending"}">Threads：${threadsStatus}</span>
+  </div>`;
+}
+
 function renderSnsEditor(item) {
   const posts = item.snsPosts || createSnsPosts();
   const roomUrl = item.roomUrl || "";
-  return `<details class="sns-posts"><summary>SNS文章</summary>
+  return `<details class="sns-posts"><summary>SNS文章（X：${getSnsPostStatus(posts.x)} / Threads：${getSnsPostStatus(posts.threads)}）</summary>
     <p class="sns-room-url-status">${roomUrl ? `ROOM個別URL：${escapeHtml(roomUrl)}` : "ROOM個別URL未設定"}</p>
     <label>ROOM個別URLを入力<input type="url" value="${escapeAttr(roomUrl)}" placeholder="https://room.rakuten.co.jp/..." oninput="saveRoomUrl('${item.id}', this.value)"></label>
     ${renderSnsPostEditor(item, "x", "X")}
@@ -1459,6 +1478,7 @@ function candidateCard(item) {
         ${trustReasonText ? `<details class="trust-details"><summary>判定理由を見る</summary><p>${escapeHtml(trustReasonText).replaceAll("\n", "<br>")}</p></details>` : ""}
         <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
+        ${renderSnsStatusSummary(item)}
         ${renderSnsEditor(item)}
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
         <p class="post-status-line"><span class="badge post-status-badge">${escapeHtml(item.postStatus || "投稿待ち")}</span>${item.postStatus === "Codex処理中" ? " CodexでROOM投稿準備中" : ""}</p>

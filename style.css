@@ -656,6 +656,42 @@ textarea {
   white-space: pre-wrap;
 }
 
+.sns-status-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbf7;
+}
+
+.sns-status-summary strong {
+  margin-right: 4px;
+}
+
+.sns-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.7em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.sns-status-done {
+  color: #216b4b;
+  background: #e0f3e7;
+}
+
+.sns-status-pending {
+  color: #7a5a1a;
+  background: #fff2cc;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
