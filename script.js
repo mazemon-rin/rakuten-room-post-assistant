@@ -123,6 +123,7 @@ let rankingRetryInProgress = false;
 const codexPasteErrors = new Map();
 let affiliateImportDraft = [];
 let salesDashboardView = "all";
+let historyListCollapsed = false;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -166,6 +167,7 @@ function bindForms() {
   $("#candidateStatusFilter").addEventListener("change", renderCandidates);
   $("#apply-codex-result").addEventListener("click", applyCodexResult);
   $("#historyFilter").addEventListener("input", renderHistory);
+  $("#toggleHistoryList").addEventListener("click", () => { historyListCollapsed = !historyListCollapsed; renderHistory(); });
   $("#favoriteFilter").addEventListener("input", renderFavorites);
   $("#favoriteTypeFilter").addEventListener("change", renderFavorites);
   $("#calendarMonth").addEventListener("change", renderCalendar);
@@ -1439,7 +1441,8 @@ function candidateCard(item) {
 function renderHistory() {
   const keyword = $("#historyFilter")?.value?.trim().toLowerCase() || "";
   const items = data.history.filter((item) => `${item.title} ${item.genreId} ${item.memo}`.toLowerCase().includes(keyword));
-  $("#historyList").innerHTML = items.length ? items.map((item) => `
+  const historyList = $("#historyList");
+  historyList.innerHTML = items.length ? items.map((item) => `
     <article class="record-card">
       <img src="${escapeAttr(item.imageUrl)}" alt="">
       <div>
@@ -1455,6 +1458,9 @@ function renderHistory() {
       </div>
     </article>
   `).join("") : `<p class="message">投稿履歴はまだありません。</p>`;
+  historyList.hidden = historyListCollapsed;
+  const toggle = $("#toggleHistoryList");
+  if (toggle) { toggle.textContent = historyListCollapsed ? "履歴一覧を開く" : "履歴一覧を閉じる"; toggle.setAttribute("aria-expanded", String(!historyListCollapsed)); }
   renderSalesDashboard();
 }
 
