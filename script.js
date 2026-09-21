@@ -1190,7 +1190,7 @@ function renderSnsPostEditor(item, medium, label) {
     <h4>${label}</h4>
     <label>投稿タイプ<select onchange="saveSnsPost('${item.id}', '${medium}', 'postType', this.value); generateSnsPrompt('${item.id}', '${medium}')">${options}</select></label>
     <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(post.prompt || "")}</textarea></label>
-    <div class="record-actions"><button class="secondary-button" type="button" onclick="generateSnsPrompt('${item.id}', '${medium}')">生成プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">生成プロンプトをコピー</button></div>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="generateSnsPrompt('${item.id}', '${medium}')">生成プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">生成プロンプトをコピー</button><button class="primary-button" type="button" onclick="openSnsChatGPT('${item.id}', '${medium}')">ChatGPTで文章を作成</button></div>
     <label>生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', '${medium}', 'text', this.value)">${escapeHtml(post.text || "")}</textarea></label>
     <p>文字数：<span data-sns-count="${textId}" class="${lengthWarning ? "sns-count-warning" : ""}">${lengthLabel}</span> <span data-sns-warning="${textId}" class="sns-count-warning">${lengthWarning}</span></p>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${textId}')">文章をコピー</button><button class="secondary-button" type="button" onclick="markSnsPosted('${item.id}', '${medium}')">投稿済みにする</button></div>
@@ -1249,6 +1249,7 @@ function renderCombinedContentGenerator(item) {
     <div class="record-actions">
       <button class="primary-button" type="button" onclick="generateCombinedContentPrompt('${item.id}')">ROOM・X・Threadsをまとめて作成</button>
       <button class="secondary-button" type="button" onclick="copyValue('${promptId}')">統合プロンプトをコピー</button>
+      <button class="primary-button" type="button" onclick="openCombinedContentChatGPT('${item.id}')">ChatGPTで4項目を作成</button>
     </div>
     <label>統合生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(item.combinedPrompt || "")}</textarea></label>
     <label>AI生成結果をまとめて貼り付け<textarea id="${resultId}" placeholder="===ROOM_INTRO===\n...\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n...\n===END_ROOM_HASHTAGS===\n\n===X_POST===\n...\n===END_X_POST===\n\n===THREADS_POST===\n...\n===END_THREADS_POST==="></textarea></label>
@@ -2187,6 +2188,18 @@ function generateSnsPrompt(id, medium) {
   toast(`${medium === "x" ? "X" : "Threads"}用プロンプトを作成しました。`);
 }
 
+function openSnsChatGPT(id, medium) {
+  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  if (!item || !["x", "threads"].includes(medium)) return;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts[medium].prompt = buildSnsPrompt(item, medium, item.snsPosts[medium].postType);
+  item.snsPosts[medium].generatedAt = new Date().toISOString();
+  saveData();
+  copyText(item.snsPosts[medium].prompt, { silent: true });
+  window.open("https://chatgpt.com/", "_blank", "noopener,noreferrer");
+  toast(`${medium === "x" ? "X" : "Threads"}用プロンプトをコピーしました。ChatGPTで文章を作成し、生成結果をアプリへ貼り付けてください。`);
+}
+
 function generateCombinedSnsPrompt(id) {
   const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
   if (!item) return;
@@ -2197,6 +2210,16 @@ function generateCombinedSnsPrompt(id) {
   saveData();
   copyText(buildCombinedSnsPrompt(item));
   toast("X・Threads用プロンプトをまとめて作成しました。");
+}
+
+function openCombinedContentChatGPT(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate) return;
+  candidate.combinedPrompt = buildCombinedContentPrompt(candidate);
+  saveData();
+  copyText(candidate.combinedPrompt, { silent: true });
+  window.open("https://chatgpt.com/", "_blank", "noopener,noreferrer");
+  toast("統合プロンプトをコピーしました。ChatGPTで4項目を作成し、生成結果をアプリへ貼り付けてください。");
 }
 
 function markSnsPosted(id, medium) {
