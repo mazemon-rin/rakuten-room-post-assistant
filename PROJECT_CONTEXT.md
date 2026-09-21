@@ -32,11 +32,13 @@ README記載のVersionを作業開始時に確認する。
 
 ## 正式なROOM→X→Threads運用
 
-正式な工程は `ROOM紹介文・ハッシュタグ作成 → ROOM投稿 → ROOM投稿完了確認 → 確定したROOM個別URL取得 → アプリでURL入力・「登録完了」 → URL保存・検証 → X・Threads生成プロンプト作成 → AI文章生成 → アプリへ一括反映 → 内容確認 → X投稿 → Threads投稿 → 各SNSを投稿済みにする` とする。
+正式な工程は `ROOM紹介文・ハッシュタグ作成 → ROOM投稿 → ROOM投稿完了確認 → 確定したROOM個別URL取得 → アプリでURL入力・「登録完了」 → ROOM投稿済み・投稿履歴・postedAt・URLを同時保存 → X・Threads生成プロンプト作成 → AI文章生成 → アプリへ一括反映 → 内容確認 → X投稿 → Threads投稿 → 実投稿が完了した媒体だけSNSを投稿済みにする` とする。
 
 - ROOM投稿後のSNS生成では、保存済みの`introText`と`hashTags`を再生成せず、XとThreadsだけを生成する。
 - ROOM URLは確定した実URLだけを使い、`itemCode`等から推測・生成・短縮しない。入力だけでは登録完了にせず、アプリの「登録完了」で保存・検証する。
+- 「登録完了」は実際のROOM投稿完了後にだけ行い、候補の`status` / `postStatus`を投稿済みにし、同一履歴を`postedAt`・確定URL付きで作成または更新する。既存の「投稿済みにする」を先に使った場合も、後のURL登録は履歴を重複作成せず同一履歴へURLを反映する。
 - Xは`discovery`を基本とし、ROOM URL、`#PR`、ハッシュタグ、改行を含む全文140文字以内とする。Threadsは`problem`を基本とし、140文字制限は設けない。
+- X・Threadsの「投稿済みにする」は、各外部SNSへの実投稿が完了した後にだけ行う。文章生成・一括反映・機能確認だけでは投稿済みにしない。
 - SNS一括反映はX／Threadsの区切り形式を使い、`snsPosts.x.text`と`snsPosts.threads.text`だけを更新する。解析・検証失敗時は既存文章を保持する。
 - URL未登録時はURLを捏造せず、SNS本文に「ROOM個別URL未設定」と書かない。未使用商品の使用体験、未確認の価格・クーポン・ポイント・セール情報も捏造・断定しない。
 

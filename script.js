@@ -2151,7 +2151,8 @@ function updateRoomUrlInputState(id, value) {
 }
 
 function registerRoomUrl(id) {
-  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  const candidate = data.candidates.find((item) => item.id === id);
+  const item = candidate || data.history.find((historyItem) => historyItem.id === id);
   if (!item) return;
   const input = document.querySelector(`#room-url-input-${id}`);
   const roomUrl = String(input?.value || "").trim();
@@ -2164,6 +2165,7 @@ function registerRoomUrl(id) {
   item.snsPosts.x.prompt = buildSnsPrompt(item, "x", item.snsPosts.x.postType);
   item.snsPosts.threads.prompt = buildSnsPrompt(item, "threads", item.snsPosts.threads.postType);
   item.snsPosts.x.generatedAt = item.snsPosts.threads.generatedAt = new Date().toISOString();
+  if (candidate) recordRoomPosting(candidate, { roomUrl });
   saveData();
   const snsEditor = document.querySelector(`#sns-editor-${id}`);
   if (snsEditor) {
@@ -2171,7 +2173,7 @@ function registerRoomUrl(id) {
     snsEditor.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   const [notice, noticeType] = getRoomUrlNotice(item);
-  toast(noticeType === "warning" ? `${notice} URLは保存しました。` : "ROOM個別URLを登録し、X・Threads文章生成の準備が完了しました。");
+  toast(noticeType === "warning" ? `${notice} URLは保存しました。` : candidate ? "ROOM投稿済みとして履歴へ記録し、X・Threads文章生成の準備が完了しました。" : "ROOM個別URLを登録し、X・Threads文章生成の準備が完了しました。");
 }
 
 function generateSnsPrompt(id, medium) {
@@ -2382,24 +2384,46 @@ function startNextCandidate(id) {
   startCodexPost(next.id);
 }
 
+function findPostedHistoryRecord(item) {
+  const byId = data.history.find((historyItem) => historyItem.id === item.id);
+  if (byId) return byId;
+  const itemCode = item.itemCode || item.product?.itemCode || "";
+  if (!itemCode) return null;
+  return data.history.find((historyItem) => (historyItem.itemCode || historyItem.product?.itemCode || "") === itemCode) || null;
+}
+
+function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "" } = {}) {
+  const existingHistory = findPostedHistoryRecord(item);
+  const resolvedPostedAt = existingHistory?.postedAt || item.postedAt || postedAt || new Date().toISOString();
+  const resolvedRoomUrl = roomUrl || item.roomUrl || existingHistory?.roomUrl || "";
+  const historyId = existingHistory?.id || item.id;
+  item.status = "投稿済み";
+  item.postStatus = "投稿済み";
+  item.postedAt = resolvedPostedAt;
+  item.roomUrl = resolvedRoomUrl;
+  const historySnapshot = {
+    ...item,
+    id: historyId,
+    postedAt: resolvedPostedAt,
+    roomUrl: resolvedRoomUrl,
+    snsPosts: createSnsPosts(item.snsPosts),
+    originalPhoto: existingHistory?.originalPhoto ?? false
+  };
+  if (existingHistory) Object.assign(existingHistory, historySnapshot);
+  else data.history.unshift(historySnapshot);
+  return existingHistory || historySnapshot;
+}
+
 function markPosted(id) {
   const item = data.candidates.find((candidate) => candidate.id === id);
   if (!item) return;
-  if (item.status === "投稿済み" || item.postStatus === "投稿済み") {
+  const existingHistory = findPostedHistoryRecord(item);
+  if ((item.status === "投稿済み" || item.postStatus === "投稿済み") && existingHistory) {
     toast("この商品はすでに投稿済みです。");
     return;
   }
-  // ROOM投稿URLの入力確認は省略し、利用者が完了を伝えた時点で記録する。
-  const roomUrl = "";
-  item.status = "投稿済み";
-  item.postStatus = "投稿済み";
-  data.history.unshift({
-    ...item,
-    postedAt: new Date().toISOString(),
-    roomUrl,
-    snsPosts: createSnsPosts(item.snsPosts),
-    originalPhoto: false
-  });
+  // URL取得前の従来運用でもROOM投稿完了を記録できる。後のURL登録時は同じ履歴を更新する。
+  recordRoomPosting(item);
   saveData();
   showTab("history");
   toast("投稿履歴に記録しました。");

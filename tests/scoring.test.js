@@ -27,7 +27,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -120,6 +120,23 @@ assert(scoring.validateSnsPostsResult(withRoomUrl, { xText: "本文\n#PR", threa
 const preservedCopyItem = { ...withRoomUrl, introText: "保存済みROOM紹介文", hashTags: "#保存済み", snsPosts: scoring.createSnsPosts() };
 scoring.applySnsPostsToItem(preservedCopyItem, snsOnlyResult);
 assert(preservedCopyItem.introText === "保存済みROOM紹介文" && preservedCopyItem.hashTags === "#保存済み" && preservedCopyItem.snsPosts.x.text === shortX && preservedCopyItem.snsPosts.threads.text === shortThreads, "SNS workflow: SNS-only apply preserves ROOM copy and hashtags");
+
+scoring.data.candidates = [];
+scoring.data.history = [];
+scoring.data.sales = [{ id: "sale-keep", historyId: "history-existing" }];
+const roomPostingCandidate = { id: "candidate-room", itemCode: "shop:iphone-case", status: "文章作成済み", postStatus: "投稿待ち", roomUrl: "", snsPosts: scoring.createSnsPosts() };
+scoring.data.candidates.push(roomPostingCandidate);
+const firstHistory = scoring.recordRoomPosting(roomPostingCandidate, { roomUrl, postedAt: "2026-09-22T10:00:00.000Z" });
+assert(roomPostingCandidate.status === "投稿済み" && roomPostingCandidate.postStatus === "投稿済み", "ROOM URL registration: candidate becomes posted");
+assert(firstHistory.roomUrl === roomUrl && firstHistory.postedAt === "2026-09-22T10:00:00.000Z" && scoring.data.history.length === 1, "ROOM URL registration: URL and postedAt are stored in one history record");
+const originalPostedAt = firstHistory.postedAt;
+scoring.recordRoomPosting(roomPostingCandidate, { roomUrl });
+assert(scoring.data.history.length === 1 && scoring.data.history[0].postedAt === originalPostedAt, "ROOM URL registration: repeated completion does not duplicate history or reset postedAt");
+scoring.data.history[0].id = "history-existing";
+const sameItemLegacyCandidate = { id: "legacy-candidate", itemCode: "shop:iphone-case", status: "投稿待ち", postStatus: "投稿待ち", roomUrl: "", snsPosts: scoring.createSnsPosts() };
+scoring.recordRoomPosting(sameItemLegacyCandidate, { roomUrl });
+assert(scoring.data.history.length === 1 && scoring.data.history[0].id === "history-existing" && scoring.data.history[0].itemCode === "shop:iphone-case", "ROOM URL registration: exact itemCode updates the existing history identity");
+assert(scoring.data.sales.length === 1 && scoring.data.sales[0].historyId === "history-existing", "ROOM URL registration: existing sales linkage is unchanged");
 const combinedItem = { ...snsItem, snsPosts: { x: { postType: "info" }, threads: { postType: "problem" } } };
 const combinedPrompt = scoring.buildCombinedContentPrompt(combinedItem);
 assert(combinedPrompt.includes("ROOM紹介文") && combinedPrompt.includes("ROOMハッシュタグ") && combinedPrompt.includes("X投稿文") && combinedPrompt.includes("Threads投稿文"), "SNS combined: all four generation instructions are included");
