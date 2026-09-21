@@ -123,7 +123,6 @@ let rankingRetryInProgress = false;
 const codexPasteErrors = new Map();
 let affiliateImportDraft = [];
 let salesDashboardView = "all";
-let historyListCollapsed = false;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -167,7 +166,6 @@ function bindForms() {
   $("#candidateStatusFilter").addEventListener("change", renderCandidates);
   $("#apply-codex-result").addEventListener("click", applyCodexResult);
   $("#historyFilter").addEventListener("input", renderHistory);
-  $("#toggleHistoryList").addEventListener("click", () => { historyListCollapsed = !historyListCollapsed; renderHistory(); });
   $("#favoriteFilter").addEventListener("input", renderFavorites);
   $("#favoriteTypeFilter").addEventListener("change", renderFavorites);
   $("#calendarMonth").addEventListener("change", renderCalendar);
@@ -1442,7 +1440,25 @@ function renderHistory() {
   const keyword = $("#historyFilter")?.value?.trim().toLowerCase() || "";
   const items = data.history.filter((item) => `${item.title} ${item.genreId} ${item.memo}`.toLowerCase().includes(keyword));
   const historyList = $("#historyList");
-  historyList.innerHTML = items.length ? items.map((item) => `
+  const getWeekKey = (dateValue) => {
+    const date = new Date(dateValue || 0);
+    if (Number.isNaN(date.getTime())) return "日付未設定";
+    const day = date.getDay() || 7;
+    date.setDate(date.getDate() - day + 1);
+    return date.toISOString().slice(0, 10);
+  };
+  const formatWeekLabel = (weekKey) => weekKey === "日付未設定" ? weekKey : `${formatDate(weekKey)}の週`;
+  const groups = new Map();
+  items.forEach((item) => {
+    const key = getWeekKey(item.postedAt);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+  const groupedItems = [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  historyList.innerHTML = items.length ? groupedItems.map(([weekKey, weekItems], groupIndex) => `
+    <details class="history-week" ${groupIndex === 0 ? "open" : ""}>
+      <summary><span>${escapeHtml(formatWeekLabel(weekKey))}</span><time>${escapeHtml(weekKey === "日付未設定" ? "" : formatDate(weekKey))}</time><em>${weekItems.length}件</em></summary>
+      <div class="history-week-list">${weekItems.map((item) => `
     <article class="record-card">
       <img src="${escapeAttr(item.imageUrl)}" alt="">
       <div>
@@ -1457,10 +1473,10 @@ function renderHistory() {
         ${item.roomUrl ? `<a href="${escapeAttr(item.roomUrl)}" target="_blank" rel="noopener noreferrer">ROOM投稿URL</a>` : ""}
       </div>
     </article>
+  `).join("")}</div>
+    </details>
   `).join("") : `<p class="message">投稿履歴はまだありません。</p>`;
-  historyList.hidden = historyListCollapsed;
-  const toggle = $("#toggleHistoryList");
-  if (toggle) { toggle.textContent = historyListCollapsed ? "履歴一覧を開く" : "履歴一覧を閉じる"; toggle.setAttribute("aria-expanded", String(!historyListCollapsed)); }
+  historyList.hidden = false;
   renderSalesDashboard();
 }
 
