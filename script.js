@@ -12,7 +12,7 @@ const TREND_PRODUCTS_PER_KEYWORD = 5;
 const OPPORTUNITY_CONFIG = Object.freeze({ priceBands: [[1000, 1999, 6], [2000, 4999, 5], [5000, 9999, 4], [10000, 29999, 3], [30000, Infinity, 1], [0, 999, 2]] });
 const SELECTION_SCORE_CONFIG = Object.freeze({
   ranking: 30, reviewRating: 20, reviewCount: 20, price: 15, category: 10, freshness: 5,
-  categories: { "食品": 10, "美容・コスメ・香水": 10, "日用品・生活雑貨": 8, "キッチン用品・食器・調理器具": 8, "家電": 5, "パソコン・周辺機器": 5 }
+  categories: { "食品": 10, "美容・コスメ・香水": 10, "日用品・生活雑貨": 8, "キッチン用品・食器・調理器具": 8, "インテリア・寝具・収納": 8, "スポーツ・アウトドア": 8, "ベビー・キッズ・マタニティ": 8, "ペット・ペットグッズ": 8, "家電": 5, "パソコン・周辺機器": 5 }
 });
 // 既存UIの内訳表示との互換用。新しい選定スコアは上記設定を正本とします。
 const SELECTION_SCORING = Object.freeze({ click: 30, problem: 20, purchase: 15, trust: 15, roomFit: 10, season: 10 });
@@ -27,7 +27,11 @@ const rankingCategories = [
   { id: "100554", name: "日用品・生活雑貨" },
   { id: "558944", name: "キッチン用品・食器・調理器具" },
   { id: "100227", name: "食品" },
-  { id: "100939", name: "美容・コスメ・香水" }
+  { id: "100939", name: "美容・コスメ・香水" },
+  { id: "100804", name: "インテリア・寝具・収納" },
+  { id: "101070", name: "スポーツ・アウトドア" },
+  { id: "100533", name: "ベビー・キッズ・マタニティ" },
+  { id: "101213", name: "ペット・ペットグッズ" }
 ];
 
 const sampleProducts = [
