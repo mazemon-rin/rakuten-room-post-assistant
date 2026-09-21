@@ -351,6 +351,21 @@ main {
 .affiliate-preview-card p { margin: 4px 0; }
 .affiliate-preview-card label { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
 
+.sales-dashboard { margin: 18px 0; }
+.sales-summary-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin: 14px 0 18px; }
+.sales-summary-grid > div { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fffdf8; }
+.sales-summary-grid span, .sales-summary-grid strong { display: block; }
+.sales-summary-grid span { color: var(--muted); font-size: .85rem; }
+.sales-summary-grid strong { margin-top: 4px; font-size: 1.1rem; }
+.sales-table-wrap { overflow-x: auto; }
+.sales-table { width: 100%; border-collapse: collapse; min-width: 720px; }
+.sales-table th, .sales-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.sales-table th { background: rgba(238, 231, 216, .55); }
+.sales-label { white-space: nowrap; }
+
+@media (max-width: 900px) { .sales-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .sales-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 .ranking-category-fieldset {
   grid-column: 1 / -1;
   min-width: 0;

@@ -1454,6 +1454,29 @@ function renderHistory() {
       </div>
     </article>
   `).join("") : `<p class="message">投稿履歴はまだありません。</p>`;
+  renderSalesDashboard();
+}
+
+function renderSalesDashboard() {
+  const panel = $("#salesDashboard");
+  if (!panel) return;
+  const sales = (data.sales || []).filter((sale) => sale.status !== "キャンセル");
+  if (!sales.length) {
+    panel.innerHTML = `<div class="section-heading"><h3 id="salesDashboardTitle">売上状況</h3><p>楽天成果CSVを読み込んで保存すると、投稿商品との一致や売上状況を確認できます。</p></div>`;
+    return;
+  }
+  const totals = sales.reduce((summary, sale) => ({ amount: summary.amount + Number(sale.amount || 0), reward: summary.reward + Number(sale.reward || 0), quantity: summary.quantity + Number(sale.quantity || 0) }), { amount: 0, reward: 0, quantity: 0 });
+  const grouped = new Map();
+  sales.forEach((sale) => {
+    const key = `${sale.classification || "other"}|${sale.productName || sale.productSnapshot?.title || "商品名未設定"}`;
+    const current = grouped.get(key) || { classification: sale.classification || "other", productName: sale.productName || sale.productSnapshot?.title || "商品名未設定", shopName: sale.shopName || sale.productSnapshot?.shopName || "", amount: 0, reward: 0, quantity: 0 };
+    current.amount += Number(sale.amount || 0); current.reward += Number(sale.reward || 0); current.quantity += Number(sale.quantity || 0); grouped.set(key, current);
+  });
+  const groupedRows = [...grouped.values()].sort((a, b) => b.amount - a.amount);
+  const count = (classification) => sales.filter((sale) => (sale.classification || "other") === classification).length;
+  panel.innerHTML = `<div class="section-heading"><h3 id="salesDashboardTitle">売上状況</h3><p>楽天成果CSVを保存した売上を、投稿商品との一致状況別に確認できます。</p></div>
+    <div class="sales-summary-grid"><div><span>売上合計</span><strong>${formatYen(totals.amount)}</strong></div><div><span>成果報酬</span><strong>${formatYen(totals.reward)}</strong></div><div><span>売上件数</span><strong>${totals.quantity}件</strong></div><div><span>紹介商品</span><strong>${count("introduced")}件</strong></div><div><span>その他購入</span><strong>${count("other")}件</strong></div><div><span>要確認</span><strong>${count("review")}件</strong></div></div>
+    <div class="sales-table-wrap"><table class="sales-table"><thead><tr><th>分類</th><th>商品</th><th>ショップ</th><th>売上</th><th>報酬</th><th>件数</th></tr></thead><tbody>${groupedRows.map((row) => `<tr><td><span class="sales-label ${escapeAttr(row.classification)}">${affiliateClassificationLabel(row.classification)}</span></td><td>${escapeHtml(row.productName)}</td><td>${escapeHtml(row.shopName)}</td><td>${formatYen(row.amount)}</td><td>${formatYen(row.reward)}</td><td>${row.quantity}件</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function parseCsvRows(text) {
@@ -1567,6 +1590,7 @@ function saveAffiliateImport() {
     if (!existing.has(row.importKey)) data.sales.unshift(record);
   });
   saveData(); closeAffiliateImport(); toast("確認した売上を保存しました。");
+  renderHistory();
 }
 
 function closeAffiliateImport() { affiliateImportDraft = []; $("#affiliateCsvInput").value = ""; $("#affiliateImportMessage").textContent = ""; renderAffiliateImportPreview(); }
