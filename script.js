@@ -114,6 +114,33 @@ const defaultData = {
   eventSettings: { eventName: "", startDate: "", endDate: "", enabled: false }
 };
 
+const SNS_POST_TYPES = Object.freeze({
+  discovery: "発見型",
+  problem: "困りごと型",
+  info: "情報型",
+  sale: "セール型",
+  experience: "体験型"
+});
+
+function createSnsPosts(existing = {}) {
+  const makePost = (post = {}, defaultType) => ({
+    postType: post.postType || defaultType,
+    text: typeof post.text === "string" ? post.text : "",
+    prompt: typeof post.prompt === "string" ? post.prompt : "",
+    status: post.status === "posted" ? "posted" : "draft",
+    generatedAt: post.generatedAt || "",
+    postedAt: post.postedAt || ""
+  });
+  return {
+    x: makePost(existing.x, "discovery"),
+    threads: makePost(existing.threads, "problem")
+  };
+}
+
+function normalizeSnsRecords(records = []) {
+  return records.map((record) => ({ ...record, snsPosts: createSnsPosts(record.snsPosts) }));
+}
+
 let data = loadData();
 let currentProduct = null;
 let searchResults = [];
@@ -137,7 +164,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function loadData() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return { ...defaultData, ...saved, sales: Array.isArray(saved?.sales) ? saved.sales : [], settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
+    return { ...defaultData, ...saved, candidates: normalizeSnsRecords(Array.isArray(saved?.candidates) ? saved.candidates : []), history: normalizeSnsRecords(Array.isArray(saved?.history) ? saved.history : []), sales: Array.isArray(saved?.sales) ? saved.sales : [], settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
   } catch {
     return structuredClone(defaultData);
   }
@@ -1076,7 +1103,8 @@ function quickSave(product) {
     favoriteType: "今すぐ投稿",
     matchedTrendKeywords: productWithUrl.matchedTrendKeywords || [],
     trendSearchPosition: productWithUrl.trendSearchPosition || null,
-    performance: productWithUrl.performance || { clicks: null, orders: null, reward: null }
+    performance: productWithUrl.performance || { clicks: null, orders: null, reward: null },
+    snsPosts: createSnsPosts()
   };
   Object.assign(candidate, checkProductTrust(productWithUrl));
   applySelectionScore(candidate);
@@ -1146,6 +1174,35 @@ function renderCandidates() {
   $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
   renderQueueProgress();
   renderCollectionSummary();
+}
+
+function renderSnsPostEditor(item, medium, label) {
+  const posts = item.snsPosts || createSnsPosts();
+  const post = posts[medium];
+  const options = Object.entries(SNS_POST_TYPES).map(([value, text]) => `<option value="${value}" ${post.postType === value ? "selected" : ""} ${value === "experience" && item.usageStatus !== "used" ? "disabled" : ""}>${text}</option>`).join("");
+  const promptId = `sns-prompt-${medium}-${item.id}`;
+  const textId = `sns-text-${medium}-${item.id}`;
+  return `<section class="sns-post-editor" data-sns-medium="${medium}">
+    <h4>${label}</h4>
+    <label>投稿タイプ<select onchange="saveSnsPost('${item.id}', '${medium}', 'postType', this.value); generateSnsPrompt('${item.id}', '${medium}')">${options}</select></label>
+    <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(post.prompt || "")}</textarea></label>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="generateSnsPrompt('${item.id}', '${medium}')">生成プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">生成プロンプトをコピー</button></div>
+    <label>生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', '${medium}', 'text', this.value)">${escapeHtml(post.text || "")}</textarea></label>
+    <p>文字数：<span data-sns-count="${textId}">${Array.from(post.text || "").length}</span></p>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${textId}')">文章をコピー</button><button class="secondary-button" type="button" onclick="markSnsPosted('${item.id}', '${medium}')">投稿済みにする</button></div>
+  </section>`;
+}
+
+function renderSnsEditor(item) {
+  const posts = item.snsPosts || createSnsPosts();
+  const roomUrl = item.roomUrl || "";
+  return `<details class="sns-posts"><summary>SNS文章</summary>
+    <p class="sns-room-url-status">${roomUrl ? `ROOM個別URL：${escapeHtml(roomUrl)}` : "ROOM個別URL未設定"}</p>
+    <label>ROOM個別URLを入力<input type="url" value="${escapeAttr(roomUrl)}" placeholder="https://room.rakuten.co.jp/..." oninput="saveRoomUrl('${item.id}', this.value)"></label>
+    ${renderSnsPostEditor(item, "x", "X")}
+    ${renderSnsPostEditor(item, "threads", "Threads")}
+    <button class="primary-button" type="button" onclick="generateCombinedSnsPrompt('${item.id}')">X・Threads生成プロンプトをまとめてコピー</button>
+  </details>`;
 }
 
 function renderCollectionSummary() {
@@ -1402,6 +1459,7 @@ function candidateCard(item) {
         ${trustReasonText ? `<details class="trust-details"><summary>判定理由を見る</summary><p>${escapeHtml(trustReasonText).replaceAll("\n", "<br>")}</p></details>` : ""}
         <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
+        ${renderSnsEditor(item)}
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
         <p class="post-status-line"><span class="badge post-status-badge">${escapeHtml(item.postStatus || "投稿待ち")}</span>${item.postStatus === "Codex処理中" ? " CodexでROOM投稿準備中" : ""}</p>
         ${codexPasteErrors.has(item.id) ? `<p class="message" role="alert">${escapeHtml(codexPasteErrors.get(item.id))}</p>` : ""}
@@ -1774,6 +1832,98 @@ function updateCandidate(id, field, value) {
   renderCandidates();
 }
 
+function getSnsProductFacts(item) {
+  const product = item.product || item;
+  return [
+    `商品名：${item.title || product.itemName || "未設定"}`,
+    `価格：${item.price ?? product.itemPrice ?? "未設定"}`,
+    `ショップ名：${item.shopName || product.shopName || "未設定"}`,
+    `商品説明：${product.itemCaption || "未設定"}`,
+    `カテゴリー：${item.categoryName || product.categoryName || "未設定"}`,
+    `ランキング：${item.rank || product.rank || "未設定"}`,
+    `レビュー：評価${product.reviewAverage ?? "未設定"}／${product.reviewCount ?? "未設定"}件`,
+    `セール・クーポン情報：${product.saleInfo || product.couponInfo || product.pointInfo || "未設定"}`,
+    `信頼性判定：${item.trustStatus || "未確認"}`,
+    `ROOM紹介文：${item.introText || "未設定"}`,
+    `ハッシュタグ：${item.hashTags || "未設定"}`,
+    `usageStatus：${item.usageStatus || "unknown"}`,
+    `ROOM個別URL：${item.roomUrl || "ROOM個別URL未設定"}`
+  ].join("\n");
+}
+
+function buildSnsPrompt(item, medium, postType) {
+  const typeLabel = SNS_POST_TYPES[postType] || SNS_POST_TYPES.discovery;
+  const isX = medium === "x";
+  const rules = isX
+    ? "X向け。短めにし、最初の1〜2行で興味を引く。商品名の羅列から始めず、特徴は1〜2個に絞り、広告っぽさを抑える。絵文字は少なめ。#PRを付け、必要に応じて#楽天ROOMを付ける。ROOM個別URLがある場合は導線として使う。"
+    : "Threads向け。Xより少し長めで会話調にする。共感・困りごと・発見から入り、なぜ気になったかを伝える。売り込み感を弱くし、X文章の単純な長文化にしない。絵文字は少なめ。#PRを付け、ROOM個別URLがある場合は導線として使う。";
+  const usageRule = item.usageStatus === "used"
+    ? "usageStatusはused。使用体験を書く場合も、商品情報と利用者が入力した事実の範囲だけに限定する。"
+    : "usageStatusはusedではない。使ってみた、買ってみた、愛用している、使いやすかった、おすすめです、買ってよかった等の使用経験・断定を絶対に書かない。見つけました、気になりました、便利そう、チェックしておきたい等の安全な表現を使う。体験型の内容は生成しない。";
+  return `SNS投稿文章生成プロンプトを作成してください。\n\n媒体：${isX ? "X" : "Threads"}\nSNS投稿タイプ：${typeLabel}（${postType}）\n\n${getSnsProductFacts(item)}\n\n${rules}\n${usageRule}\n存在しない情報、レビュー、効果、在庫、最安値、セール期限、クーポン、使用体験を推測・捏造しない。ROOM個別URLが未設定の場合はURLを作らず、「ROOM個別URL未設定」と分かる状態にする。商品情報とSNSルールに合った自然な文章を作る。\n\n出力は文章本文だけにし、必要なら最後にROOM個別URLとPR表記を置く。`;
+}
+
+function buildCombinedSnsPrompt(item) {
+  const posts = item.snsPosts || createSnsPosts();
+  return `次の商品について、X用とThreads用のSNS投稿文章を別々に作成してください。\n\n【X】投稿タイプ：${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}\n${buildSnsPrompt(item, "x", posts.x.postType)}\n\n【Threads】投稿タイプ：${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}\n${buildSnsPrompt(item, "threads", posts.threads.postType)}\n\n出力形式：X:（X本文）\n\nThreads:（Threads本文）`;
+}
+
+function saveSnsPost(id, medium, field, value) {
+  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  if (!item || !["x", "threads"].includes(medium)) return;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  if (field === "postType" && value === "experience" && item.usageStatus !== "used") return;
+  item.snsPosts[medium][field] = value;
+  if (field === "text") {
+    item.snsPosts[medium].status = "draft";
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const counter = document.querySelector(`[data-sns-count="sns-text-${medium}-${id}"]`);
+    if (counter) counter.textContent = Array.from(value || "").length;
+    return;
+  }
+  saveData();
+}
+
+function saveRoomUrl(id, value) {
+  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  if (!item) return;
+  item.roomUrl = String(value || "").trim();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function generateSnsPrompt(id, medium) {
+  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  if (!item) return;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts[medium].prompt = buildSnsPrompt(item, medium, item.snsPosts[medium].postType);
+  item.snsPosts[medium].generatedAt = new Date().toISOString();
+  saveData();
+  copyText(item.snsPosts[medium].prompt);
+  toast(`${medium === "x" ? "X" : "Threads"}用プロンプトを作成しました。`);
+}
+
+function generateCombinedSnsPrompt(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  if (!item) return;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts.x.prompt = buildSnsPrompt(item, "x", item.snsPosts.x.postType);
+  item.snsPosts.threads.prompt = buildSnsPrompt(item, "threads", item.snsPosts.threads.postType);
+  item.snsPosts.x.generatedAt = item.snsPosts.threads.generatedAt = new Date().toISOString();
+  saveData();
+  copyText(buildCombinedSnsPrompt(item));
+  toast("X・Threads用プロンプトをまとめて作成しました。");
+}
+
+function markSnsPosted(id, medium) {
+  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  if (!item) return;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts[medium].status = "posted";
+  item.snsPosts[medium].postedAt = new Date().toISOString();
+  saveData();
+  toast(`${medium === "x" ? "X" : "Threads"}を投稿済みにしました。`);
+}
+
 function setPostStatus(id, status) {
   const item = data.candidates.find((candidate) => candidate.id === id);
   if (!item) return;
@@ -1959,6 +2109,7 @@ function markPosted(id) {
     ...item,
     postedAt: new Date().toISOString(),
     roomUrl,
+    snsPosts: createSnsPosts(item.snsPosts),
     originalPhoto: false
   });
   saveData();
@@ -2257,7 +2408,7 @@ function importJson(event) {
       if (!Array.isArray(imported.candidates) || !Array.isArray(imported.history) || typeof imported.settings !== "object") {
         throw new Error("バックアップ形式が違います。");
       }
-      data = { ...defaultData, ...imported, sales: Array.isArray(imported.sales) ? imported.sales : [] };
+      data = { ...defaultData, ...imported, candidates: normalizeSnsRecords(Array.isArray(imported.candidates) ? imported.candidates : []), history: normalizeSnsRecords(Array.isArray(imported.history) ? imported.history : []), sales: Array.isArray(imported.sales) ? imported.sales : [] };
       saveData();
       fillSettings();
       toast("バックアップを復元しました。");

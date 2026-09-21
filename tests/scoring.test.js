@@ -27,7 +27,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -68,6 +68,17 @@ const sparseRanks = [31, 32, 34, 35].map((rank) => scoring.applyOfficialRankingR
 assert(sparseRanks.length === 4 && sparseRanks.map((item) => item.rank).join(",") === "31,32,34,35", "F: ranking gaps are preserved");
 const unknownRank = scoring.applyOfficialRankingRank({ itemName: "unknown" });
 assert(unknownRank.rank === null && unknownRank.apiRank === null && unknownRank.sourceRank === null, "safe handling: missing API rank is not guessed");
+
+const snsItem = { title: "軽量トートバッグ", price: 2490, shopName: "毎日バッグ研究所", categoryName: "日用品・生活雑貨", usageStatus: "unknown", introText: "A4対応で便利そうなトートバッグです。", hashTags: "#楽天ROOM", roomUrl: "" };
+const xPrompt = scoring.buildSnsPrompt(snsItem, "x", "info");
+const threadsPrompt = scoring.buildSnsPrompt(snsItem, "threads", "problem");
+assert(xPrompt.includes("X向け") && xPrompt.includes("最初の1〜2行"), "SNS: X rules are included");
+assert(threadsPrompt.includes("Threads向け") && threadsPrompt.includes("会話調"), "SNS: Threads rules are included");
+assert(xPrompt !== threadsPrompt, "SNS: media prompts differ");
+assert(xPrompt.includes("使用経験・断定を絶対に書かない") && xPrompt.includes("ROOM個別URL未設定"), "SNS: unused and missing URL safety rules");
+assert(!scoring.buildSnsPrompt({ ...snsItem, usageStatus: "unknown" }, "x", "experience").includes("usageStatusはused。"), "SNS: unused item cannot use experience rule");
+assert(scoring.buildCombinedSnsPrompt({ ...snsItem, snsPosts: scoring.createSnsPosts() }).includes("【X】") && scoring.buildCombinedSnsPrompt({ ...snsItem, snsPosts: scoring.createSnsPosts() }).includes("【Threads】"), "SNS: combined prompt includes both media");
+assert(scoring.createSnsPosts().x.postType === "discovery" && scoring.createSnsPosts().threads.postType === "problem", "SNS: defaults are independent from ROOM postType");
 
 console.log(JSON.stringify({
   caseA: { trendFit: caseA.selectionScore.trendFit, opportunity: caseA.selectionScore.opportunity, total: caseA.selectionScore.total },
