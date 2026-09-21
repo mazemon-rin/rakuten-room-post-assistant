@@ -669,6 +669,37 @@ textarea {
   color: var(--green);
 }
 
+.room-url-editor {
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(218, 91, 54, 0.28);
+  border-radius: 8px;
+  background: #fffaf5;
+}
+
+.room-url-editor strong {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.room-url-status {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.room-url-status-missing {
+  color: #9a5b13;
+}
+
+.room-url-status-warning {
+  color: #a83d2a;
+}
+
+.room-url-status-saved {
+  color: #216b4b;
+}
+
 .combined-content-generator textarea {
   min-height: 110px;
 }

@@ -27,7 +27,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, isLikelyRoomUrl, getRoomUrlNotice, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -79,6 +79,19 @@ assert(xPrompt.includes("使用経験・断定を絶対に書かない") && xPro
 assert(!scoring.buildSnsPrompt({ ...snsItem, usageStatus: "unknown" }, "x", "experience").includes("usageStatusはused。"), "SNS: unused item cannot use experience rule");
 assert(scoring.buildCombinedSnsPrompt({ ...snsItem, snsPosts: scoring.createSnsPosts() }).includes("【X】") && scoring.buildCombinedSnsPrompt({ ...snsItem, snsPosts: scoring.createSnsPosts() }).includes("【Threads】"), "SNS: combined prompt includes both media");
 assert(scoring.createSnsPosts().x.postType === "discovery" && scoring.createSnsPosts().threads.postType === "problem", "SNS: defaults are independent from ROOM postType");
+const problemPrompt = scoring.buildSnsPrompt(snsItem, "threads", "problem");
+const discoveryPrompt = scoring.buildSnsPrompt(snsItem, "x", "discovery");
+assert(problemPrompt.includes("日常の具体的な小さな困りごと") && problemPrompt.includes("私は困っていました") && problemPrompt.includes("実体験を作らない"), "SNS problem: concrete daily difficulty and no fabricated experience rules");
+assert(discoveryPrompt.includes("発見性の高い特徴を1つ") && discoveryPrompt.includes("冒頭のフック候補"), "SNS discovery: distinctive feature hook rule");
+const roomUrl = "https://room.rakuten.co.jp/room_b51fcf8b3c/1700393916418208";
+const withRoomUrl = { ...snsItem, roomUrl };
+assert(scoring.buildSnsPrompt(withRoomUrl, "x", "discovery").includes(roomUrl), "SNS URL: X prompt includes saved ROOM URL");
+assert(scoring.buildSnsPrompt(withRoomUrl, "threads", "problem").includes(roomUrl), "SNS URL: Threads prompt includes saved ROOM URL");
+assert(scoring.buildCombinedContentPrompt({ ...withRoomUrl, snsPosts: scoring.createSnsPosts() }).includes(roomUrl), "SNS URL: combined prompt includes saved ROOM URL");
+const missingUrlPrompt = scoring.buildSnsPrompt(snsItem, "x", "discovery");
+assert(missingUrlPrompt.includes("投稿本文には「ROOM個別URL未設定」という文言を書かず") && missingUrlPrompt.includes("URL部分を省略"), "SNS URL: missing URL is omitted from generated post");
+assert(scoring.isLikelyRoomUrl(roomUrl) && !scoring.isLikelyRoomUrl("https://example.com/item"), "SNS URL: format check");
+assert(scoring.getRoomUrlNotice({ postStatus: "投稿済み", roomUrl: "" })[0].includes("未登録"), "SNS URL: posted item without URL is clearly indicated");
 const combinedItem = { ...snsItem, snsPosts: { x: { postType: "info" }, threads: { postType: "problem" } } };
 const combinedPrompt = scoring.buildCombinedContentPrompt(combinedItem);
 assert(combinedPrompt.includes("ROOM紹介文") && combinedPrompt.includes("ROOMハッシュタグ") && combinedPrompt.includes("X投稿文") && combinedPrompt.includes("Threads投稿文"), "SNS combined: all four generation instructions are included");

@@ -1214,14 +1214,21 @@ function renderSnsStatusSummary(item) {
 
 function renderSnsEditor(item) {
   const posts = item.snsPosts || createSnsPosts();
-  const roomUrl = item.roomUrl || "";
   return `<details class="sns-posts"><summary>SNS文章（X：${getSnsPostStatus(posts.x)} / Threads：${getSnsPostStatus(posts.threads)}）</summary>
-    <p class="sns-room-url-status">${roomUrl ? `ROOM個別URL：${escapeHtml(roomUrl)}` : "ROOM個別URL未設定"}</p>
-    <label>ROOM個別URLを入力<input type="url" value="${escapeAttr(roomUrl)}" placeholder="https://room.rakuten.co.jp/..." oninput="saveRoomUrl('${item.id}', this.value)"></label>
     ${renderSnsPostEditor(item, "x", "X")}
     ${renderSnsPostEditor(item, "threads", "Threads")}
     <button class="primary-button" type="button" onclick="generateCombinedSnsPrompt('${item.id}')">X・Threads生成プロンプトをまとめてコピー</button>
   </details>`;
+}
+
+function renderRoomUrlEditor(item) {
+  const roomUrl = item.roomUrl || "";
+  const [notice, noticeType] = getRoomUrlNotice(item);
+  return `<div class="room-url-editor" aria-label="ROOM個別URL設定">
+    <strong>ROOM個別URL</strong>
+    <p id="room-url-status-${escapeAttr(item.id)}" class="room-url-status room-url-status-${noticeType}">${escapeHtml(notice)}</p>
+    <label>ROOM個別URLを入力<input type="url" value="${escapeAttr(roomUrl)}" placeholder="https://room.rakuten.co.jp/room_xxxxx/1700..." oninput="saveRoomUrl('${item.id}', this.value)"></label>
+  </div>`;
 }
 
 function renderCombinedContentGenerator(item) {
@@ -1230,6 +1237,7 @@ function renderCombinedContentGenerator(item) {
   return `<section class="combined-content-generator" aria-label="ROOM・X・Threads一括作成">
     <h4>通常：ROOM・X・Threadsをまとめて作成</h4>
     <p class="meta">ChatGPTなどへ1回渡し、4項目をまとめてアプリへ反映できます。</p>
+    ${renderRoomUrlEditor(item)}
     <div class="record-actions">
       <button class="primary-button" type="button" onclick="generateCombinedContentPrompt('${item.id}')">ROOM・X・Threadsをまとめて作成</button>
       <button class="secondary-button" type="button" onclick="copyValue('${promptId}')">統合プロンプトをコピー</button>
@@ -1889,16 +1897,39 @@ function getSnsProductFacts(item) {
   ].join("\n");
 }
 
+function isLikelyRoomUrl(value = "") {
+  return /^https?:\/\/room\.rakuten\.co\.jp\/room_[^/\s]+\/[^/\s]+/i.test(String(value).trim());
+}
+
+function getRoomUrlNotice(item = {}) {
+  const roomUrl = String(item.roomUrl || "").trim();
+  if (!roomUrl) return [item.status === "投稿済み" || item.postStatus === "投稿済み" ? "ROOM投稿済みですが、個別URLが未登録です" : "ROOM個別URL未設定", "missing"];
+  if (!isLikelyRoomUrl(roomUrl)) return ["楽天ROOMの個別URLではない可能性があります。形式を確認してください。", "warning"];
+  return ["ROOM個別URL登録済み", "saved"];
+}
+
+function getRoomUrlPromptRule(roomUrl = "") {
+  if (String(roomUrl).trim()) return `ROOM個別URL：${roomUrl}\nこのURLは取得済みの値として必要に応じて使用する。URLを変更・推測しない。`;
+  return "ROOM URLは未設定。存在しないURLを生成しないこと。投稿本文には「ROOM個別URL未設定」という文言を書かず、URL部分を省略すること。";
+}
+
+function getSnsTypeSpecificRule(medium, postType) {
+  if (postType === "problem") return "商品説明から合理的に導ける、日常の具体的な小さな困りごとを1つだけ抽出し、冒頭1〜2文に置く。商品説明の単純な言い換えや一般論ではなく、「〜って意外と困りますよね」「〜になることありませんか」のような一般的な日常場面にする。「私は困っていました」「いつもこうなります」など、生成者自身の実体験を作らない。";
+  if (postType === "discovery") return "商品情報の中から、知らなかった・そんな方法があるのか・そこまで対応しているのかと思える発見性の高い特徴を1つだけ選び、冒頭のフック候補にする。商品名やスペックの羅列から始めず、特徴は商品情報に明記された範囲に限定する。";
+  return medium === "x" ? "特徴は1〜2個に絞り、冒頭を重視する。" : "共感・困りごと・発見から入り、なぜ気になったかを伝える。";
+}
+
 function buildSnsPrompt(item, medium, postType) {
   const typeLabel = SNS_POST_TYPES[postType] || SNS_POST_TYPES.discovery;
   const isX = medium === "x";
-  const rules = isX
-    ? "X向け。短めにし、最初の1〜2行で興味を引く。商品名の羅列から始めず、特徴は1〜2個に絞り、広告っぽさを抑える。絵文字は少なめ。#PRを付け、必要に応じて#楽天ROOMを付ける。ROOM個別URLがある場合は導線として使う。"
-    : "Threads向け。Xより少し長めで会話調にする。共感・困りごと・発見から入り、なぜ気になったかを伝える。売り込み感を弱くし、X文章の単純な長文化にしない。絵文字は少なめ。#PRを付け、ROOM個別URLがある場合は導線として使う。";
+  const baseRules = isX
+    ? "X向け。短めにし、最初の1〜2行で興味を引く。商品名の羅列から始めず、広告っぽさを抑える。絵文字は少なめ。#PRを付け、必要に応じて#楽天ROOMを付ける。"
+    : "Threads向け。Xより少し長めで会話調にする。共感・困りごと・発見から入り、なぜ気になったかを伝える。売り込み感を弱くし、X文章の単純な長文化にしない。絵文字は少なめ。#PRを付ける。";
+  const rules = `${baseRules} ${getSnsTypeSpecificRule(medium, postType)} ${getRoomUrlPromptRule(item.roomUrl || "")}`;
   const usageRule = item.usageStatus === "used"
     ? "usageStatusはused。使用体験を書く場合も、商品情報と利用者が入力した事実の範囲だけに限定する。"
     : "usageStatusはusedではない。使ってみた、買ってみた、愛用している、使いやすかった、おすすめです、買ってよかった等の使用経験・断定を絶対に書かない。見つけました、気になりました、便利そう、チェックしておきたい等の安全な表現を使う。体験型の内容は生成しない。";
-  return `SNS投稿文章生成プロンプトを作成してください。\n\n媒体：${isX ? "X" : "Threads"}\nSNS投稿タイプ：${typeLabel}（${postType}）\n\n${getSnsProductFacts(item)}\n\n${rules}\n${usageRule}\n存在しない情報、レビュー、効果、在庫、最安値、セール期限、クーポン、使用体験を推測・捏造しない。ROOM個別URLが未設定の場合はURLを作らず、「ROOM個別URL未設定」と分かる状態にする。商品情報とSNSルールに合った自然な文章を作る。\n\n出力は文章本文だけにし、必要なら最後にROOM個別URLとPR表記を置く。`;
+  return `SNS投稿文章生成プロンプトを作成してください。\n\n媒体：${isX ? "X" : "Threads"}\nSNS投稿タイプ：${typeLabel}（${postType}）\n\n${getSnsProductFacts(item)}\n\n${rules}\n${usageRule}\n存在しない情報、レビュー、効果、在庫、最安値、セール期限、クーポン、使用体験を推測・捏造しない。商品情報とSNSルールに合った自然な文章を作る。\n\n出力は文章本文だけにし、ROOM個別URLが設定されている場合だけURLとPR表記を必要に応じて置く。`;
 }
 
 function buildCombinedSnsPrompt(item) {
@@ -1915,9 +1946,9 @@ function buildCombinedContentPrompt(item) {
   const usageRule = item.usageStatus === "used"
     ? "usageStatusはused。使用体験を書く場合も、利用者が入力した事実の範囲だけに限定する。"
     : "usageStatusはusedではない。使ってみた、買ってみた、愛用しています、使いやすかった、おすすめです、買ってよかった等の使用経験・断定を絶対に書かない。便利そう、気になりました、チェックしておきたい等の安全な表現を使う。";
-  const xRules = `Xは短め、冒頭の1〜2行を重視し、商品名の羅列から始めない。特徴は1〜2個に絞り、広告っぽさを抑える。投稿タイプは${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}（${posts.x.postType}）。絵文字は少なめ、#PRを付け、必要なら#楽天ROOMを付ける。ROOM個別URLがある場合だけ導線として使う。`;
-  const threadsRules = `ThreadsはXより少し長めの会話調にし、共感・困りごと・発見から始める。商品名や価格だけで始めず、なぜ気になったかを伝え、売り込み感を弱くする。Xの単純な長文化にしない。投稿タイプは${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}（${posts.threads.postType}）。絵文字は少なめ、#PRを付け、ROOM個別URLがある場合だけ導線として使う。`;
-  return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\nROOM個別URL：${roomUrl}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、対象者・困りごと・特徴・利用場面が伝わる自然な紹介文を作る。未使用または不明の商品は体験談を書かない。\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\nROOM個別URLが未設定の場合はURLを作らず、「ROOM個別URL未設定」と明記する。セール・クーポン・ポイントは商品データに明記されたものだけ使用する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\n===END_THREADS_POST===`;
+  const xRules = `Xは短め、冒頭の1〜2行を重視し、商品名の羅列から始めない。${getSnsTypeSpecificRule("x", posts.x.postType)} 投稿タイプは${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}（${posts.x.postType}）。絵文字は少なめ、#PRを付け、必要なら#楽天ROOMを付ける。`;
+  const threadsRules = `ThreadsはXより少し長めの会話調にし、共感・困りごと・発見から始める。商品名や価格だけで始めず、なぜ気になったかを伝え、売り込み感を弱くする。Xの単純な長文化にしない。${getSnsTypeSpecificRule("threads", posts.threads.postType)} 投稿タイプは${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}（${posts.threads.postType}）。絵文字は少なめ、#PRを付ける。`;
+  return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\n${getRoomUrlPromptRule(roomUrl)}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、対象者・困りごと・特徴・利用場面が伝わる自然な紹介文を作る。未使用または不明の商品は体験談を書かない。\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\nURL未設定時は、投稿本文に「ROOM個別URL未設定」と書かず、URL部分を省略する。セール・クーポン・ポイントは商品データに明記されたものだけ使用する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\n===END_THREADS_POST===`;
 }
 
 function parseCombinedContentResult(rawText = "") {
@@ -1999,7 +2030,23 @@ function saveRoomUrl(id, value) {
   const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
   if (!item) return;
   item.roomUrl = String(value || "").trim();
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  if (item.snsPosts.x.prompt) item.snsPosts.x.prompt = buildSnsPrompt(item, "x", item.snsPosts.x.postType);
+  if (item.snsPosts.threads.prompt) item.snsPosts.threads.prompt = buildSnsPrompt(item, "threads", item.snsPosts.threads.postType);
+  if (item.combinedPrompt) item.combinedPrompt = buildCombinedContentPrompt(item);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  const status = document.querySelector(`#room-url-status-${id}`);
+  if (status) {
+    const [notice, noticeType] = getRoomUrlNotice(item);
+    status.textContent = notice;
+    status.className = `room-url-status room-url-status-${noticeType}`;
+  }
+  const xPrompt = document.querySelector(`#sns-prompt-x-${id}`);
+  const threadsPrompt = document.querySelector(`#sns-prompt-threads-${id}`);
+  const combinedPrompt = document.querySelector(`#combined-sns-prompt-${id}`);
+  if (xPrompt) xPrompt.value = item.snsPosts.x.prompt;
+  if (threadsPrompt) threadsPrompt.value = item.snsPosts.threads.prompt;
+  if (combinedPrompt) combinedPrompt.value = item.combinedPrompt || "";
 }
 
 function generateSnsPrompt(id, medium) {
