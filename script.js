@@ -1190,7 +1190,7 @@ function renderSnsPostEditor(item, medium, label) {
     <h4>${label}</h4>
     <label>投稿タイプ<select onchange="saveSnsPost('${item.id}', '${medium}', 'postType', this.value); generateSnsPrompt('${item.id}', '${medium}')">${options}</select></label>
     <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(post.prompt || "")}</textarea></label>
-    <div class="record-actions"><button class="secondary-button" type="button" onclick="generateSnsPrompt('${item.id}', '${medium}')">生成プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">生成プロンプトをコピー</button><button class="primary-button" type="button" onclick="openSnsChatGPT('${item.id}', '${medium}')">ChatGPTで文章を作成</button></div>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="generateSnsPrompt('${item.id}', '${medium}')">生成プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">生成プロンプトをコピー</button><button class="secondary-button" type="button" onclick="openSnsChatGPT('${item.id}', '${medium}')">ChatGPT用プロンプトをコピー</button></div>
     <label>生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', '${medium}', 'text', this.value)">${escapeHtml(post.text || "")}</textarea></label>
     <p>文字数：<span data-sns-count="${textId}" class="${lengthWarning ? "sns-count-warning" : ""}">${lengthLabel}</span> <span data-sns-warning="${textId}" class="sns-count-warning">${lengthWarning}</span></p>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${textId}')">文章をコピー</button><button class="secondary-button" type="button" onclick="markSnsPosted('${item.id}', '${medium}')">投稿済みにする</button></div>
@@ -1218,7 +1218,15 @@ function renderSnsStatusSummary(item) {
 
 function renderSnsEditor(item) {
   const posts = item.snsPosts || createSnsPosts();
+  const snsCodexReady = canStartSnsCodex(item);
+  const snsCodexPromptId = `sns-codex-prompt-${item.id}`;
   return `<details id="sns-editor-${escapeAttr(item.id)}" class="sns-posts"><summary>SNS文章（X：${getSnsPostStatus(posts.x)} / Threads：${getSnsPostStatus(posts.threads)}）</summary>
+    <section class="sns-codex-actions" aria-label="CodexでSNS文章を作成">
+      <h4>通常：CodexでX・Threads作成</h4>
+      <p class="meta">ROOM個別URL登録後、CodexがX・Threads本文を作成し、この画面へ直接反映します。</p>
+      <button class="primary-button" type="button" onclick="startSnsCodexPost('${item.id}')" ${snsCodexReady ? "" : "disabled"}>CodexでX・Threads作成</button>
+      ${snsCodexReady ? `<details class="sns-codex-prompt"><summary>Codex用SNS指示文を確認</summary><textarea id="${snsCodexPromptId}" readonly>${escapeHtml(item.snsCodexPrompt || "")}</textarea><button class="secondary-button" type="button" onclick="copyValue('${snsCodexPromptId}')">指示文をコピー</button></details>` : `<p class="message">ROOM個別URLを登録完了すると実行できます。</p>`}
+    </section>
     ${renderSnsPostEditor(item, "x", "X")}
     ${renderSnsPostEditor(item, "threads", "Threads")}
     <button class="primary-button" type="button" onclick="generateCombinedSnsPrompt('${item.id}')">X・Threads生成プロンプトをまとめてコピー</button>
@@ -1249,7 +1257,7 @@ function renderCombinedContentGenerator(item) {
     <div class="record-actions">
       <button class="primary-button" type="button" onclick="generateCombinedContentPrompt('${item.id}')">ROOM・X・Threadsをまとめて作成</button>
       <button class="secondary-button" type="button" onclick="copyValue('${promptId}')">統合プロンプトをコピー</button>
-      <button class="primary-button" type="button" onclick="openCombinedContentChatGPT('${item.id}')">ChatGPTで4項目を作成</button>
+      <button class="primary-button" type="button" onclick="openCombinedContentChatGPT('${item.id}')">ChatGPT用統合プロンプトをコピー</button>
     </div>
     <label>統合生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(item.combinedPrompt || "")}</textarea></label>
     <label>AI生成結果をまとめて貼り付け<textarea id="${resultId}" placeholder="===ROOM_INTRO===\n...\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n...\n===END_ROOM_HASHTAGS===\n\n===X_POST===\n...\n===END_X_POST===\n\n===THREADS_POST===\n...\n===END_THREADS_POST==="></textarea></label>
@@ -1949,6 +1957,63 @@ function buildSnsPrompt(item, medium, postType) {
   return `SNS投稿文章生成プロンプトを作成してください。\n\n媒体：${isX ? "X" : "Threads"}\nSNS投稿タイプ：${typeLabel}（${postType}）\n\n${getSnsProductFacts(item)}\n\n${rules}\n${usageRule}\n${getSalePromptRule()}\n存在しない情報、レビュー、効果、在庫、最安値、セール期限、クーポン、使用体験を推測・捏造しない。商品情報とSNSルールに合った自然な文章を作る。\n\n出力は文章本文だけにし、ROOM個別URLが登録済みの場合は必ず1回だけ記載し、未設定の場合はURL導線を省略する。`;
 }
 
+function canStartSnsCodex(item = {}) {
+  const roomUrl = String(item.roomUrl || "").trim();
+  return Boolean(roomUrl && isLikelyRoomUrl(roomUrl));
+}
+
+function buildSnsCodexInstructions(item) {
+  if (!canStartSnsCodex(item)) return "";
+  const product = item.product || item;
+  const posts = item.snsPosts || createSnsPosts();
+  const itemCode = item.itemCode || product.itemCode || "";
+  const usageRule = item.usageStatus === "used"
+    ? "usageStatusはused。使用体験を書く場合も、利用者が入力した事実の範囲だけに限定する。"
+    : "usageStatusはusedではない。使ってみた、買ってみた、愛用している、使いやすかった、おすすめです、買ってよかった等の使用経験を作らない。見つけました、気になりました、便利そう、チェックしておきたい等の安全な表現を使う。体験型の内容は生成しない。";
+  const xType = posts.x.postType || "discovery";
+  const threadsType = posts.threads.postType || "problem";
+  return [
+    "楽天ROOM投稿後のSNS文章を作成し、アプリへ直接反映してください。",
+    "ChatGPTへ手動で貼り付けるための手順ではありません。この指示に従い、CodexがChrome上のアプリを操作します。",
+    "",
+    `ITEM_CODE：${itemCode}`,
+    getSnsProductFacts(item),
+    "",
+    `X投稿タイプ：${SNS_POST_TYPES[xType] || xType}（${xType}）`,
+    `Threads投稿タイプ：${SNS_POST_TYPES[threadsType] || threadsType}（${threadsType}）`,
+    `確定ROOM個別URL：${item.roomUrl}`,
+    "登録済みのROOM個別URLをXとThreadsの各本文へ完全一致で1回だけ記載する。URLを変更、短縮、省略、推測しない。",
+    "",
+    "【Xの作成ルール】",
+    "発見型を基本とし、商品情報から発見性の高い特徴を1つ選んで冒頭のフックにする。商品名の長い羅列から始めず、特徴は1〜2個に絞る。",
+    `${getXLengthPromptRule()} #PRは必須。登録済みROOM URLと#PRは削除しない。`,
+    "",
+    "【Threadsの作成ルール】",
+    "困りごと型を基本とし、商品説明から合理的に導ける日常の具体的な小さな困りごとを1つ選び、冒頭1〜2文に置く。Xを単純に長文化せず、会話調で困りごと→気になった点→ROOM導線の流れにする。140文字制限は設けない。#PRは必須。",
+    "",
+    "【共通の安全ルール】",
+    usageRule,
+    getSalePromptRule(),
+    "存在しない使用体験、効果、在庫、最安値、レビュー内容、セール期限、クーポン条件を推測・捏造しない。ROOM紹介文とハッシュタグは変更・再生成しない。",
+    "",
+    "【Codexの操作】",
+    "1. この商品情報と保存済みROOM紹介文・ハッシュタグを確認する。",
+    "2. X本文とThreads本文を作成する。",
+    "3. アプリの『AI生成結果をまとめて貼り付け』欄へ、下記の区切りを含む結果を直接入力する。",
+    "4. 『X・Threadsに反映』を押す。",
+    "5. エラーが表示された場合は既存SNS文章を変更せず、原因を報告する。",
+    "",
+    "【必須入力形式】",
+    "===X_POST===",
+    "X本文（ROOM URLと#PRを含めて140文字以内）",
+    "===END_X_POST===",
+    "",
+    "===THREADS_POST===",
+    "Threads本文（ROOM URLと#PRを含める）",
+    "===END_THREADS_POST==="
+  ].join("\n");
+}
+
 function buildCombinedSnsPrompt(item) {
   const posts = item.snsPosts || createSnsPosts();
   return `次の商品について、X用とThreads用のSNS投稿文章を別々に作成してください。\n\n【X】投稿タイプ：${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}\n${buildSnsPrompt(item, "x", posts.x.postType)}\n\n【Threads】投稿タイプ：${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}\n${buildSnsPrompt(item, "threads", posts.threads.postType)}\n\n次の区切りをそのまま使って、XとThreadsだけを返してください。ROOM紹介文とハッシュタグは返さないでください。\n===X_POST===\nX本文\n===END_X_POST===\n\n===THREADS_POST===\nThreads本文\n===END_THREADS_POST===`;
@@ -2186,6 +2251,20 @@ function generateSnsPrompt(id, medium) {
   saveData();
   copyText(item.snsPosts[medium].prompt);
   toast(`${medium === "x" ? "X" : "Threads"}用プロンプトを作成しました。`);
+}
+
+async function startSnsCodexPost(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id) || data.history.find((historyItem) => historyItem.id === id);
+  if (!item) return;
+  if (!canStartSnsCodex(item)) {
+    toast("ROOM個別URLを登録完了してから実行してください。");
+    return;
+  }
+  item.snsCodexPrompt = buildSnsCodexInstructions(item);
+  item.snsCodexGeneratedAt = new Date().toISOString();
+  saveData();
+  const copied = await copyText(item.snsCodexPrompt, { silent: true });
+  toast(copied ? "Codex用SNS指示文を作成しました。Codexが結果入力欄へ直接反映できます。" : "Codex用SNS指示文を作成しました。画面の指示文を確認してください。");
 }
 
 function openSnsChatGPT(id, medium) {

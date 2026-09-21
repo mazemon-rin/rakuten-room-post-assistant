@@ -27,7 +27,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -117,6 +117,14 @@ assert(scoring.validateSnsPostText(withRoomUrl, "threads", `本文\n${roomUrl}\n
 const snsOnlyResult = scoring.parseSnsPostsResult(`===X_POST===\n${shortX}\n===END_X_POST===\n===THREADS_POST===\n${shortThreads}\n===END_THREADS_POST===`);
 assert(snsOnlyResult.xText === shortX && snsOnlyResult.threadsText === shortThreads && scoring.validateSnsPostsResult(withRoomUrl, snsOnlyResult) === "", "SNS workflow: X and Threads result format parses and validates");
 assert(scoring.validateSnsPostsResult(withRoomUrl, { xText: "本文\n#PR", threadsText: shortThreads }).includes("ROOM個別URL"), "SNS workflow: incomplete X result is rejected without overwrite");
+assert(!scoring.canStartSnsCodex({ roomUrl: "" }), "SNS Codex: cannot start before ROOM URL registration");
+assert(scoring.canStartSnsCodex(withRoomUrl), "SNS Codex: can start after valid ROOM URL registration");
+const snsCodexInstructions = scoring.buildSnsCodexInstructions({ ...withRoomUrl, itemCode: "shop:iphone-case", snsPosts: scoring.createSnsPosts() });
+assert(snsCodexInstructions.includes("ITEM_CODE：shop:iphone-case") && snsCodexInstructions.includes(roomUrl), "SNS Codex: itemCode and exact ROOM URL are included");
+assert(snsCodexInstructions.includes("発見性の高い特徴") && snsCodexInstructions.includes("日常の具体的な小さな困りごと"), "SNS Codex: X discovery and Threads problem rules are included");
+assert(snsCodexInstructions.includes("140文字以内") && snsCodexInstructions.includes("#PRは必須"), "SNS Codex: X length and PR rules are included");
+assert(snsCodexInstructions.includes("使用経験を作らない") && snsCodexInstructions.includes("現在有効であることが確認できない場合"), "SNS Codex: unused and changing-sale safety rules are included");
+assert(snsCodexInstructions.includes("===X_POST===") && snsCodexInstructions.includes("===END_THREADS_POST==="), "SNS Codex: direct result markers are included");
 const preservedCopyItem = { ...withRoomUrl, introText: "保存済みROOM紹介文", hashTags: "#保存済み", snsPosts: scoring.createSnsPosts() };
 scoring.applySnsPostsToItem(preservedCopyItem, snsOnlyResult);
 assert(preservedCopyItem.introText === "保存済みROOM紹介文" && preservedCopyItem.hashTags === "#保存済み" && preservedCopyItem.snsPosts.x.text === shortX && preservedCopyItem.snsPosts.threads.text === shortThreads, "SNS workflow: SNS-only apply preserves ROOM copy and hashtags");

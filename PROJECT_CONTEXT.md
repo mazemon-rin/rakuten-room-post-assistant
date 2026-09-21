@@ -32,7 +32,7 @@ README記載のVersionを作業開始時に確認する。
 
 ## 正式なROOM→X→Threads運用
 
-正式な工程は `ROOM紹介文・ハッシュタグ作成 → ROOM投稿 → ROOM投稿完了確認 → 確定したROOM個別URL取得 → アプリでURL入力・「登録完了」 → ROOM投稿済み・投稿履歴・postedAt・URLを同時保存 → X・Threads生成プロンプト作成 → AI文章生成 → アプリへ一括反映 → 内容確認 → X投稿 → Threads投稿 → 実投稿が完了した媒体だけSNSを投稿済みにする` とする。
+正式な工程は `ROOM紹介文・ハッシュタグ作成 → ROOM投稿 → ROOM投稿完了確認 → 確定したROOM個別URL取得 → アプリでURL入力・「登録完了」 → ROOM投稿済み・投稿履歴・postedAt・URLを同時保存 → CodexでX・Threads文章作成 → Codexがアプリへ直接反映 → 内容確認 → X投稿 → Threads投稿 → 実投稿が完了した媒体だけSNSを投稿済みにする` とする。アプリは外部AI APIへ接続せず、Codexが既存のChrome操作と結果反映欄を使う。
 
 - ROOM投稿後のSNS生成では、保存済みの`introText`と`hashTags`を再生成せず、XとThreadsだけを生成する。
 - ROOM URLは確定した実URLだけを使い、`itemCode`等から推測・生成・短縮しない。入力だけでは登録完了にせず、アプリの「登録完了」で保存・検証する。

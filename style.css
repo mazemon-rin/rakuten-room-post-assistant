@@ -669,6 +669,28 @@ textarea {
   color: var(--green);
 }
 
+.sns-codex-actions {
+  margin: 12px 0;
+  padding: 12px;
+  border: 2px solid rgba(58, 126, 102, 0.28);
+  border-radius: 10px;
+  background: #f5faf7;
+}
+
+.sns-codex-actions h4 {
+  margin: 0 0 4px;
+  color: var(--green);
+}
+
+.sns-codex-prompt {
+  margin-top: 10px;
+}
+
+.sns-codex-prompt textarea {
+  min-height: 160px;
+  background: #fff;
+}
+
 .room-url-editor {
   margin: 10px 0 12px;
   padding: 10px 12px;
