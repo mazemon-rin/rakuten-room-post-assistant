@@ -1909,8 +1909,12 @@ function getRoomUrlNotice(item = {}) {
 }
 
 function getRoomUrlPromptRule(roomUrl = "") {
-  if (String(roomUrl).trim()) return `ROOM個別URL：${roomUrl}\nこのURLは取得済みの値として必要に応じて使用する。URLを変更・推測しない。`;
+  if (String(roomUrl).trim()) return `ROOM個別URL：${roomUrl}\nROOM個別URLが登録済みの場合、投稿文にこの登録URLを必ず1回だけそのまま記載する。省略・変更・短縮・推測は禁止。Xは「ROOMで詳細をチェック👇」などの導線の直後、Threadsは「ROOMに載せています👇」などの導線の直後にURLを置く。`;
   return "ROOM URLは未設定。存在しないURLを生成しないこと。投稿本文には「ROOM個別URL未設定」という文言を書かず、URL部分を省略すること。";
+}
+
+function getSalePromptRule() {
+  return "価格、クーポン、ポイント倍率、セール情報は変動する可能性がある。現在有効であることが確認できない場合は、SNS投稿文へ積極的に使用しない。商品名に含まれているだけのセール表現を、現在有効な情報として断定しない。アプリ側で確認済みとして保持された情報がある場合だけ、事実として自然に反映する。";
 }
 
 function getSnsTypeSpecificRule(medium, postType) {
@@ -1929,7 +1933,7 @@ function buildSnsPrompt(item, medium, postType) {
   const usageRule = item.usageStatus === "used"
     ? "usageStatusはused。使用体験を書く場合も、商品情報と利用者が入力した事実の範囲だけに限定する。"
     : "usageStatusはusedではない。使ってみた、買ってみた、愛用している、使いやすかった、おすすめです、買ってよかった等の使用経験・断定を絶対に書かない。見つけました、気になりました、便利そう、チェックしておきたい等の安全な表現を使う。体験型の内容は生成しない。";
-  return `SNS投稿文章生成プロンプトを作成してください。\n\n媒体：${isX ? "X" : "Threads"}\nSNS投稿タイプ：${typeLabel}（${postType}）\n\n${getSnsProductFacts(item)}\n\n${rules}\n${usageRule}\n存在しない情報、レビュー、効果、在庫、最安値、セール期限、クーポン、使用体験を推測・捏造しない。商品情報とSNSルールに合った自然な文章を作る。\n\n出力は文章本文だけにし、ROOM個別URLが設定されている場合だけURLとPR表記を必要に応じて置く。`;
+  return `SNS投稿文章生成プロンプトを作成してください。\n\n媒体：${isX ? "X" : "Threads"}\nSNS投稿タイプ：${typeLabel}（${postType}）\n\n${getSnsProductFacts(item)}\n\n${rules}\n${usageRule}\n${getSalePromptRule()}\n存在しない情報、レビュー、効果、在庫、最安値、セール期限、クーポン、使用体験を推測・捏造しない。商品情報とSNSルールに合った自然な文章を作る。\n\n出力は文章本文だけにし、ROOM個別URLが登録済みの場合は必ず1回だけ記載し、未設定の場合はURL導線を省略する。`;
 }
 
 function buildCombinedSnsPrompt(item) {
@@ -1948,7 +1952,7 @@ function buildCombinedContentPrompt(item) {
     : "usageStatusはusedではない。使ってみた、買ってみた、愛用しています、使いやすかった、おすすめです、買ってよかった等の使用経験・断定を絶対に書かない。便利そう、気になりました、チェックしておきたい等の安全な表現を使う。";
   const xRules = `Xは短め、冒頭の1〜2行を重視し、商品名の羅列から始めない。${getSnsTypeSpecificRule("x", posts.x.postType)} 投稿タイプは${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}（${posts.x.postType}）。絵文字は少なめ、#PRを付け、必要なら#楽天ROOMを付ける。`;
   const threadsRules = `ThreadsはXより少し長めの会話調にし、共感・困りごと・発見から始める。商品名や価格だけで始めず、なぜ気になったかを伝え、売り込み感を弱くする。Xの単純な長文化にしない。${getSnsTypeSpecificRule("threads", posts.threads.postType)} 投稿タイプは${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}（${posts.threads.postType}）。絵文字は少なめ、#PRを付ける。`;
-  return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\n${getRoomUrlPromptRule(roomUrl)}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、対象者・困りごと・特徴・利用場面が伝わる自然な紹介文を作る。未使用または不明の商品は体験談を書かない。\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\nURL未設定時は、投稿本文に「ROOM個別URL未設定」と書かず、URL部分を省略する。セール・クーポン・ポイントは商品データに明記されたものだけ使用する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\n===END_THREADS_POST===`;
+  return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\n${getRoomUrlPromptRule(roomUrl)}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、対象者・困りごと・特徴・利用場面が伝わる自然な紹介文を作る。未使用または不明の商品は体験談を書かない。\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\n${getSalePromptRule()}\nURL未設定時は、投稿本文に「ROOM個別URL未設定」と書かず、URL部分を省略する。登録済みURLがある場合は、X_POSTとTHREADS_POSTの両方へ登録URLを1回だけそのまま記載する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_THREADS_POST===`;
 }
 
 function parseCombinedContentResult(rawText = "") {
@@ -1960,6 +1964,24 @@ function parseCombinedContentResult(rawText = "") {
     threadsText: readBlock("THREADS_POST")
   };
   return result;
+}
+
+function countTextOccurrences(text = "", value = "") {
+  if (!value) return 0;
+  return String(text).split(value).length - 1;
+}
+
+function validateCombinedSnsLinks(item, parsed) {
+  const roomUrl = String(item.roomUrl || "").trim();
+  const snsText = `${parsed.xText}\n${parsed.threadsText}`;
+  if (!roomUrl) {
+    return snsText.includes("ROOM個別URL未設定") ? "ROOM個別URL未設定という文言をSNS本文へ入れず、URL導線を省略してください。" : "";
+  }
+  if (countTextOccurrences(parsed.xText, roomUrl) !== 1 || countTextOccurrences(parsed.threadsText, roomUrl) !== 1) {
+    return "登録済みのROOM個別URLが、X・Threadsの各本文に1回ずつ含まれていません。既存データは保存していません。";
+  }
+  if (countTextOccurrences(snsText, roomUrl) !== 2) return "ROOM個別URLの記載回数を確認できないため、保存していません。";
+  return "";
 }
 
 function generateCombinedContentPrompt(id) {
@@ -1982,6 +2004,13 @@ function applyCombinedSnsResult(id) {
     codexPasteErrors.set(id, "4項目を確認できません。指定された4つの区切りを含めて貼り付けてください。既存データは保存していません。");
     renderCandidates();
     toast("4項目を解析できません。既存データは保存していません。");
+    return;
+  }
+  const linkError = validateCombinedSnsLinks(candidate, parsed);
+  if (linkError) {
+    codexPasteErrors.set(id, linkError);
+    renderCandidates();
+    toast(linkError);
     return;
   }
   const copyError = validateGeneratedCopy(parsed.introText, candidate);

@@ -27,7 +27,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, isLikelyRoomUrl, getRoomUrlNotice, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, validateCombinedSnsLinks, isLikelyRoomUrl, getRoomUrlNotice, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -87,9 +87,17 @@ const roomUrl = "https://room.rakuten.co.jp/room_b51fcf8b3c/1700393916418208";
 const withRoomUrl = { ...snsItem, roomUrl };
 assert(scoring.buildSnsPrompt(withRoomUrl, "x", "discovery").includes(roomUrl), "SNS URL: X prompt includes saved ROOM URL");
 assert(scoring.buildSnsPrompt(withRoomUrl, "threads", "problem").includes(roomUrl), "SNS URL: Threads prompt includes saved ROOM URL");
-assert(scoring.buildCombinedContentPrompt({ ...withRoomUrl, snsPosts: scoring.createSnsPosts() }).includes(roomUrl), "SNS URL: combined prompt includes saved ROOM URL");
+const withRoomUrlCombinedPrompt = scoring.buildCombinedContentPrompt({ ...withRoomUrl, snsPosts: scoring.createSnsPosts() });
+assert(withRoomUrlCombinedPrompt.includes(roomUrl) && withRoomUrlCombinedPrompt.includes("X_POST") && withRoomUrlCombinedPrompt.includes("THREADS_POST"), "SNS URL: combined prompt includes saved ROOM URL for both posts");
+assert(scoring.buildSnsPrompt(withRoomUrl, "x", "discovery").includes("必ず1回だけそのまま記載") && scoring.buildSnsPrompt(withRoomUrl, "threads", "problem").includes("省略・変更・短縮・推測は禁止"), "SNS URL: individual prompts require the exact URL once");
+assert(withRoomUrlCombinedPrompt.includes("X_POSTとTHREADS_POSTの両方") && withRoomUrlCombinedPrompt.includes("1回だけそのまま記載"), "SNS URL: combined prompt requires the exact URL in both posts");
+assert(withRoomUrlCombinedPrompt.includes("変動する可能性") && withRoomUrlCombinedPrompt.includes("現在有効であることが確認できない場合"), "SNS sale: changing sale data must not be asserted without confirmation");
+const validLinkResult = { xText: `本文\n${roomUrl}\n#PR`, threadsText: `本文\n${roomUrl}\n#PR` };
+assert(scoring.validateCombinedSnsLinks(withRoomUrl, validLinkResult) === "", "SNS URL: both generated posts contain the exact URL once");
+assert(scoring.validateCombinedSnsLinks(withRoomUrl, { xText: "本文", threadsText: "本文" }).includes("1回ずつ"), "SNS URL: missing URL in generated posts is rejected");
 const missingUrlPrompt = scoring.buildSnsPrompt(snsItem, "x", "discovery");
 assert(missingUrlPrompt.includes("投稿本文には「ROOM個別URL未設定」という文言を書かず") && missingUrlPrompt.includes("URL部分を省略"), "SNS URL: missing URL is omitted from generated post");
+assert(scoring.validateCombinedSnsLinks(snsItem, { xText: "本文", threadsText: "本文" }) === "" && scoring.validateCombinedSnsLinks(snsItem, { xText: "ROOM個別URL未設定", threadsText: "本文" }).includes("URL導線"), "SNS URL: missing URL does not create placeholder text");
 assert(scoring.isLikelyRoomUrl(roomUrl) && !scoring.isLikelyRoomUrl("https://example.com/item"), "SNS URL: format check");
 assert(scoring.getRoomUrlNotice({ postStatus: "投稿済み", roomUrl: "" })[0].includes("未登録"), "SNS URL: posted item without URL is clearly indicated");
 const combinedItem = { ...snsItem, snsPosts: { x: { postType: "info" }, threads: { postType: "problem" } } };
