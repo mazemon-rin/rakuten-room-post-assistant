@@ -656,6 +656,28 @@ textarea {
   white-space: pre-wrap;
 }
 
+.combined-content-generator {
+  margin: 14px 0 8px;
+  padding: 12px;
+  border: 2px solid rgba(58, 126, 102, 0.28);
+  border-radius: 10px;
+  background: #f5faf7;
+}
+
+.combined-content-generator h4 {
+  margin: 0 0 4px;
+  color: var(--green);
+}
+
+.combined-content-generator textarea {
+  min-height: 110px;
+}
+
+.combined-content-generator textarea[readonly] {
+  min-height: 130px;
+  background: #fff;
+}
+
 .sns-status-summary {
   display: flex;
   flex-wrap: wrap;

@@ -27,7 +27,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, parseCombinedContentResult, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -79,6 +79,16 @@ assert(xPrompt.includes("使用経験・断定を絶対に書かない") && xPro
 assert(!scoring.buildSnsPrompt({ ...snsItem, usageStatus: "unknown" }, "x", "experience").includes("usageStatusはused。"), "SNS: unused item cannot use experience rule");
 assert(scoring.buildCombinedSnsPrompt({ ...snsItem, snsPosts: scoring.createSnsPosts() }).includes("【X】") && scoring.buildCombinedSnsPrompt({ ...snsItem, snsPosts: scoring.createSnsPosts() }).includes("【Threads】"), "SNS: combined prompt includes both media");
 assert(scoring.createSnsPosts().x.postType === "discovery" && scoring.createSnsPosts().threads.postType === "problem", "SNS: defaults are independent from ROOM postType");
+const combinedItem = { ...snsItem, snsPosts: { x: { postType: "info" }, threads: { postType: "problem" } } };
+const combinedPrompt = scoring.buildCombinedContentPrompt(combinedItem);
+assert(combinedPrompt.includes("ROOM紹介文") && combinedPrompt.includes("ROOMハッシュタグ") && combinedPrompt.includes("X投稿文") && combinedPrompt.includes("Threads投稿文"), "SNS combined: all four generation instructions are included");
+assert(combinedPrompt.includes("===ROOM_INTRO===") && combinedPrompt.includes("===END_ROOM_INTRO===") && combinedPrompt.includes("===END_THREADS_POST==="), "SNS combined: machine-readable output markers are included");
+assert(combinedPrompt.includes("情報型（info）") && combinedPrompt.includes("困りごと型（problem）"), "SNS combined: independent post types are included");
+assert(combinedPrompt.includes("使用経験・断定を絶対に書かない") && combinedPrompt.includes("ROOM個別URL未設定"), "SNS combined: unused and missing URL safety rules");
+const combinedResult = scoring.parseCombinedContentResult(`===ROOM_INTRO===\n紹介文です。\n===END_ROOM_INTRO===\n===ROOM_HASHTAGS===\n#タグ1 #タグ2\n===END_ROOM_HASHTAGS===\n===X_POST===\nX本文です。\n===END_X_POST===\n===THREADS_POST===\nThreads本文です。\n===END_THREADS_POST===`);
+assert(combinedResult.introText === "紹介文です。" && combinedResult.hashTags === "#タグ1 #タグ2" && combinedResult.xText === "X本文です。" && combinedResult.threadsText === "Threads本文です。", "SNS combined: four blocks parse correctly");
+const invalidCombinedResult = scoring.parseCombinedContentResult("===ROOM_INTRO===\n紹介文だけ\n===END_ROOM_INTRO===");
+assert(!invalidCombinedResult.hashTags && !invalidCombinedResult.xText && !invalidCombinedResult.threadsText, "SNS combined: incomplete result is rejected");
 
 console.log(JSON.stringify({
   caseA: { trendFit: caseA.selectionScore.trendFit, opportunity: caseA.selectionScore.opportunity, total: caseA.selectionScore.total },

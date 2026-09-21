@@ -1224,6 +1224,23 @@ function renderSnsEditor(item) {
   </details>`;
 }
 
+function renderCombinedContentGenerator(item) {
+  const promptId = `combined-sns-prompt-${item.id}`;
+  const resultId = `combined-sns-result-${item.id}`;
+  return `<section class="combined-content-generator" aria-label="ROOM・X・Threads一括作成">
+    <h4>通常：ROOM・X・Threadsをまとめて作成</h4>
+    <p class="meta">ChatGPTなどへ1回渡し、4項目をまとめてアプリへ反映できます。</p>
+    <div class="record-actions">
+      <button class="primary-button" type="button" onclick="generateCombinedContentPrompt('${item.id}')">ROOM・X・Threadsをまとめて作成</button>
+      <button class="secondary-button" type="button" onclick="copyValue('${promptId}')">統合プロンプトをコピー</button>
+    </div>
+    <label>統合生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(item.combinedPrompt || "")}</textarea></label>
+    <label>AI生成結果をまとめて貼り付け<textarea id="${resultId}" placeholder="===ROOM_INTRO===\n...\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n...\n===END_ROOM_HASHTAGS===\n\n===X_POST===\n...\n===END_X_POST===\n\n===THREADS_POST===\n...\n===END_THREADS_POST==="></textarea></label>
+    <button class="secondary-button" type="button" onclick="applyCombinedSnsResult('${item.id}')">4項目に反映</button>
+    ${codexPasteErrors.has(item.id) ? `<p class="message" role="alert">${escapeHtml(codexPasteErrors.get(item.id))}</p>` : ""}
+  </section>`;
+}
+
 function renderCollectionSummary() {
   const element = $("#collectionSummary");
   if (!element) return;
@@ -1478,6 +1495,7 @@ function candidateCard(item) {
         ${trustReasonText ? `<details class="trust-details"><summary>判定理由を見る</summary><p>${escapeHtml(trustReasonText).replaceAll("\n", "<br>")}</p></details>` : ""}
         <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
+        ${renderCombinedContentGenerator(item)}
         ${renderSnsStatusSummary(item)}
         ${renderSnsEditor(item)}
         <label>投稿予定日<input type="date" value="${escapeAttr(item.plannedDate || "")}" onchange="updateCandidate('${item.id}', 'plannedDate', this.value)"></label>
@@ -1886,6 +1904,79 @@ function buildSnsPrompt(item, medium, postType) {
 function buildCombinedSnsPrompt(item) {
   const posts = item.snsPosts || createSnsPosts();
   return `次の商品について、X用とThreads用のSNS投稿文章を別々に作成してください。\n\n【X】投稿タイプ：${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}\n${buildSnsPrompt(item, "x", posts.x.postType)}\n\n【Threads】投稿タイプ：${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}\n${buildSnsPrompt(item, "threads", posts.threads.postType)}\n\n出力形式：X:（X本文）\n\nThreads:（Threads本文）`;
+}
+
+function buildCombinedContentPrompt(item) {
+  const product = item.product || item;
+  const posts = item.snsPosts || createSnsPosts();
+  const context = buildGenerationContext(product, item.usageStatus || "不明");
+  const itemUrl = item.itemUrl || product.itemUrl || product.affiliateUrl || "";
+  const roomUrl = item.roomUrl || "ROOM個別URL未設定";
+  const usageRule = item.usageStatus === "used"
+    ? "usageStatusはused。使用体験を書く場合も、利用者が入力した事実の範囲だけに限定する。"
+    : "usageStatusはusedではない。使ってみた、買ってみた、愛用しています、使いやすかった、おすすめです、買ってよかった等の使用経験・断定を絶対に書かない。便利そう、気になりました、チェックしておきたい等の安全な表現を使う。";
+  const xRules = `Xは短め、冒頭の1〜2行を重視し、商品名の羅列から始めない。特徴は1〜2個に絞り、広告っぽさを抑える。投稿タイプは${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}（${posts.x.postType}）。絵文字は少なめ、#PRを付け、必要なら#楽天ROOMを付ける。ROOM個別URLがある場合だけ導線として使う。`;
+  const threadsRules = `ThreadsはXより少し長めの会話調にし、共感・困りごと・発見から始める。商品名や価格だけで始めず、なぜ気になったかを伝え、売り込み感を弱くする。Xの単純な長文化にしない。投稿タイプは${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}（${posts.threads.postType}）。絵文字は少なめ、#PRを付け、ROOM個別URLがある場合だけ導線として使う。`;
+  return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\nROOM個別URL：${roomUrl}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、対象者・困りごと・特徴・利用場面が伝わる自然な紹介文を作る。未使用または不明の商品は体験談を書かない。\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\nROOM個別URLが未設定の場合はURLを作らず、「ROOM個別URL未設定」と明記する。セール・クーポン・ポイントは商品データに明記されたものだけ使用する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\n===END_THREADS_POST===`;
+}
+
+function parseCombinedContentResult(rawText = "") {
+  const readBlock = (name) => rawText.match(new RegExp(`===${name}===\\s*([\\s\\S]*?)\\s*===END_${name}===`))?.[1]?.trim() || "";
+  const result = {
+    introText: readBlock("ROOM_INTRO"),
+    hashTags: readBlock("ROOM_HASHTAGS"),
+    xText: readBlock("X_POST"),
+    threadsText: readBlock("THREADS_POST")
+  };
+  return result;
+}
+
+function generateCombinedContentPrompt(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate) return;
+  candidate.combinedPrompt = buildCombinedContentPrompt(candidate);
+  saveData();
+  renderCandidates();
+  copyText(candidate.combinedPrompt, { silent: true });
+  toast("ROOM・X・Threads用の統合プロンプトを作成しました。");
+}
+
+function applyCombinedSnsResult(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  const input = document.querySelector(`#combined-sns-result-${id}`);
+  if (!candidate || !input) return;
+  codexPasteErrors.delete(id);
+  const parsed = parseCombinedContentResult(input.value || "");
+  if (!parsed.introText || !parsed.hashTags || !parsed.xText || !parsed.threadsText) {
+    codexPasteErrors.set(id, "4項目を確認できません。指定された4つの区切りを含めて貼り付けてください。既存データは保存していません。");
+    renderCandidates();
+    toast("4項目を解析できません。既存データは保存していません。");
+    return;
+  }
+  const copyError = validateGeneratedCopy(parsed.introText, candidate);
+  if (copyError) {
+    codexPasteErrors.set(id, copyError);
+    renderCandidates();
+    toast(copyError);
+    return;
+  }
+  if (`${parsed.introText}\n${parsed.hashTags}`.length > 500) {
+    codexPasteErrors.set(id, "ROOM紹介文とハッシュタグが500文字を超えています。既存データは保存していません。");
+    renderCandidates();
+    toast("ROOM紹介文とハッシュタグが500文字を超えています。");
+    return;
+  }
+  candidate.introText = parsed.introText;
+  candidate.hashTags = parsed.hashTags;
+  candidate.snsPosts = createSnsPosts(candidate.snsPosts);
+  candidate.snsPosts.x.text = parsed.xText;
+  candidate.snsPosts.x.status = "draft";
+  candidate.snsPosts.threads.text = parsed.threadsText;
+  candidate.snsPosts.threads.status = "draft";
+  candidate.status = "文章作成済み";
+  saveData();
+  renderCandidates();
+  toast("ROOM・X・Threadsの4項目を保存しました。");
 }
 
 function saveSnsPost(id, medium, field, value) {
