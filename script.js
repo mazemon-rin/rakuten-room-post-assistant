@@ -1463,7 +1463,7 @@ function renderSalesDashboard() {
   if (!panel) return;
   const sales = (data.sales || []).filter((sale) => sale.status !== "キャンセル");
   if (!sales.length) {
-    panel.innerHTML = `<div class="section-heading"><h3 id="salesDashboardTitle">売上状況</h3><p>楽天成果CSVを読み込んで保存すると、投稿商品との一致や売上状況を確認できます。</p></div>`;
+    panel.innerHTML = `<div class="section-heading"><h3 id="salesDashboardTitle">売上状況</h3><p>楽天成果CSVを読み込んで保存すると、投稿商品との一致や売上状況を確認できます。</p></div><div class="button-row sales-view-buttons"><button class="secondary-button" type="button" disabled>紹介商品と一致</button><button class="secondary-button" type="button" disabled>投稿商品以外の売上</button><button class="secondary-button" type="button" disabled>売上状況をすべて見る</button></div>`;
     return;
   }
   const totals = sales.reduce((summary, sale) => ({ amount: summary.amount + Number(sale.amount || 0), reward: summary.reward + Number(sale.reward || 0), quantity: summary.quantity + Number(sale.quantity || 0) }), { amount: 0, reward: 0, quantity: 0 });
