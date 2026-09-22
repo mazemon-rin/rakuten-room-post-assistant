@@ -167,8 +167,16 @@ assert(scoring.ensureThreadsOnlyDraft(autoDraftCandidate) === true, "Auto draft 
 assert(autoDraftCandidate.snsPosts.threads.text.includes("荷物を整理して持ち歩きたい人") && autoDraftCandidate.snsPosts.threads.text.includes("#PR"), "Auto draft B: audience and PR marker are included");
 assert(!autoDraftCandidate.snsPosts.threads.text.includes("50%OFF"), "Auto draft C: unconfirmed discount is not asserted");
 assert(autoDraftCandidate.snsPosts.threads.replyText.includes(affiliateUrl) && autoDraftCandidate.snsPosts.threads.replyText.split(affiliateUrl).length - 1 === 1, "Auto draft D: affiliateUrl is included exactly once in reply");
+const noAffiliateDraft = scoring.createThreadsOnlyCandidate({ itemName: "収納ボックス", categoryName: "インテリア", itemUrl: "https://example.com/box" }, "no-affiliate-draft");
+noAffiliateDraft.snsPosts.threads.performanceUrlMode = "reply";
+scoring.ensureThreadsOnlyDraft(noAffiliateDraft);
+assert(!noAffiliateDraft.snsPosts.threads.replyText.includes("http") && !noAffiliateDraft.snsPosts.threads.replyText.includes("ROOM"), "Auto draft E: missing affiliateUrl does not create a guessed reply URL");
+const confirmedDraft = scoring.createThreadsOnlyCandidate({ itemName: "収納チェスト", categoryName: "インテリア", itemUrl: "https://example.com/chest", affiliateUrl, couponCandidate: true, discountRate: 50, rateConfirmed: true, discountRateType: "exact" }, "confirmed-draft");
+confirmedDraft.snsPosts.threads.performanceUrlMode = "reply";
+scoring.ensureThreadsOnlyDraft(confirmedDraft);
+assert(confirmedDraft.snsPosts.threads.replyText.includes("50%OFFクーポン対象はこちら"), "Auto draft F: confirmed discount can be used in reply");
 const normalizedAutoDraft = scoring.normalizeSnsRecords([{ ...autoDraftCandidate, snsPosts: { ...autoDraftCandidate.snsPosts, threads: { ...autoDraftCandidate.snsPosts.threads, text: "", replyText: "" } } }])[0];
-assert(normalizedAutoDraft.snsPosts.threads.text && normalizedAutoDraft.threadsStatus === "確認待ち", "Auto draft E: empty legacy Threads candidate is filled on reload");
+assert(normalizedAutoDraft.snsPosts.threads.text && normalizedAutoDraft.snsPosts.threads.replyText.includes(affiliateUrl) && normalizedAutoDraft.threadsStatus === "確認待ち", "Auto draft G: empty legacy Threads candidate is filled on reload");
 
 // Threads成果型 Ver.1: existing normal records remain normal and the new mode is isolated.
 const performanceItem = {

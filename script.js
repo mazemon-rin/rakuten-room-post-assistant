@@ -1900,7 +1900,11 @@ function generateWarningPrompt(id) {
 function renderThreadsOnlyEditor(item) {
   const threads = item.snsPosts?.threads || createSnsPosts().threads;
   const textId = `threads-only-text-${item.id}`;
+  const replyId = `threads-only-reply-${item.id}`;
   const promptId = `threads-only-prompt-${item.id}`;
+  const replyEditor = threads.performanceUrlMode === "reply"
+    ? `<label>返信用文章<textarea id="${replyId}" oninput="saveSnsPost('${item.id}', 'threads', 'replyText', this.value)">${escapeHtml(threads.replyText || "")}</textarea></label><p class="meta">${item.affiliateUrl || item.product?.affiliateUrl ? "保存済み楽天アフィリエイトURLを1回だけ使用します。" : "楽天アフィリエイトURL未取得のため、返信用URLは作成していません。"}</p><div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${replyId}')">返信文をコピー</button></div>`
+    : "";
   return `<section class="threads-only-editor" aria-label="Threads限定文章">
     <h4>Threads限定文章（成果型 Ver.1）</h4>
     <label>誰向け（任意・修正可）<input value="${escapeAttr(threads.performanceAudience || "")}" placeholder="例：クローゼットの収納が足りない人" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label>
@@ -1910,6 +1914,7 @@ function renderThreadsOnlyEditor(item) {
     <p class="message">登録時に安全な自動下書きを作成済みです。必要に応じてCodexで書き直せます。</p>
     <label>Threads生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', 'threads', 'text', this.value)">${escapeHtml(threads.text || "")}</textarea></label>
     <p>文字数：<span>${Array.from(threads.text || "").length}</span></p>
+    ${replyEditor}
     <label>Codex結果をまとめて貼り付け<textarea id="threads-only-result-${item.id}" placeholder="===THREADS_POST===\n...\n===END_THREADS_POST==="></textarea></label>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="applyThreadsOnlyResult('${item.id}')">Threads文章に反映</button><button class="secondary-button" type="button" onclick="copyValue('${textId}')">文章をコピー</button><button class="secondary-button" type="button" onclick="markThreadsOnlyPosted('${item.id}')">投稿済みにする</button></div>
   </section>`;
@@ -2542,7 +2547,8 @@ function buildThreadsOnlyDraft(item) {
     urlMode === "reply" ? "対象は返信に👇" : link ? `商品はこちら👇\n${link}` : "商品情報は商品ページで確認してください。",
     "#PR"
   ];
-  const replyText = urlMode === "reply" && link ? `商品はこちら👇\n${link}\n#PR` : "";
+  const replyLabel = confirmedRate && item.couponCandidate ? `${evidence.discountRate}%OFFクーポン対象はこちら👇` : "お得情報はこちら👇";
+  const replyText = urlMode === "reply" && link ? `${replyLabel}\n${link}\n#PR` : "";
   return { text: bodyParts.join("\n"), replyText };
 }
 
