@@ -1644,7 +1644,7 @@ function renderThreadsOnlyEditor(item) {
   return `<section class="threads-only-editor" aria-label="Threads限定文章">
     <h4>Threads限定文章（成果型 Ver.1）</h4>
     <label>誰向け（任意・修正可）<input value="${escapeAttr(threads.performanceAudience || "")}" placeholder="例：セール商品を探している人へ" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label>
-    <p class="meta">ROOM URLは使用しません。Threads限定投稿用URLは未実装のため、商品URL・アフィリエイトURLを文章へ自動挿入しません。</p>
+    <p class="meta">ROOM URLは使用しません。楽天アフィリエイトURLの取得状態に応じて、成果型文章へ反映します。</p>
     <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(threads.prompt || "")}</textarea></label>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="generateThreadsOnlyPrompt('${item.id}')">成果型プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">プロンプトをコピー</button><button class="primary-button" type="button" onclick="startThreadsOnlyCodex('${item.id}')">CodexでThreads文章作成</button></div>
     <label>Threads生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', 'threads', 'text', this.value)">${escapeHtml(threads.text || "")}</textarea></label>
