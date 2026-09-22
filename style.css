@@ -355,6 +355,34 @@ main {
   margin-bottom: 18px;
 }
 
+.candidate-view-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.candidate-view-tab {
+  min-height: 42px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px 8px 0 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.candidate-view-tab.active {
+  border-color: rgba(58, 126, 102, 0.45);
+  background: #edf7f2;
+  color: var(--green);
+}
+
+.candidate-view-panel[hidden] {
+  display: none;
+}
+
 .affiliate-import-panel {
   margin: 18px 0;
 }

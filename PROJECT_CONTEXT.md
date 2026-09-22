@@ -46,6 +46,7 @@ README記載のVersionを作業開始時に確認する。
 
 ## Threads限定投稿
 
+- 候補管理画面は「投稿候補」タブ（ROOM自動運用）と「Threads投稿」タブ（Threads限定アフィリエイト投稿）に分かれる。初期表示は投稿候補で、タブ切り替えは保存データを変更しない。
 - 商品カードの「投稿候補に保存」は従来どおりROOM投稿専用で、保存先は後方互換のため同じ`data.candidates`配列を使い、`destination: "room"`として扱う。
 - 商品カードの「Threads投稿」は`destination: "threads_only"`の候補を作る。ROOM投稿候補、ROOM投稿待ち、ROOM紹介文・ハッシュタグ作成、ROOM個別URL、X投稿対象には追加しない。
 - Threads限定候補は「Threads候補」→「文章作成待ち」→「確認待ち」→「投稿済み」を区別し、既存のThreads成果型Ver.1を基本モードとして使う。誰向けの表現は人間が確認・修正できる。

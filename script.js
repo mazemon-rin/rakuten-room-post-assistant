@@ -211,6 +211,7 @@ function bindForms() {
   $("#settingsForm").addEventListener("submit", saveSettings);
   $("#candidateFilter").addEventListener("input", renderCandidates);
   $("#candidateStatusFilter").addEventListener("change", renderCandidates);
+  $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
   $("#apply-codex-result").addEventListener("click", applyCodexResult);
   $("#historyFilter").addEventListener("input", renderHistory);
   $("#favoriteFilter").addEventListener("input", renderFavorites);
@@ -231,6 +232,20 @@ function bindForms() {
   $("#saveAffiliateImport").addEventListener("click", saveAffiliateImport);
   $("#cancelAffiliateImport").addEventListener("click", closeAffiliateImport);
   $("#clearData").addEventListener("click", clearData);
+}
+
+function setCandidateView(view) {
+  const selectedView = view === "threads" ? "threads" : "room";
+  $$(".candidate-view-tab").forEach((button) => {
+    const active = button.dataset.candidateView === selectedView;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  $$(".candidate-view-panel").forEach((panel) => {
+    const active = panel.id === `candidate-${selectedView}-view`;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
 }
 
 function saveRankingCategorySelection() {
@@ -1286,6 +1301,7 @@ function renderCandidates() {
     }
   });
   if (trustUpdated) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  updateCandidateViewCounts();
   const keyword = $("#candidateFilter")?.value?.trim() || "";
   const status = $("#candidateStatusFilter")?.value || "";
   const items = data.candidates.filter((item) => {
@@ -1298,6 +1314,13 @@ function renderCandidates() {
   renderThreadsOnlyCandidates();
   renderQueueProgress();
   renderCollectionSummary();
+}
+
+function updateCandidateViewCounts() {
+  const roomCount = data.candidates.filter(isRoomCandidate).length;
+  const threadsCount = data.candidates.filter(isThreadsOnlyItem).length;
+  if ($("#roomCandidateCount")) $("#roomCandidateCount").textContent = roomCount;
+  if ($("#threadsCandidateCount")) $("#threadsCandidateCount").textContent = threadsCount;
 }
 
 function renderThreadsOnlyCandidates() {
