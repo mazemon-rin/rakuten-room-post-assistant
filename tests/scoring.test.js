@@ -27,7 +27,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -117,6 +117,41 @@ assert(scoring.validateSnsPostText(withRoomUrl, "threads", `本文\n${roomUrl}\n
 const snsOnlyResult = scoring.parseSnsPostsResult(`===X_POST===\n${shortX}\n===END_X_POST===\n===THREADS_POST===\n${shortThreads}\n===END_THREADS_POST===`);
 assert(snsOnlyResult.xText === shortX && snsOnlyResult.threadsText === shortThreads && scoring.validateSnsPostsResult(withRoomUrl, snsOnlyResult) === "", "SNS workflow: X and Threads result format parses and validates");
 assert(scoring.validateSnsPostsResult(withRoomUrl, { xText: "本文\n#PR", threadsText: shortThreads }).includes("ROOM個別URL"), "SNS workflow: incomplete X result is rejected without overwrite");
+
+// Threads成果型 Ver.1: existing normal records remain normal and the new mode is isolated.
+const performanceItem = {
+  ...withRoomUrl,
+  itemName: "iPhone18Pro ケース",
+  title: "iPhone18Pro ケース",
+  categoryName: "スマートフォン・タブレット",
+  saleInfo: { discountRate: 50, coupon: "50%OFFクーポン", salePeriod: "2026-09-24 01:59まで" },
+  snsPosts: scoring.createSnsPosts({ threads: { postType: "problem", threadsPostType: "performance_v1" } })
+};
+assert(scoring.createSnsPosts({ threads: { postType: "problem" } }).threads.threadsPostType === "normal", "Performance A: legacy Threads records default to normal");
+const performancePrompt = scoring.buildThreadsPerformancePrompt(performanceItem);
+assert(performancePrompt.includes("誰向け") && performancePrompt.includes("どんなお得") && performancePrompt.includes("期限・今見る理由"), "Performance B: prompt includes the three-part structure");
+assert(scoring.buildSnsPrompt(performanceItem, "threads", "problem") === performancePrompt, "Performance B: Threads prompt route uses the selected performance mode");
+assert(performancePrompt.includes("50%OFFクーポン") && performancePrompt.includes("2026-09-24 01:59まで") && performancePrompt.includes(roomUrl), "Performance C: verified sale facts and exact ROOM URL are included");
+const noSalePrompt = scoring.buildThreadsPerformancePrompt({ ...performanceItem, saleInfo: {}, roomUrl: "" });
+assert(noSalePrompt.includes("確認済みのセール情報なし") && noSalePrompt.includes("期限が確認できない場合") && !noSalePrompt.includes("50%OFF"), "Performance D: unavailable discount and deadline are not invented");
+const today = new Date().toISOString().slice(0, 10);
+scoring.data.eventSettings = { enabled: true, eventName: "テストイベント", startDate: today, endDate: today };
+const eventPrompt = scoring.buildThreadsPerformancePrompt(performanceItem);
+assert(eventPrompt.includes("テストイベント") && eventPrompt.includes(today), "Performance E: active eventSettings can be used with dates");
+scoring.data.eventSettings = {};
+const bodyPerformance = { ...performanceItem, snsPosts: scoring.createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: "body" } }) };
+const bodyThreads = `iPhone18を買った人へ\n50%OFFクーポンあり\n${roomUrl}\n#PR`;
+assert(scoring.validateSnsPostsResult(bodyPerformance, { xText: shortX, threadsText: bodyThreads }) === "", "Performance F: body mode requires exact URL once and #PR");
+const replyPerformance = { ...performanceItem, snsPosts: scoring.createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: "reply" } }) };
+assert(scoring.buildCombinedSnsPrompt(replyPerformance).includes("===THREADS_REPLY===") && scoring.buildSnsCodexInstructions(replyPerformance).includes("===THREADS_REPLY==="), "Performance F: combined and Codex prompts include the reply block");
+const replyThreads = "iPhone18を買った人へ\n50%OFFクーポンあり\n#PR";
+const replyResult = scoring.parseSnsPostsResult(`===X_POST===\n${shortX}\n===END_X_POST===\n===THREADS_POST===\n${replyThreads}\n===END_THREADS_POST===\n===THREADS_REPLY===\n商品はこちら\n${roomUrl}\n===END_THREADS_REPLY===`);
+assert(scoring.validateSnsPostsResult(replyPerformance, replyResult) === "", "Performance G: reply mode validates body and exact URL in reply");
+const appliedPerformance = { ...replyPerformance, introText: "保存済み紹介文", hashTags: "#保存済み" };
+scoring.applySnsPostsToItem(appliedPerformance, replyResult);
+assert(appliedPerformance.introText === "保存済み紹介文" && appliedPerformance.hashTags === "#保存済み" && appliedPerformance.snsPosts.threads.replyText === `商品はこちら\n${roomUrl}`, "Performance H: apply preserves ROOM text and stores reply text");
+scoring.data.eventSettings = {};
+
 assert(!scoring.canStartSnsCodex({ roomUrl: "" }), "SNS Codex: cannot start before ROOM URL registration");
 assert(scoring.canStartSnsCodex(withRoomUrl), "SNS Codex: can start after valid ROOM URL registration");
 const snsCodexInstructions = scoring.buildSnsCodexInstructions({ ...withRoomUrl, itemCode: "shop:iphone-case", snsPosts: scoring.createSnsPosts() });

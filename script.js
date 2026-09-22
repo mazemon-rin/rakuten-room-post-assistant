@@ -134,8 +134,18 @@ function createSnsPosts(existing = {}) {
   });
   return {
     x: makePost(existing.x, "discovery"),
-    threads: makePost(existing.threads, "problem")
+    threads: {
+      ...makePost(existing.threads, "problem"),
+      threadsPostType: existing.threads?.threadsPostType === "performance_v1" ? "performance_v1" : "normal",
+      performanceAudience: typeof existing.threads?.performanceAudience === "string" ? existing.threads.performanceAudience : "",
+      performanceUrlMode: existing.threads?.performanceUrlMode === "reply" ? "reply" : "body",
+      replyText: typeof existing.threads?.replyText === "string" ? existing.threads.replyText : ""
+    }
   };
+}
+
+function getThreadsPostModeLabel(mode = "normal") {
+  return mode === "performance_v1" ? "Threads成果型 Ver.1" : "通常Threads紹介文";
 }
 
 function normalizeSnsRecords(records = []) {
@@ -518,6 +528,27 @@ function getSaleInfo(product = {}) {
     ["注意事項", pick("saleNotice", "campaignNotice", "limitedQuantity", "quantityLimit")]
   ];
   return entries.filter(([, value]) => value !== "").map(([label, value]) => `${label}：${value}`).join("\n");
+}
+
+function getThreadsPerformanceFacts(item = {}) {
+  const product = item.product || item;
+  const saleInfo = getSaleInfo(product);
+  const event = data.eventSettings || {};
+  const structured = [
+    ["割引率", product.discountRate ?? product.saleRate],
+    ["セール価格", product.salePrice ?? product.discountPrice ?? product.campaignPrice],
+    ["通常価格", product.regularPrice ?? product.originalPrice ?? product.listPrice],
+    ["クーポン", product.coupon ?? product.couponInfo ?? product.couponText],
+    ["セール期間", product.salePeriod ?? product.campaignPeriod ?? product.saleStartEnd],
+    ["ポイント還元", product.pointBack ?? product.pointRate ?? product.pointCampaign],
+    ["送料無料", product.postageFlag === 1 ? "確認済み" : ""],
+    ["商品セール情報", saleInfo]
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+  const eventTiming = calculateEventTiming(event);
+  return {
+    structured: structured.map(([label, value]) => `${label}：${value}`).join("\n") || "確認済みのセール情報なし",
+    event: event.enabled && event.eventName && eventTiming.score ? `${event.eventName}（${event.startDate || ""}〜${event.endDate || ""}）` : "確認済みの有効イベントなし"
+  };
 }
 
 function buildGenerationContext(product = {}, usageStatus = "不明") {
@@ -1186,14 +1217,18 @@ function renderSnsPostEditor(item, medium, label) {
   const textLength = Array.from(post.text || "").length;
   const lengthLabel = medium === "x" ? `${textLength} / ${SNS_X_MAX_LENGTH}` : textLength;
   const lengthWarning = medium === "x" && textLength > SNS_X_MAX_LENGTH ? "140文字を超えています" : "";
+  const performanceControls = medium === "threads" ? `<label>文章モード<select onchange="saveSnsPost('${item.id}', 'threads', 'threadsPostType', this.value); generateSnsPrompt('${item.id}', 'threads'); renderCandidates()"><option value="normal" ${post.threadsPostType !== "performance_v1" ? "selected" : ""}>通常Threads紹介文</option><option value="performance_v1" ${post.threadsPostType === "performance_v1" ? "selected" : ""}>Threads成果型 Ver.1</option></select></label>${post.threadsPostType === "performance_v1" ? `<label>誰向け（任意・修正可）<input value="${escapeAttr(post.performanceAudience || "")}" placeholder="例：iPhone18を買った人へ" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label><label>ROOM URLの扱い<select onchange="saveSnsPost('${item.id}', 'threads', 'performanceUrlMode', this.value); generateSnsPrompt('${item.id}', 'threads'); renderCandidates()"><option value="body" ${post.performanceUrlMode !== "reply" ? "selected" : ""}>本文に含める</option><option value="reply" ${post.performanceUrlMode === "reply" ? "selected" : ""}>返信用URLとして別生成</option></select></label>` : ""}` : "";
+  const replyEditor = medium === "threads" && post.threadsPostType === "performance_v1" && post.performanceUrlMode === "reply" ? `<label>返信用文章<textarea id="sns-reply-text-${item.id}" oninput="saveSnsPost('${item.id}', 'threads', 'replyText', this.value)">${escapeHtml(post.replyText || "")}</textarea></label>` : "";
   return `<section class="sns-post-editor" data-sns-medium="${medium}">
     <h4>${label}</h4>
+    ${performanceControls}
     <label>投稿タイプ<select onchange="saveSnsPost('${item.id}', '${medium}', 'postType', this.value); generateSnsPrompt('${item.id}', '${medium}')">${options}</select></label>
     <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(post.prompt || "")}</textarea></label>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="generateSnsPrompt('${item.id}', '${medium}')">生成プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">生成プロンプトをコピー</button><button class="secondary-button" type="button" onclick="openSnsChatGPT('${item.id}', '${medium}')">ChatGPT用プロンプトをコピー</button></div>
     <label>生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', '${medium}', 'text', this.value)">${escapeHtml(post.text || "")}</textarea></label>
     <p>文字数：<span data-sns-count="${textId}" class="${lengthWarning ? "sns-count-warning" : ""}">${lengthLabel}</span> <span data-sns-warning="${textId}" class="sns-count-warning">${lengthWarning}</span></p>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${textId}')">文章をコピー</button><button class="secondary-button" type="button" onclick="markSnsPosted('${item.id}', '${medium}')">投稿済みにする</button></div>
+    ${replyEditor}
   </section>`;
 }
 
@@ -1905,7 +1940,7 @@ function getSnsProductFacts(item) {
     `カテゴリー：${item.categoryName || product.categoryName || "未設定"}`,
     `ランキング：${item.rank || product.rank || "未設定"}`,
     `レビュー：評価${product.reviewAverage ?? "未設定"}／${product.reviewCount ?? "未設定"}件`,
-    `セール・クーポン情報：${product.saleInfo || product.couponInfo || product.pointInfo || "未設定"}`,
+    `セール・クーポン情報：${getSaleInfo(product) || product.couponInfo || product.pointInfo || "未設定"}`,
     `信頼性判定：${item.trustStatus || "未確認"}`,
     `ROOM紹介文：${item.introText || "未設定"}`,
     `ハッシュタグ：${item.hashTags || "未設定"}`,
@@ -1944,7 +1979,29 @@ function getSnsTypeSpecificRule(medium, postType) {
   return medium === "x" ? "特徴は1〜2個に絞り、冒頭を重視する。" : "共感・困りごと・発見から入り、なぜ気になったかを伝える。";
 }
 
+function buildThreadsPerformancePrompt(item, options = {}) {
+  const product = item.product || item;
+  const posts = item.snsPosts || createSnsPosts();
+  const threads = posts.threads || createSnsPosts().threads;
+  const urlMode = options.urlMode || threads.performanceUrlMode || "body";
+  const audience = options.audience || threads.performanceAudience || "自動判定できる範囲で、商品情報に合う対象者を短く示す。根拠がなければ人間が修正する。";
+  const context = buildGenerationContext(product, item.usageStatus || "不明");
+  const facts = getThreadsPerformanceFacts(item);
+  const roomUrl = String(item.roomUrl || "").trim();
+  const urlRule = roomUrl
+    ? urlMode === "reply"
+      ? `本文にはROOM URLを入れず、返信用文章に登録済みURLを完全一致で1回だけ記載する。URLは変更・短縮・省略・推測しない。`
+      : `本文に登録済みROOM URLを完全一致で1回だけ記載する。URLは変更・短縮・省略・推測しない。`
+    : "ROOM URLは未設定。本文・返信用文章へURLを推測生成せず、「ROOM個別URL未設定」という文言も書かない。";
+  const output = urlMode === "reply"
+    ? `===THREADS_POST===\n本文（URLなし、#PR必須）\n===END_THREADS_POST===\n\n===THREADS_REPLY===\n返信用の短い導線とROOM URL（登録済みの場合のみ）\n===END_THREADS_REPLY===`
+    : `===THREADS_POST===\n本文（ROOM URLと#PRを含む）\n===END_THREADS_POST===`;
+  return `Threads成果型 Ver.1の投稿文章を作成してください。通常Threads紹介文とは別の短文モードです。\n\n【基本構造】\n1. 誰向け\n2. どんなお得\n3. 期限・今見る理由\nこの3要素を短く自然にまとめる。商品説明を長く言い換えず、最も強いお得情報を1つ優先する。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品名：${product.itemName || product.title || "未設定"}\nカテゴリー：${product.categoryName || "未設定"}\n対象者の補助情報：${context.targetUser}\n誰向けの入力・指定：${audience}\n確認済みセール情報：\n${facts.structured}\n確認済みイベント：${facts.event}\nROOM個別URL：${roomUrl || "未設定"}\n\n【安全ルール】\n${getSalePromptRule()}\nusageStatusがusedでない場合、使用・購入体験、レビュー・効果・在庫を捏造しない。存在しない割引率、期限、ポイント倍率、イベント開催状況を推測しない。期限が確認できない場合、「今日まで」「あと○時間」などを書かない。\n${urlRule}\n#PRを必ず含める。外部Threadsへ自動投稿しない。\n\n【出力形式】\n${output}`;
+}
+
 function buildSnsPrompt(item, medium, postType) {
+  const threadsMode = item.snsPosts?.threads?.threadsPostType || "normal";
+  if (medium === "threads" && threadsMode === "performance_v1") return buildThreadsPerformancePrompt(item);
   const typeLabel = SNS_POST_TYPES[postType] || SNS_POST_TYPES.discovery;
   const isX = medium === "x";
   const baseRules = isX
@@ -1980,7 +2037,7 @@ function buildSnsCodexInstructions(item) {
     getSnsProductFacts(item),
     "",
     `X投稿タイプ：${SNS_POST_TYPES[xType] || xType}（${xType}）`,
-    `Threads投稿タイプ：${SNS_POST_TYPES[threadsType] || threadsType}（${threadsType}）`,
+    `Threads文章モード：${getThreadsPostModeLabel(posts.threads.threadsPostType)} / 投稿タイプ：${SNS_POST_TYPES[threadsType] || threadsType}（${threadsType}）`,
     `確定ROOM個別URL：${item.roomUrl}`,
     "登録済みのROOM個別URLをXとThreadsの各本文へ完全一致で1回だけ記載する。URLを変更、短縮、省略、推測しない。",
     "",
@@ -1989,7 +2046,9 @@ function buildSnsCodexInstructions(item) {
     `${getXLengthPromptRule()} #PRは必須。登録済みROOM URLと#PRは削除しない。`,
     "",
     "【Threadsの作成ルール】",
-    "困りごと型を基本とし、商品説明から合理的に導ける日常の具体的な小さな困りごとを1つ選び、冒頭1〜2文に置く。Xを単純に長文化せず、会話調で困りごと→気になった点→ROOM導線の流れにする。140文字制限は設けない。#PRは必須。",
+    posts.threads.threadsPostType === "performance_v1"
+      ? `成果型 Ver.1：誰向け＋どんなお得＋期限・今見る理由を短くまとめる。確認済み情報だけを使い、${posts.threads.performanceUrlMode === "reply" ? "本文にはROOM URLを入れず、返信用文章へ完全一致で1回記載する" : "本文へROOM URLを完全一致で1回記載する"}。#PRは必須。`
+      : "困りごと型を基本とし、商品説明から合理的に導ける日常の具体的な小さな困りごとを1つ選び、冒頭1〜2文に置く。Xを単純に長文化せず、会話調で困りごと→気になった点→ROOM導線の流れにする。140文字制限は設けない。#PRは必須。",
     "",
     "【共通の安全ルール】",
     usageRule,
@@ -2009,14 +2068,16 @@ function buildSnsCodexInstructions(item) {
     "===END_X_POST===",
     "",
     "===THREADS_POST===",
-    "Threads本文（ROOM URLと#PRを含める）",
-    "===END_THREADS_POST==="
+    posts.threads.threadsPostType === "performance_v1" && posts.threads.performanceUrlMode === "reply" ? "Threads成果型本文（URLなし、#PRを含める）" : "Threads本文（ROOM URLと#PRを含める）",
+    "===END_THREADS_POST===",
+    ...(posts.threads.threadsPostType === "performance_v1" && posts.threads.performanceUrlMode === "reply" ? ["", "===THREADS_REPLY===", "返信用文章（登録済みROOM URLを完全一致で1回）", "===END_THREADS_REPLY==="] : [])
   ].join("\n");
 }
 
 function buildCombinedSnsPrompt(item) {
   const posts = item.snsPosts || createSnsPosts();
-  return `次の商品について、X用とThreads用のSNS投稿文章を別々に作成してください。\n\n【X】投稿タイプ：${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}\n${buildSnsPrompt(item, "x", posts.x.postType)}\n\n【Threads】投稿タイプ：${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}\n${buildSnsPrompt(item, "threads", posts.threads.postType)}\n\n次の区切りをそのまま使って、XとThreadsだけを返してください。ROOM紹介文とハッシュタグは返さないでください。\n===X_POST===\nX本文\n===END_X_POST===\n\n===THREADS_POST===\nThreads本文\n===END_THREADS_POST===`;
+  const replyBlock = posts.threads.threadsPostType === "performance_v1" && posts.threads.performanceUrlMode === "reply" ? "\n\n===THREADS_REPLY===\n返信用文章\n===END_THREADS_REPLY===" : "";
+  return `次の商品について、X用とThreads用のSNS投稿文章を別々に作成してください。\n\n【X】投稿タイプ：${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}\n${buildSnsPrompt(item, "x", posts.x.postType)}\n\n【Threads】文章モード：${getThreadsPostModeLabel(posts.threads.threadsPostType)} / 投稿タイプ：${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}\n${buildSnsPrompt(item, "threads", posts.threads.postType)}\n\n次の区切りをそのまま使って、XとThreadsだけを返してください。ROOM紹介文とハッシュタグは返さないでください。\n===X_POST===\nX本文\n===END_X_POST===\n\n===THREADS_POST===\nThreads本文\n===END_THREADS_POST===${replyBlock}`;
 }
 
 function buildCombinedContentPrompt(item) {
@@ -2081,10 +2142,19 @@ function validateSnsPostText(item, medium, text) {
 
 function parseSnsPostsResult(rawText = "") {
   const readBlock = (name) => rawText.match(new RegExp(`===${name}===\\s*([\\s\\S]*?)\\s*===END_${name}===`))?.[1]?.trim() || "";
-  return { xText: readBlock("X_POST"), threadsText: readBlock("THREADS_POST") };
+  return { xText: readBlock("X_POST"), threadsText: readBlock("THREADS_POST"), threadsReplyText: readBlock("THREADS_REPLY") };
 }
 
 function validateSnsPostsResult(item, parsed) {
+  const threads = item.snsPosts?.threads || {};
+  if (threads.threadsPostType === "performance_v1" && threads.performanceUrlMode === "reply") {
+    const bodyError = validateSnsPostText({ ...item, roomUrl: "" }, "threads", parsed.threadsText);
+    if (bodyError) return bodyError;
+    const roomUrl = String(item.roomUrl || "").trim();
+    if (roomUrl && countTextOccurrences(parsed.threadsReplyText, roomUrl) !== 1) return "Threads返信用文章に登録済みROOM個別URLを1回だけ含めてください。";
+    if (!roomUrl && parsed.threadsReplyText) return "ROOM URL未設定時は返信用URLを作成しないでください。";
+    return validateSnsPostText(item, "x", parsed.xText);
+  }
   return validateSnsPostText(item, "x", parsed.xText) || validateSnsPostText(item, "threads", parsed.threadsText);
 }
 
@@ -2094,6 +2164,7 @@ function applySnsPostsToItem(item, parsed) {
   item.snsPosts.x.status = "draft";
   item.snsPosts.threads.text = parsed.threadsText;
   item.snsPosts.threads.status = "draft";
+  if (item.snsPosts.threads.threadsPostType === "performance_v1" && item.snsPosts.threads.performanceUrlMode === "reply") item.snsPosts.threads.replyText = parsed.threadsReplyText || "";
   return item;
 }
 
