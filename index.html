@@ -144,6 +144,9 @@
         <select id="candidateStatusFilter">
           <option value="">すべてのステータス</option>
           <option>未作成</option>
+          <option>文章作成待ち</option>
+          <option>Threads候補</option>
+          <option>Threads限定</option>
           <option>文章作成済み</option>
           <option>投稿待ち</option>
           <option>Codex処理中</option>
@@ -156,6 +159,13 @@
         </select>
       </div>
       <div id="candidateList" class="record-list"></div>
+      <section class="panel threads-only-panel" aria-labelledby="threadsOnlyTitle">
+        <div class="section-heading">
+          <h3 id="threadsOnlyTitle">Threads限定投稿</h3>
+          <p>ROOMへ投稿せず、Threadsだけで紹介する商品を管理します。</p>
+        </div>
+        <div id="threadsOnlyList" class="record-list"></div>
+      </section>
     </section>
 
     <section id="history" class="tab-panel">

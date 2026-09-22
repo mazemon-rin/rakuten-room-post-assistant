@@ -149,7 +149,15 @@ function getThreadsPostModeLabel(mode = "normal") {
 }
 
 function normalizeSnsRecords(records = []) {
-  return records.map((record) => ({ ...record, snsPosts: createSnsPosts(record.snsPosts) }));
+  return records.map((record) => ({ ...record, destination: record.destination === "threads_only" ? "threads_only" : "room", snsPosts: createSnsPosts(record.snsPosts) }));
+}
+
+function isThreadsOnlyItem(item = {}) {
+  return item.destination === "threads_only";
+}
+
+function isRoomCandidate(item = {}) {
+  return !isThreadsOnlyItem(item);
 }
 
 let data = loadData();
@@ -772,7 +780,7 @@ function calculateTrendSelectionScore(product = {}, context = {}) {
 function scoreProductSelection(product = {}) {
   return calculateSelectionScore(product, {
     postedIdentities: new Set(data.history.map((item) => rankingIdentity(item.product || item))),
-    queuedIdentities: new Set(data.candidates.map((item) => rankingIdentity(item.product || item)))
+    queuedIdentities: new Set(data.candidates.filter(isRoomCandidate).map((item) => rankingIdentity(item.product || item)))
   });
   /* legacy scoring fields retained below for backward-compatible saved data. */
   const trust = product.trustStatus ? product : { ...product, ...checkProductTrust(product) };
@@ -862,7 +870,7 @@ function applySelectionScore(product = {}) {
   const isTrendProduct = Array.isArray(source.matchedTrendKeywords) && source.matchedTrendKeywords.length > 0;
   Object.assign(product, isTrendProduct ? calculateTrendSelectionScore(source, {
     postedIdentities: new Set(data.history.map((item) => rankingIdentity(item.product || item))),
-    queuedIdentities: new Set(data.candidates.map((item) => rankingIdentity(item.product || item))),
+    queuedIdentities: new Set(data.candidates.filter(isRoomCandidate).map((item) => rankingIdentity(item.product || item))),
     matchedTrendKeywords: source.matchedTrendKeywords
   }) : scoreProductSelection(source));
   return product;
@@ -943,6 +951,7 @@ function renderResults(products) {
         <div class="button-row">
           <button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>
           <button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button>
+          <button class="secondary-button" type="button" onclick="threadsOnlySaveByIndex(${index})">Threads投稿</button>
           <button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button>
           <a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a>
         </div>
@@ -964,6 +973,11 @@ function openDetailByCandidate(id) {
 function quickSaveByIndex(index) {
   const product = searchResults[index];
   if (product) quickSave(product);
+}
+
+function threadsOnlySaveByIndex(index) {
+  const product = searchResults[index];
+  if (product) quickSaveThreadsOnly(product);
 }
 
 function saveWarningCandidateByIndex(index) {
@@ -1013,6 +1027,7 @@ function openDetail(product, draft = {}) {
         <div class="button-row">
           <button class="primary-button" type="button" onclick="generatePrompt()">紹介文プロンプトを作る</button>
           <button class="secondary-button" type="button" onclick="quickSave(currentProduct)">投稿候補に保存</button>
+          <button class="secondary-button" type="button" onclick="quickSaveThreadsOnly(currentProduct)">Threads投稿</button>
           <button class="secondary-button" type="button" onclick="addFavorite(currentProduct)">お気に入り</button>
           <button class="secondary-button" type="button" onclick="openChatGPT()">ChatGPTで開く</button>
         </div>
@@ -1111,6 +1126,7 @@ function quickSave(product) {
   const duplicate = findDuplicate(productWithUrl);
   const candidate = {
     id: crypto.randomUUID(),
+    destination: "room",
     product: productWithUrl,
     title: productWithUrl.itemName,
     imageUrl: getImage(productWithUrl),
@@ -1147,6 +1163,62 @@ function quickSave(product) {
   toast("投稿候補に保存しました。");
 }
 
+function createThreadsOnlyCandidate(product, id = crypto.randomUUID()) {
+  const itemUrl = product.itemUrl || product.affiliateUrl || "";
+  const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
+  return {
+    id,
+    destination: "threads_only",
+    product: productWithUrl,
+    title: productWithUrl.itemName,
+    imageUrl: getImage(productWithUrl),
+    itemUrl,
+    itemCode: productWithUrl.itemCode,
+    price: productWithUrl.itemPrice,
+    shopName: productWithUrl.shopName,
+    genreId: productWithUrl.genreId || "",
+    categoryId: productWithUrl.categoryId || "",
+    categoryName: productWithUrl.categoryName || "",
+    rank: productWithUrl.rank || "",
+    fetchedAt: productWithUrl.fetchedAt || "",
+    introPrompt: "",
+    introText: "",
+    hashTags: "",
+    usageStatus: "unknown",
+    savedAt: new Date().toISOString(),
+    plannedDate: new Date().toISOString().slice(0, 10),
+    memo: "Threads限定投稿",
+    status: "Threads候補",
+    postStatus: "Threads限定",
+    threadsStatus: "文章作成待ち",
+    favoriteType: "Threads限定",
+    matchedTrendKeywords: productWithUrl.matchedTrendKeywords || [],
+    trendSearchPosition: productWithUrl.trendSearchPosition || null,
+    performance: productWithUrl.performance || { clicks: null, orders: null, reward: null },
+    snsPosts: createSnsPosts({ threads: { threadsPostType: "performance_v1" } })
+  };
+}
+
+function quickSaveThreadsOnly(product) {
+  const itemUrl = product.itemUrl || product.affiliateUrl || "";
+  const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
+  const existing = data.candidates.find((item) => isThreadsOnlyItem(item) && rankingIdentity(item.product || item) === rankingIdentity(productWithUrl));
+  if (existing) {
+    toast("この商品はThreads限定候補へ保存済みです。");
+    return;
+  }
+  const candidate = createThreadsOnlyCandidate(productWithUrl);
+  candidate.snsPosts.threads.prompt = buildThreadsPerformancePrompt(candidate);
+  candidate.snsPosts.threads.generatedAt = new Date().toISOString();
+  Object.assign(candidate, checkProductTrust(productWithUrl));
+  applySelectionScore(candidate);
+  applyStrategyScores(candidate);
+  data.candidates.unshift(candidate);
+  saveData();
+  renderCandidates();
+  toast("Threads限定候補へ保存しました。ROOM投稿候補には追加していません。");
+}
+
 function renderAll() {
   renderDashboard();
   renderCandidates();
@@ -1159,15 +1231,15 @@ function renderAll() {
 function renderDashboard() {
   const today = new Date().toISOString().slice(0, 10);
   const month = today.slice(0, 7);
-  const duplicateCount = data.candidates.filter((candidate) => findDuplicate(candidate.product, candidate.id)).length;
+  const duplicateCount = data.candidates.filter((candidate) => isRoomCandidate(candidate) && findDuplicate(candidate.product, candidate.id)).length;
   const stats = [
-    ["今日の投稿候補数", data.candidates.filter((item) => item.savedAt.slice(0, 10) === today).length],
-    ["未投稿の商品数", data.candidates.filter((item) => item.status !== "投稿済み").length],
+    ["今日の投稿候補数", data.candidates.filter((item) => isRoomCandidate(item) && item.savedAt.slice(0, 10) === today).length],
+    ["未投稿の商品数", data.candidates.filter((item) => isRoomCandidate(item) && item.status !== "投稿済み").length],
     ["今月の投稿数", data.history.filter((item) => item.postedAt.slice(0, 7) === month).length],
     ["重複候補数", duplicateCount]
   ];
   $("#statsGrid").innerHTML = stats.map(([label, value]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join("");
-  $("#recentCandidates").innerHTML = compactItems(data.candidates.slice(0, 5));
+  $("#recentCandidates").innerHTML = compactItems(data.candidates.filter(isRoomCandidate).slice(0, 5));
   $("#recentHistory").innerHTML = compactItems(data.history.slice(0, 5));
 }
 
@@ -1191,21 +1263,38 @@ function renderCandidates() {
       applyStrategyScores(item);
       trustUpdated = true;
     }
-    const beforeCollectionState = `${item.postType}|${item.recommendedCollection}|${item.collectionStatus}`;
-    applyCollectionMetadata(item);
-    if (beforeCollectionState !== `${item.postType}|${item.recommendedCollection}|${item.collectionStatus}`) trustUpdated = true;
+    if (isRoomCandidate(item)) {
+      const beforeCollectionState = `${item.postType}|${item.recommendedCollection}|${item.collectionStatus}`;
+      applyCollectionMetadata(item);
+      if (beforeCollectionState !== `${item.postType}|${item.recommendedCollection}|${item.collectionStatus}`) trustUpdated = true;
+    }
   });
   if (trustUpdated) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   const keyword = $("#candidateFilter")?.value?.trim() || "";
   const status = $("#candidateStatusFilter")?.value || "";
   const items = data.candidates.filter((item) => {
+    if (!isRoomCandidate(item)) return false;
     const text = `${item.title} ${item.shopName} ${item.memo}`.toLowerCase();
     const postStatus = item.postStatus || item.status || "投稿待ち";
     return (!keyword || text.includes(keyword.toLowerCase())) && (!status || postStatus === status || item.status === status);
   });
   $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
+  renderThreadsOnlyCandidates();
   renderQueueProgress();
   renderCollectionSummary();
+}
+
+function renderThreadsOnlyCandidates() {
+  const keyword = $("#candidateFilter")?.value?.trim().toLowerCase() || "";
+  const status = $("#candidateStatusFilter")?.value || "";
+  const items = data.candidates.filter((item) => {
+    if (!isThreadsOnlyItem(item)) return false;
+    const text = `${item.title} ${item.shopName} ${item.memo}`.toLowerCase();
+    const itemStatus = item.threadsStatus || item.status || "文章作成待ち";
+    return (!keyword || text.includes(keyword)) && (!status || itemStatus === status || item.status === status);
+  });
+  const container = $("#threadsOnlyList");
+  if (container) container.innerHTML = items.length ? items.map(renderThreadsOnlyCard).join("") : `<p class="message">Threads限定候補はありません。</p>`;
 }
 
 function renderSnsPostEditor(item, medium, label) {
@@ -1305,7 +1394,7 @@ function renderCollectionSummary() {
   const element = $("#collectionSummary");
   if (!element) return;
   const counts = new Map(COLLECTIONS.filter((collection) => collection.enabled).map((collection) => [collection.id, { recommended: 0, selected: 0 }]));
-  data.candidates.forEach((item) => {
+  data.candidates.filter(isRoomCandidate).forEach((item) => {
     if (counts.has(item.recommendedCollection)) counts.get(item.recommendedCollection).recommended += 1;
     if (counts.has(item.selectedCollection)) counts.get(item.selectedCollection).selected += 1;
   });
@@ -1318,8 +1407,9 @@ function renderCollectionSummary() {
 function renderQueueProgress() {
   const progress = $("#queue-progress");
   if (!progress) return;
-  const queue = data.candidates.filter((item) => !["投稿済み", "スキップ"].includes(item.postStatus));
-  const active = data.candidates.find((item) => ["Codex処理中", "確認待ち"].includes(item.postStatus));
+  const roomCandidates = data.candidates.filter(isRoomCandidate);
+  const queue = roomCandidates.filter((item) => !["投稿済み", "スキップ"].includes(item.postStatus));
+  const active = roomCandidates.find((item) => ["Codex処理中", "確認待ち"].includes(item.postStatus));
   if (!queue.length) {
     progress.textContent = "処理対象の商品はありません。";
     return;
@@ -1328,8 +1418,8 @@ function renderQueueProgress() {
     progress.textContent = `投稿待ち ${queue.filter((item) => item.postStatus === "投稿待ち").length}件。連続処理開始で先頭の商品を準備します。`;
     return;
   }
-  const position = data.candidates.findIndex((item) => item.id === active.id) + 1;
-  progress.textContent = `現在の処理商品：${active.title}（${position} / ${data.candidates.length}件） / 状態：${active.postStatus}`;
+  const position = roomCandidates.findIndex((item) => item.id === active.id) + 1;
+  progress.textContent = `現在の処理商品：${active.title}（${position} / ${roomCandidates.length}件） / 状態：${active.postStatus}`;
 }
 
 function buildQueueCandidate(product) {
@@ -1337,6 +1427,7 @@ function buildQueueCandidate(product) {
   const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
   const candidate = {
     id: crypto.randomUUID(),
+    destination: "room",
     product: productWithUrl,
     title: productWithUrl.itemName,
     imageUrl: getImage(productWithUrl),
@@ -1379,7 +1470,7 @@ function queueSelectedRanking() {
     return;
   }
 
-  const existingIdentities = new Set([...data.candidates, ...data.history].map((item) => rankingIdentity(item.product || item)));
+  const existingIdentities = new Set([...data.candidates.filter(isRoomCandidate), ...data.history].map((item) => rankingIdentity(item.product || item)));
   const added = [];
   const skipped = [];
   selected.forEach((product) => {
@@ -1422,7 +1513,7 @@ function applyCodexResult() {
   const parsed = parseCodexResult($("#codex-result-input").value || "");
   const fail = (text) => { message.textContent = text; toast(text); };
   if (!parsed.itemCode) return fail("ITEM_CODEがないため保存していません。");
-  const matches = data.candidates.filter((item) => (item.itemCode || item.product?.itemCode || "") === parsed.itemCode);
+  const matches = data.candidates.filter(isRoomCandidate).filter((item) => (item.itemCode || item.product?.itemCode || "") === parsed.itemCode);
   if (matches.length !== 1) return fail(matches.length ? "ITEM_CODEが複数商品に一致したため保存していません。" : "ITEM_CODEが投稿キューに一致しないため保存していません。");
   if (!parsed.introText || !parsed.hashTags || !parsed.isConfirmationReady) return fail("紹介文・ハッシュタグ・状態:確認待ちを確認できないため保存していません。");
   const copyError = validateGeneratedCopy(parsed.introText, matches[0]);
@@ -1527,6 +1618,134 @@ function generateWarningPrompt(id) {
   saveData();
   copyText(candidate.introPrompt, { silent: true });
   toast("注意喚起文章の指示文を作成しました。");
+}
+
+function renderThreadsOnlyEditor(item) {
+  const threads = item.snsPosts?.threads || createSnsPosts().threads;
+  const textId = `threads-only-text-${item.id}`;
+  const promptId = `threads-only-prompt-${item.id}`;
+  return `<section class="threads-only-editor" aria-label="Threads限定文章">
+    <h4>Threads限定文章（成果型 Ver.1）</h4>
+    <label>誰向け（任意・修正可）<input value="${escapeAttr(threads.performanceAudience || "")}" placeholder="例：セール商品を探している人へ" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label>
+    <p class="meta">ROOM URLは使用しません。Threads限定投稿用URLは未実装のため、商品URL・アフィリエイトURLを文章へ自動挿入しません。</p>
+    <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(threads.prompt || "")}</textarea></label>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="generateThreadsOnlyPrompt('${item.id}')">成果型プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">プロンプトをコピー</button><button class="primary-button" type="button" onclick="startThreadsOnlyCodex('${item.id}')">CodexでThreads文章作成</button></div>
+    <label>Threads生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', 'threads', 'text', this.value)">${escapeHtml(threads.text || "")}</textarea></label>
+    <p>文字数：<span>${Array.from(threads.text || "").length}</span></p>
+    <label>Codex結果をまとめて貼り付け<textarea id="threads-only-result-${item.id}" placeholder="===THREADS_POST===\n...\n===END_THREADS_POST==="></textarea></label>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="applyThreadsOnlyResult('${item.id}')">Threads文章に反映</button><button class="secondary-button" type="button" onclick="copyValue('${textId}')">文章をコピー</button><button class="secondary-button" type="button" onclick="markThreadsOnlyPosted('${item.id}')">投稿済みにする</button></div>
+  </section>`;
+}
+
+function renderThreadsOnlyCard(item) {
+  const threads = item.snsPosts?.threads || createSnsPosts().threads;
+  const trust = item.trustStatus ? item : { ...item, ...checkProductTrust(item.product || item) };
+  return `<article class="record-card candidate-card threads-only-card" data-candidate-id="${escapeAttr(item.id)}" data-destination="threads_only">
+    <img src="${escapeAttr(item.imageUrl)}" alt="">
+    <div>
+      <h3>${escapeHtml(item.title)}</h3>
+      <p><span class="badge">Threads限定</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
+      <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
+      <p class="trust-status" aria-label="商品信頼性判定">${escapeHtml(trust.trustStatus || "要確認")}（${trust.trustScore ?? "-"}点・検証中）</p>
+      <p class="post-status-line"><span class="badge post-status-badge">${escapeHtml(item.threadsStatus || "文章作成待ち")}</span></p>
+      ${renderThreadsOnlyEditor(item)}
+      <div class="record-actions"><button class="secondary-button" type="button" onclick="setThreadsOnlyStatus('${item.id}', '確認待ち')">確認待ちにする</button><button class="danger-button" type="button" onclick="deleteCandidate('${item.id}')">削除</button></div>
+    </div>
+  </article>`;
+}
+
+function buildThreadsOnlyCodexInstructions(item) {
+  const threads = item.snsPosts?.threads || createSnsPosts().threads;
+  return `Threads限定投稿の商品について、CodexがChrome上の楽天ROOM投稿アシスタントを操作して文章を作成し、結果欄へ直接反映してください。ROOM投稿、ROOM URL取得、X文章作成は行いません。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${item.itemUrl || "未設定"}\n\n【文章モード】\nThreads成果型 Ver.1（performance_v1）\n誰向け：${threads.performanceAudience || "商品情報から根拠のある対象者を短く示し、人間が確認できるようにする"}\nROOM URL：使用しない（Threads限定投稿）\nThreads限定投稿用URL：未実装。商品URL・アフィリエイトURL・ROOM URLを本文へ自動挿入、推測、代用しない。\n\n【作成ルール】\n${buildThreadsPerformancePrompt(item)}\n未確認のセール、割引率、クーポン、期限、イベント情報を追加しない。外部Threadsへ投稿せず、アプリへ反映して人間の確認待ちで停止する。`;
+}
+
+function generateThreadsOnlyPrompt(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id && isThreadsOnlyItem(candidate));
+  if (!item) return;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts.threads.threadsPostType = "performance_v1";
+  item.snsPosts.threads.prompt = buildThreadsPerformancePrompt(item);
+  item.snsPosts.threads.generatedAt = new Date().toISOString();
+  saveData();
+  renderCandidates();
+  copyText(item.snsPosts.threads.prompt, { silent: true });
+  toast("Threads成果型プロンプトを作成しました。");
+}
+
+function startThreadsOnlyCodex(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id && isThreadsOnlyItem(candidate));
+  if (!item) return;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts.threads.threadsPostType = "performance_v1";
+  item.snsPosts.threads.prompt = buildThreadsPerformancePrompt(item);
+  item.snsPosts.threads.generatedAt = new Date().toISOString();
+  item.threadsCodexPrompt = buildThreadsOnlyCodexInstructions(item);
+  item.threadsCodexGeneratedAt = new Date().toISOString();
+  saveData();
+  copyText(item.threadsCodexPrompt, { silent: true });
+  toast("Threads限定用のCodex指示文を作成しました。Codexが文章を作成してアプリへ反映できます。");
+}
+
+function validateThreadsOnlyResult(item, parsed) {
+  const threads = item.snsPosts?.threads || {};
+  const bodyError = validateSnsPostText({ ...item, roomUrl: "" }, "threads", parsed.threadsText);
+  if (bodyError) return bodyError;
+  if (threads.performanceUrlMode === "reply" && parsed.threadsReplyText && parsed.threadsReplyText.includes("ROOM個別URL未設定")) return "Threads限定投稿ではROOM URL未設定という文言を本文・返信用文章へ入れません。";
+  return "";
+}
+
+function applyThreadsOnlyResultToItem(item, parsed) {
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts.threads.threadsPostType = "performance_v1";
+  item.snsPosts.threads.text = parsed.threadsText;
+  item.snsPosts.threads.replyText = parsed.threadsReplyText || "";
+  item.snsPosts.threads.status = "draft";
+  item.threadsStatus = "確認待ち";
+  item.status = "確認待ち";
+  return item;
+}
+
+function applyThreadsOnlyResult(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id && isThreadsOnlyItem(candidate));
+  const input = document.querySelector(`#threads-only-result-${id}`);
+  if (!item || !input) return;
+  const parsed = parseSnsPostsResult(input.value || "");
+  const error = validateThreadsOnlyResult(item, parsed);
+  if (error) {
+    toast(`${error} 既存のThreads文章は保存していません。`);
+    return;
+  }
+  applyThreadsOnlyResultToItem(item, parsed);
+  saveData();
+  renderCandidates();
+  toast("Threads限定文章を保存しました。ROOM候補・ROOM文章・Xは変更していません。");
+}
+
+function setThreadsOnlyStatus(id, status) {
+  const item = data.candidates.find((candidate) => candidate.id === id && isThreadsOnlyItem(candidate));
+  if (!item) return;
+  item.threadsStatus = status;
+  item.status = status;
+  saveData();
+  renderCandidates();
+}
+
+function markThreadsOnlyPosted(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id && isThreadsOnlyItem(candidate));
+  if (!item) return;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  const error = validateThreadsOnlyResult(item, { threadsText: item.snsPosts.threads.text, threadsReplyText: item.snsPosts.threads.replyText });
+  if (error) {
+    toast(`${error} 投稿済みには変更していません。`);
+    return;
+  }
+  item.snsPosts.threads.status = "posted";
+  item.snsPosts.threads.postedAt = new Date().toISOString();
+  item.threadsStatus = "投稿済み";
+  item.status = "投稿済み";
+  saveData();
+  renderCandidates();
+  toast("Threads限定投稿を投稿済みにしました。");
 }
 
 function candidateCard(item) {
@@ -2462,7 +2681,7 @@ async function pasteCodexResult(id) {
 
   const itemCode = candidate.itemCode || candidate.product?.itemCode || "";
   const itemUrl = candidate.itemUrl || candidate.product?.itemUrl || candidate.product?.affiliateUrl || "";
-  const matchingCandidates = data.candidates.filter((item) => {
+  const matchingCandidates = data.candidates.filter(isRoomCandidate).filter((item) => {
     const sameCode = itemCode && (item.itemCode || item.product?.itemCode) === itemCode;
     const sameUrl = itemUrl && (item.itemUrl || item.product?.itemUrl || item.product?.affiliateUrl) === itemUrl;
     const sameNameShop = item.title === candidate.title && item.shopName === candidate.shopName;
@@ -2501,9 +2720,10 @@ async function pasteCodexResult(id) {
 }
 
 function focusNextCandidate(id) {
-  const index = data.candidates.findIndex((candidate) => candidate.id === id);
-  const next = data.candidates.slice(index + 1).find((candidate) => candidate.postStatus === "投稿待ち") ||
-    data.candidates.find((candidate) => candidate.postStatus === "投稿待ち");
+  const roomCandidates = data.candidates.filter(isRoomCandidate);
+  const index = roomCandidates.findIndex((candidate) => candidate.id === id);
+  const next = roomCandidates.slice(index + 1).find((candidate) => candidate.postStatus === "投稿待ち") ||
+    roomCandidates.find((candidate) => candidate.postStatus === "投稿待ち");
   if (!next) {
     toast("次の「投稿待ち」商品はありません。");
     return;
@@ -2514,7 +2734,7 @@ function focusNextCandidate(id) {
 }
 
 function getProcessingBlocker(excludeId = "") {
-  return data.candidates.find((candidate) => candidate.id !== excludeId && ["Codex処理中", "確認待ち", "要手動確認"].includes(candidate.postStatus));
+  return data.candidates.filter(isRoomCandidate).find((candidate) => candidate.id !== excludeId && ["Codex処理中", "確認待ち", "要手動確認"].includes(candidate.postStatus));
 }
 
 function startSequentialProcessing() {
@@ -2526,7 +2746,7 @@ function startSequentialProcessing() {
     toast(text);
     return;
   }
-  const next = data.candidates.find((candidate) => candidate.postStatus === "投稿待ち");
+  const next = data.candidates.filter(isRoomCandidate).find((candidate) => candidate.postStatus === "投稿待ち");
   if (!next) {
     const text = "投稿待ちの商品がありません。ランキング商品を投稿キューへ追加してください。";
     if (message) message.textContent = text;
@@ -2547,9 +2767,10 @@ function startNextCandidate(id) {
     toast(`別の商品「${blocker.title}」が${blocker.postStatus}のため開始できません。`);
     return;
   }
-  const index = data.candidates.findIndex((candidate) => candidate.id === id);
-  const next = data.candidates.slice(index + 1).find((candidate) => candidate.postStatus === "投稿待ち") ||
-    data.candidates.find((candidate) => candidate.postStatus === "投稿待ち");
+  const roomCandidates = data.candidates.filter(isRoomCandidate);
+  const index = roomCandidates.findIndex((candidate) => candidate.id === id);
+  const next = roomCandidates.slice(index + 1).find((candidate) => candidate.postStatus === "投稿待ち") ||
+    roomCandidates.find((candidate) => candidate.postStatus === "投稿待ち");
   if (!next) {
     toast("次の投稿待ち商品はありません。");
     return;
@@ -2803,7 +3024,7 @@ function saveSettings(event) {
 }
 
 function findDuplicate(product, ignoreId = "") {
-  const allItems = [...data.candidates, ...data.history].filter((item) => item.id !== ignoreId);
+  const allItems = [...data.candidates.filter(isRoomCandidate), ...data.history].filter((item) => item.id !== ignoreId);
   const identity = rankingIdentity(product);
   const found = allItems.find((item) => rankingIdentity(item.product || item) === identity);
   if (!found) return "";
@@ -2832,7 +3053,7 @@ function postedHistoryMatch(product) {
 }
 
 function queuedCandidateMatch(product) {
-  return data.candidates.some((entry) => rankingIdentity(entry.product || entry) === rankingIdentity(product));
+  return data.candidates.filter(isRoomCandidate).some((entry) => rankingIdentity(entry.product || entry) === rankingIdentity(product));
 }
 
 function selectRankingCandidate(categoryItems, context) {
@@ -3101,7 +3322,7 @@ function renderCalendar() {
   const grid = $("#calendarGrid");
   if (!grid) return;
   const month = $("#calendarMonth")?.value || new Date().toISOString().slice(0, 7);
-  const items = data.candidates.filter((item) => (item.plannedDate || "").startsWith(month));
+  const items = data.candidates.filter(isRoomCandidate).filter((item) => (item.plannedDate || "").startsWith(month));
   const grouped = items.reduce((acc, item) => {
     (acc[item.plannedDate] ||= []).push(item);
     return acc;
@@ -3351,7 +3572,7 @@ function applyStrategyScores(product = {}) {
   if (isTrendProduct) {
     const trendSelection = calculateTrendSelectionScore(product, {
       postedIdentities: new Set(data.history.map((item) => rankingIdentity(item.product || item))),
-      queuedIdentities: new Set(data.candidates.map((item) => rankingIdentity(item.product || item))),
+      queuedIdentities: new Set(data.candidates.filter(isRoomCandidate).map((item) => rankingIdentity(item.product || item))),
       matchedTrendKeywords: matched
     });
     product.trendScore = trendSelection.trendScore;
@@ -3427,7 +3648,7 @@ function renderRankingResults(products) {
   const productCard = (product, index, overallRank = null) => { const alreadyPosted = product.selectionStatus === "posted_duplicate" || postedHistoryMatch(product); return `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}" data-post-status="${alreadyPosted ? "投稿済み" : "未投稿"}">
           <img src="${escapeAttr(getImage(product))}" alt="">
           <div class="product-body"><div class="product-title">${overallRank ? `${overallRank}位 ` : product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div>${alreadyPosted ? `<p class="ranking-post-status" aria-label="投稿済み">投稿済み</p>` : ""}<p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="selection-score" aria-label="選定スコア">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade" aria-label="推薦ランク">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p><p class="selection-score" aria-label="トレンド適合と投稿機会">${product.matchedTrendKeywords?.length ? "購買トレンド適合" : "トレンド適合"}：${product.trendScore?.total ?? 0} / ${product.matchedTrendKeywords?.length ? 30 : 20}　投稿機会：${product.opportunityScore?.total ?? 0} / 20</p><p class="selection-score" aria-label="今日の投稿優先度"><strong>今日の投稿優先度：${product.todayPriorityScore ?? getSelectionTotal(product)} / ${product.matchedTrendKeywords?.length ? 100 : 140}</strong></p><details class="selection-details"><summary>スコア内訳・選定理由を見る</summary>${scoreBreakdown(product)}${scoreReasons(product)}<p>${escapeHtml((product.opportunityScore?.reasons || []).join("、"))}</p></details><p class="trust-status">${product.trustStatus === "通常投稿候補" ? "🟢 通常投稿候補" : product.trustStatus === "要確認" ? "🟡 要確認" : product.trustStatus === "注意喚起候補" ? "🟠 注意喚起候補" : product.trustStatus === "投稿対象外" ? "🔴 投稿対象外" : "信頼性未確認"}</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "投稿キュー登録済みのため除外" : product.trustStatus || "採用候補なし"}</strong><br>${escapeHtml(typeof product.selectionReason === "string" ? product.selectionReason : (product.selectionReason || []).join("、"))}</p>` : ""}</div>
-          <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button>${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
+          <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button><button class="secondary-button" type="button" onclick="threadsOnlySaveByIndex(${index})">Threads投稿</button>${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
         </article>`; };
   const sortOrder = $("#rankingSortOrder")?.value;
   if (["priority", "score"].includes(sortOrder)) {

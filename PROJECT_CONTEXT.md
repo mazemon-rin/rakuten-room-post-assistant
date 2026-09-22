@@ -44,6 +44,15 @@ README記載のVersionを作業開始時に確認する。
 - SNS一括反映はX／Threadsの区切り形式を使い、`snsPosts.x.text`と`snsPosts.threads.text`だけを更新する。解析・検証失敗時は既存文章を保持する。
 - URL未登録時はURLを捏造せず、SNS本文に「ROOM個別URL未設定」と書かない。未使用商品の使用体験、未確認の価格・クーポン・ポイント・セール情報も捏造・断定しない。
 
+## Threads限定投稿
+
+- 商品カードの「投稿候補に保存」は従来どおりROOM投稿専用で、保存先は後方互換のため同じ`data.candidates`配列を使い、`destination: "room"`として扱う。
+- 商品カードの「Threads投稿」は`destination: "threads_only"`の候補を作る。ROOM投稿候補、ROOM投稿待ち、ROOM紹介文・ハッシュタグ作成、ROOM個別URL、X投稿対象には追加しない。
+- Threads限定候補は「Threads候補」→「文章作成待ち」→「確認待ち」→「投稿済み」を区別し、既存のThreads成果型Ver.1を基本モードとして使う。誰向けの表現は人間が確認・修正できる。
+- Threads限定ではROOM URLを要求しない。既存の商品URLやアフィリエイトURLを使う場合も、取得済みで安全な値に限り、ROOM URLの推測・代用・短縮は行わない。アフィリエイトURL生成機能は追加しない。
+- Threads限定の文章反映はCodex＋Chrome経路で行えるが、外部Threadsへの実投稿は自動化せず、人間が投稿完了後に「投稿済みにする」を実行する。
+- `destination`がない既存候補は従来どおりROOM候補として復元する。JSONバックアップ・復元では新しい区分を保持する。
+
 ## 商品選定の基本方針
 
 ### 対象カテゴリー

@@ -19,6 +19,7 @@ const context = {
   RegExp,
   JSON,
   Promise,
+  crypto: { randomUUID: () => "test-uuid" },
   setTimeout,
   clearTimeout,
   document: { addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, createElement() { return { innerHTML: "", textContent: "" }; } },
@@ -27,7 +28,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, data };`, context);
 
 const scoring = context.__scoring;
 scoring.data.eventSettings = {};
@@ -118,6 +119,28 @@ const snsOnlyResult = scoring.parseSnsPostsResult(`===X_POST===\n${shortX}\n===E
 assert(snsOnlyResult.xText === shortX && snsOnlyResult.threadsText === shortThreads && scoring.validateSnsPostsResult(withRoomUrl, snsOnlyResult) === "", "SNS workflow: X and Threads result format parses and validates");
 assert(scoring.validateSnsPostsResult(withRoomUrl, { xText: "本文\n#PR", threadsText: shortThreads }).includes("ROOM個別URL"), "SNS workflow: incomplete X result is rejected without overwrite");
 
+// Threads限定投稿: same storage, explicit destination, no ROOM coupling.
+const threadsOnlyProduct = { itemCode: "threads-only-1", itemName: "50%OFF収納ケース", itemPrice: 1980, shopName: "生活ショップ", categoryName: "日用品・生活雑貨", itemUrl: "https://example.com/threads-only", saleInfo: { discountRate: 50, coupon: "50%OFFクーポン", salePeriod: "2026-09-24 01:59まで" } };
+const threadsOnlyCandidate = scoring.createThreadsOnlyCandidate(threadsOnlyProduct, "threads-only-candidate");
+assert(scoring.isRoomCandidate({}) && !scoring.isThreadsOnlyItem({}), "Threads-only A: legacy records remain ROOM candidates");
+assert(scoring.isThreadsOnlyItem(threadsOnlyCandidate) && !scoring.isRoomCandidate(threadsOnlyCandidate), "Threads-only B: destination separates the Threads-only candidate");
+assert(threadsOnlyCandidate.snsPosts.threads.threadsPostType === "performance_v1" && !threadsOnlyCandidate.roomUrl, "Threads-only C/E: no ROOM URL is required and performance mode is default");
+const threadsOnlyPrompt = scoring.buildThreadsPerformancePrompt(threadsOnlyCandidate);
+assert(threadsOnlyPrompt.includes("誰向け") && threadsOnlyPrompt.includes("どんなお得") && threadsOnlyPrompt.includes("期限・今見る理由"), "Threads-only E: performance prompt is reused");
+assert(threadsOnlyPrompt.includes("50%OFFクーポン") && threadsOnlyPrompt.includes("2026-09-24 01:59まで"), "Threads-only K: only stored sale facts are used");
+const threadsOnlyCodex = scoring.buildThreadsOnlyCodexInstructions(threadsOnlyCandidate);
+assert(threadsOnlyCodex.includes("Threads限定投稿用URL：未実装") && threadsOnlyCodex.includes("ROOM URL取得、X文章作成は行いません"), "Threads-only URL: no ROOM or unimplemented affiliate URL is generated");
+const threadsOnlyText = "セール商品を探している人へ\n50%OFFクーポンあり\n期間：2026-09-24 01:59まで\n#PR";
+scoring.applyThreadsOnlyResultToItem(threadsOnlyCandidate, { threadsText: threadsOnlyText, threadsReplyText: "" });
+assert(scoring.validateThreadsOnlyResult(threadsOnlyCandidate, { threadsText: threadsOnlyText, threadsReplyText: "" }) === "" && threadsOnlyCandidate.threadsStatus === "確認待ち", "Threads-only: text is saved and enters confirmation wait");
+assert(!threadsOnlyCandidate.introText && !threadsOnlyCandidate.hashTags, "Threads-only J: ROOM intro and hashtags are untouched");
+assert(scoring.isRoomCandidate({ id: "legacy-record", itemCode: "legacy" }), "Threads-only H: legacy data without destination restores as ROOM");
+const backupRoundTrip = JSON.parse(JSON.stringify(scoring.normalizeSnsRecords([threadsOnlyCandidate, { id: "legacy", itemCode: "legacy", snsPosts: {} }])));
+assert(backupRoundTrip[0].destination === "threads_only" && backupRoundTrip[0].snsPosts.threads.threadsPostType === "performance_v1" && backupRoundTrip[1].destination === "room", "Threads-only L: JSON backup/restore preserves the new destination and legacy default");
+const replyCandidate = scoring.createThreadsOnlyCandidate(threadsOnlyProduct, "threads-only-reply");
+replyCandidate.snsPosts.threads.performanceUrlMode = "reply";
+assert(scoring.validateThreadsOnlyResult(replyCandidate, { threadsText: "お得情報です\n#PR", threadsReplyText: "商品はこちら\nhttps://example.com/threads-only" }) === "", "Threads-only: reply mode remains available without ROOM URL");
+
 // Threads成果型 Ver.1: existing normal records remain normal and the new mode is isolated.
 const performanceItem = {
   ...withRoomUrl,
@@ -199,4 +222,4 @@ console.log(JSON.stringify({
   caseE: { trendFit: caseE.selectionScore.trendFit, reviewEvidence: caseE.selectionScore.reviewEvidence, total: caseE.selectionScore.total },
   regularRankingOne: regularBefore.selectionScore.total
 }, null, 2));
-console.log("scoring cases A-J and ranking page cases: passed");
+console.log("scoring, ranking page, and Threads-only cases A-L: passed");
