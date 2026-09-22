@@ -28,7 +28,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getCouponDisplayState, getImage, getPerformanceAudienceGuidance, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getCouponDisplayState, getImage, getPerformanceAudienceGuidance, data };`, context);
 
 const scoring = context.__scoring;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -161,6 +161,15 @@ threadsOnlyWithAffiliate.snsPosts.threads.performanceUrlMode = "reply";
 assert(scoring.validateThreadsOnlyResult(threadsOnlyWithAffiliate, { threadsText: "お得情報です\n#PR", threadsReplyText: `商品はこちら\n${affiliateUrl}` }) === "", "Affiliate I: reply mode validates the exact affiliateUrl");
 assert(scoring.validateThreadsOnlyResult(threadsOnlyWithAffiliate, { threadsText: "お得情報です\n#PR", threadsReplyText: "商品はこちら" }).includes("アフィリエイトURL"), "Affiliate I: reply mode rejects missing affiliateUrl");
 
+const autoDraftCandidate = scoring.createThreadsOnlyCandidate({ itemName: "ナイキ トレーニングバッグ", categoryName: "スポーツ・アウトドア", itemPrice: 6160, itemUrl: "https://example.com/bag", affiliateUrl, couponCandidate: true, discountRate: 50, rateConfirmed: false, discountRateType: "unknown" }, "auto-draft");
+autoDraftCandidate.snsPosts.threads.performanceUrlMode = "reply";
+assert(scoring.ensureThreadsOnlyDraft(autoDraftCandidate) === true, "Auto draft A: registration creates a Threads draft");
+assert(autoDraftCandidate.snsPosts.threads.text.includes("荷物を整理して持ち歩きたい人") && autoDraftCandidate.snsPosts.threads.text.includes("#PR"), "Auto draft B: audience and PR marker are included");
+assert(!autoDraftCandidate.snsPosts.threads.text.includes("50%OFF"), "Auto draft C: unconfirmed discount is not asserted");
+assert(autoDraftCandidate.snsPosts.threads.replyText.includes(affiliateUrl) && autoDraftCandidate.snsPosts.threads.replyText.split(affiliateUrl).length - 1 === 1, "Auto draft D: affiliateUrl is included exactly once in reply");
+const normalizedAutoDraft = scoring.normalizeSnsRecords([{ ...autoDraftCandidate, snsPosts: { ...autoDraftCandidate.snsPosts, threads: { ...autoDraftCandidate.snsPosts.threads, text: "", replyText: "" } } }])[0];
+assert(normalizedAutoDraft.snsPosts.threads.text && normalizedAutoDraft.threadsStatus === "確認待ち", "Auto draft E: empty legacy Threads candidate is filled on reload");
+
 // Threads成果型 Ver.1: existing normal records remain normal and the new mode is isolated.
 const performanceItem = {
   ...withRoomUrl,
@@ -178,7 +187,8 @@ assert(performancePrompt.includes("50%OFFクーポン") && performancePrompt.inc
 const noSalePrompt = scoring.buildThreadsPerformancePrompt({ ...performanceItem, saleInfo: {}, roomUrl: "" });
 assert(noSalePrompt.includes("確認済みのセール情報なし") && noSalePrompt.includes("期限が確認できない場合") && !noSalePrompt.includes("50%OFF"), "Performance D: unavailable discount and deadline are not invented");
 const today = new Date().toISOString().slice(0, 10);
-scoring.data.eventSettings = { enabled: true, eventName: "テストイベント", startDate: today, endDate: today };
+const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+scoring.data.eventSettings = { enabled: true, eventName: "テストイベント", startDate: today, endDate: tomorrow };
 const eventPrompt = scoring.buildThreadsPerformancePrompt(performanceItem);
 assert(eventPrompt.includes("テストイベント") && eventPrompt.includes(today), "Performance E: active eventSettings can be used with dates");
 scoring.data.eventSettings = {};

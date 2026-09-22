@@ -158,7 +158,11 @@ function getThreadsPostModeLabel(mode = "normal") {
 }
 
 function normalizeSnsRecords(records = []) {
-  return records.map((record) => ({ ...record, destination: record.destination === "threads_only" ? "threads_only" : "room", snsPosts: createSnsPosts(record.snsPosts) }));
+  return records.map((record) => {
+    const normalized = { ...record, destination: record.destination === "threads_only" ? "threads_only" : "room", snsPosts: createSnsPosts(record.snsPosts) };
+    if (isThreadsOnlyItem(normalized)) ensureThreadsOnlyDraft(normalized);
+    return normalized;
+  });
 }
 
 function isThreadsOnlyItem(item = {}) {
@@ -770,9 +774,10 @@ function saveCouponSearchCandidate(rawProduct, elementPrefix) {
     saved.couponCandidate = true;
     saved.snsPosts.threads.performanceUrlMode = "reply";
     saved.snsPosts.threads.prompt = buildThreadsPerformancePrompt(saved);
+    ensureThreadsOnlyDraft(saved);
     saveData();
   }
-  toast(rateConfirmed ? "確認済み情報を付けてThreads限定候補へ保存しました。" : "要確認の検索候補をThreads限定へ保存しました。割引を断定せず確認してください。");
+  toast(rateConfirmed ? "確認済み情報を付けて保存し、Threads文章の自動下書きを作成しました。" : "要確認の検索候補を保存し、Threads文章の自動下書きを作成しました。割引を断定せず確認してください。");
 }
 
 function getThreadsPerformanceFacts(item = {}) {
@@ -1443,9 +1448,9 @@ function createThreadsOnlyCandidate(product, id = crypto.randomUUID()) {
     savedAt: new Date().toISOString(),
     plannedDate: new Date().toISOString().slice(0, 10),
     memo: "Threads限定投稿",
-    status: "Threads候補",
+    status: "確認待ち",
     postStatus: "Threads限定",
-    threadsStatus: "文章作成待ち",
+    threadsStatus: "確認待ち",
     favoriteType: "Threads限定",
     matchedTrendKeywords: productWithUrl.matchedTrendKeywords || [],
     trendSearchPosition: productWithUrl.trendSearchPosition || null,
@@ -1458,7 +1463,7 @@ function createThreadsOnlyCandidate(product, id = crypto.randomUUID()) {
     deadlineConfirmed: productWithUrl.deadlineConfirmed === true,
     couponSource: productWithUrl.couponSource || "",
     couponCheckedAt: productWithUrl.couponCheckedAt || "",
-    snsPosts: createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: "body" } })
+    snsPosts: createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: productWithUrl.couponCandidate ? "reply" : "body" } })
   };
 }
 
@@ -1472,13 +1477,14 @@ function quickSaveThreadsOnly(product) {
   const candidate = createThreadsOnlyCandidate(productWithUrl);
   candidate.snsPosts.threads.prompt = buildThreadsPerformancePrompt(candidate);
   candidate.snsPosts.threads.generatedAt = new Date().toISOString();
+  ensureThreadsOnlyDraft(candidate);
   Object.assign(candidate, checkProductTrust(productWithUrl));
   applySelectionScore(candidate);
   applyStrategyScores(candidate);
   data.candidates.unshift(candidate);
   saveData();
   renderCandidates();
-  toast("Threads限定候補へ保存しました。ROOM投稿候補には追加していません。");
+  toast("Threads限定候補へ保存し、文章の自動下書きを作成しました。ROOM投稿候補には追加していません。");
 }
 
 function renderAll() {
@@ -1901,6 +1907,7 @@ function renderThreadsOnlyEditor(item) {
     <p class="meta">ROOM URLは使用しません。楽天アフィリエイトURLの取得状態に応じて、成果型文章へ反映します。</p>
     <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(threads.prompt || "")}</textarea></label>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="generateThreadsOnlyPrompt('${item.id}')">成果型プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">プロンプトをコピー</button><button class="primary-button" type="button" onclick="startThreadsOnlyCodex('${item.id}')">CodexでThreads文章作成</button></div>
+    <p class="message">登録時に安全な自動下書きを作成済みです。必要に応じてCodexで書き直せます。</p>
     <label>Threads生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', 'threads', 'text', this.value)">${escapeHtml(threads.text || "")}</textarea></label>
     <p>文字数：<span>${Array.from(threads.text || "").length}</span></p>
     <label>Codex結果をまとめて貼り付け<textarea id="threads-only-result-${item.id}" placeholder="===THREADS_POST===\n...\n===END_THREADS_POST==="></textarea></label>
@@ -2510,6 +2517,49 @@ function buildThreadsPerformancePrompt(item, options = {}) {
     : `===THREADS_POST===\n本文（${linkUrl ? `${linkLabel}と#PRを含む` : "URLなし・#PRを含む"}）\n===END_THREADS_POST===`;
   const outputWithLabel = output.replaceAll("ROOM URL（登録済みの場合のみ）", `${linkLabel}（登録済みの場合のみ）`);
   return `Threads成果型 Ver.1の投稿文章を作成してください。通常Threads紹介文とは別の短文モードです。\n\n【基本構造】\n1. 誰向け\n2. どんなお得（確認済みのお得情報）\n3. 期限・今見る理由（期限が確認できる場合だけ具体化）\n4. 返信への自然な導線\n5. #PR\n親投稿ですべての商品説明を完結させず、読み手が返信を確認する理由を短く残す。過度な煽りや「知らないと損」「絶対買うべき」は使わない。\n\n【誰向けのルール】\n商品カテゴリー名だけでなく、商品情報から合理的に導ける具体的な利用場面・小さな困りごとを1つ選ぶ。「お得な商品を探している人」「楽天ユーザー」「買い物好きな人」など広すぎる表現は避ける。年齢、性別、家族構成、職業、生活状況は推測しない。手動指定がある場合はそれを優先する。\n${urlMode === "reply" ? "本文＋返信URL方式では、親投稿にURLを書かず、「対象は返信に👇」「商品は返信に載せています👇」など自然な導線を本文末尾へ入れる。" : "本文にURLを入れる方式では、登録URLを本文に1回だけ入れる。"}\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品名：${product.itemName || product.title || "未設定"}\nカテゴリー：${product.categoryName || "未設定"}\n対象者の補助情報：${context.targetUser}\n誰向けの入力・指定：${audience}\n確認済みセール情報：\n${facts.structured}\n確認済みイベント：${facts.event}\n${linkLabel}：${linkUrl || "未設定"}\n\n【安全ルール】\n${getSalePromptRule()}\nusageStatusがusedでない場合、使用・購入体験、レビュー・効果・在庫を捏造しない。存在しない割引率、期限、ポイント倍率、イベント開催状況を推測しない。期限が確認できない場合、「今日まで」「あと○時間」などを書かない。割引率はrateConfirmed===trueかつdiscountRateType===exactの場合だけ書き、期限はdeadlineConfirmed===trueの場合だけ書く。\n${urlRule}\n#PRを必ず含める。外部Threadsへ自動投稿しない。\n\n【出力形式】\n${outputWithLabel}`;
+}
+
+function buildThreadsOnlyDraft(item) {
+  const posts = item.snsPosts || createSnsPosts();
+  const threads = posts.threads || createSnsPosts().threads;
+  const evidence = getCouponEvidence(item);
+  const audience = threads.performanceAudience || getPerformanceAudienceGuidance(item);
+  const link = getThreadsLink(item);
+  const urlMode = threads.performanceUrlMode || "body";
+  const confirmedRate = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate);
+  const confirmedDeadline = evidence.deadlineConfirmed && evidence.couponDeadline;
+  const benefit = confirmedRate
+    ? `${evidence.discountRate}%OFF${item.couponCandidate ? "クーポン対象" : ""}`
+    : "お得情報を確認できる商品";
+  const timing = confirmedDeadline
+    ? `${evidence.couponDeadline}まで、チェックしておきたい商品です。`
+    : "割引・期限は商品ページで確認してから判断したい商品です。";
+  const bodyParts = [
+    `${audience}へ。`,
+    "",
+    `${benefit}。`,
+    timing,
+    urlMode === "reply" ? "対象は返信に👇" : link ? `商品はこちら👇\n${link}` : "商品情報は商品ページで確認してください。",
+    "#PR"
+  ];
+  const replyText = urlMode === "reply" && link ? `商品はこちら👇\n${link}\n#PR` : "";
+  return { text: bodyParts.join("\n"), replyText };
+}
+
+function ensureThreadsOnlyDraft(item) {
+  if (!isThreadsOnlyItem(item)) return false;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  item.snsPosts.threads.threadsPostType = "performance_v1";
+  if (item.snsPosts.threads.text?.trim()) return false;
+  if (item.couponCandidate) item.snsPosts.threads.performanceUrlMode = "reply";
+  const draft = buildThreadsOnlyDraft(item);
+  item.snsPosts.threads.text = draft.text;
+  item.snsPosts.threads.replyText = draft.replyText;
+  item.snsPosts.threads.status = "draft";
+  item.snsPosts.threads.generatedAt = item.snsPosts.threads.generatedAt || new Date().toISOString();
+  item.threadsStatus = "確認待ち";
+  item.status = "確認待ち";
+  return true;
 }
 
 function buildSnsPrompt(item, medium, postType) {
