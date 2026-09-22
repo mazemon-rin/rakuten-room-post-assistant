@@ -312,6 +312,7 @@ assert(unconfirmedPrompt.includes("確認済みのセール情報なし") && !un
 const legacyCandidate = scoring.createThreadsOnlyCandidate({ ...confirmed70, couponCandidate: false }, "coupon-legacy");
 assert(legacyCandidate.snsPosts.threads.performanceUrlMode === "body", "Existing Threads-only records retain the legacy body URL mode");
 assert(scoring.getPerformanceAudienceGuidance({ itemName: "チェスト 収納", itemCaption: "クローゼット用" }).includes("クローゼットの収納が足りない人"), "Performance audience: storage context is concrete");
+assert(!scoring.getPerformanceAudienceGuidance({ itemName: "用途不明の商品" }).includes("具体的な利用場面または小さな困りごとを1つ選ぶ"), "Performance audience: fallback is post-ready text, not an instruction");
 const performanceReplyPrompt = scoring.buildThreadsPerformancePrompt({ ...couponCandidate, snsPosts: scoring.createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: "reply" } }) });
 assert(performanceReplyPrompt.includes("広すぎる表現は避ける") && performanceReplyPrompt.includes("対象は返信に👇") && performanceReplyPrompt.includes("親投稿にURLを書かず"), "Performance audience/reply: concrete audience and parent-to-reply guidance are included");
 assert(performanceReplyPrompt.includes("rateConfirmed===true") && performanceReplyPrompt.includes("deadlineConfirmed===true"), "Performance facts: only confirmed discount and deadline may be stated");

@@ -834,7 +834,7 @@ function getPerformanceAudienceGuidance(item = {}) {
   if (/(キッチン|調理|鍋|フライパン|水筒|マグ)/i.test(text)) return "料理や家事の中で置き場所・扱いやすさに困る人";
   if (/(バッグ|トート|リュック)/i.test(text)) return "荷物を整理して持ち歩きたい人";
   if (/(スマホ|iPhone|ケース|フィルム)/i.test(text)) return "スマホ本体やカメラまわりを守りたい人";
-  return "商品情報から、具体的な利用場面または小さな困りごとを1つ選ぶ（根拠がなければ人間が修正する）";
+  return "用途に合う商品を探している人";
 }
 
 function addSelectionReason(reasons, text) {
