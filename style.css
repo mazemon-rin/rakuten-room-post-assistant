@@ -384,12 +384,24 @@ main {
 }
 
 .coupon-search-panel { margin: 16px 0; }
+.search-mode-fieldset { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 14px 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.search-mode-fieldset label { display: inline-flex; align-items: center; gap: 5px; }
+.search-mode-fieldset input { width: auto; }
+.coupon-category-control { max-width: 360px; margin: 10px 0; }
 .discount-filter-fieldset { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .discount-filter-fieldset label { display: inline-flex; align-items: center; gap: 5px; }
-.coupon-result-card { border-left: 4px solid var(--accent); }
+.discount-filter-fieldset input { width: auto; }
+.coupon-results-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.coupon-result-card { grid-template-rows: auto 1fr; border-left: 4px solid var(--accent); }
+.coupon-image-wrap { position: relative; display: grid; place-items: center; min-height: 210px; background: #eee5d9; }
+.coupon-image-wrap img { width: 100%; height: 210px; object-fit: contain; background: #fff; }
+.product-image-placeholder { display: grid; place-items: center; width: 100%; height: 210px; color: var(--muted); background: #eee5d9; }
+.coupon-more-button { grid-column: 1 / -1; justify-self: center; }
 .coupon-result-card label { display: block; margin-top: 8px; }
 .coupon-result-card input[type="number"], .coupon-result-card input[type="text"] { width: 100%; margin-top: 4px; }
 .coupon-status, .coupon-candidate-badge { margin: 6px 0; }
+.coupon-confirmation.confirmed { color: var(--green); font-weight: 700; }
+.coupon-confirmation.needs-confirmation { color: #9a5b13; font-weight: 700; }
 
 .affiliate-import-panel {
   margin: 18px 0;
@@ -869,6 +881,7 @@ textarea {
 
   .stats-grid,
   .product-grid,
+  .coupon-results-grid,
   .search-form,
   .settings-form,
   .prompt-controls,
@@ -888,6 +901,7 @@ textarea {
 
   .stats-grid,
   .product-grid,
+  .coupon-results-grid,
   .search-form,
   .settings-form,
   .prompt-controls,

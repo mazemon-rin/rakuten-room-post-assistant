@@ -52,7 +52,7 @@ README記載のVersionを作業開始時に確認する。
 - Threads限定候補は「Threads候補」→「文章作成待ち」→「確認待ち」→「投稿済み」を区別し、既存のThreads成果型Ver.1を基本モードとして使う。誰向けの表現は人間が確認・修正できる。
 - Threads限定ではROOM URLを要求しない。楽天API設定にaffiliateIdがある場合だけ、APIが返したaffiliateUrlを商品・候補へ保存し、成果型文章の本文またはTHREADS_REPLYへ完全一致で使用する。affiliateId未設定・affiliateUrl未取得時はURLを推測・生成・代用・短縮せず、成果リンク付き完成状態とは扱わない。itemUrlやROOM URLをaffiliateUrlの代用にしない。
 - Threads限定の文章反映はCodex＋Chrome経路で行えるが、外部Threadsへの実投稿は自動化せず、人間が投稿完了後に「投稿済みにする」を実行する。
-- Threads投稿タブには「お得商品検索」を置き、楽天商品検索APIの割引表現を検索候補として表示する。検索ヒットだけでは割引確定にせず、`discountRate` / `rateConfirmed` / `discountRateType` / `couponDeadline` / `deadlineConfirmed` / `couponSource` / `couponCheckedAt`を確認状態とともに保存する。50%以上は`rateConfirmed === true`かつ`discountRate >= 50`かつ`discountRateType === "exact"`だけを正式対象とする。
+- 「ランキング・商品検索」を商品探索の共通画面とし、通常ランキングは楽天ランキングAPI、お得商品は楽天市場商品検索APIを使う。お得商品検索は既存の`COUPON_SEARCH_OPTIONS`を再利用し、カテゴリーは「すべて」または1カテゴリーを選択する。検索ヒットだけでは割引確定にせず、`discountRate` / `rateConfirmed` / `discountRateType` / `couponDeadline` / `deadlineConfirmed` / `couponSource` / `couponCheckedAt`を確認状態とともに保存する。50%以上は`rateConfirmed === true`かつ`discountRate >= 50`かつ`discountRateType === "exact"`だけを正式対象とする。Threads投稿タブは保存済み`threads_only`候補の管理だけを行う。
 - お得商品検索から保存したThreads限定候補は`performance_v1`の標準投稿方式を「本文＋返信URL」とし、親本文には原則URLを入れず、取得済みaffiliateUrlを`THREADS_REPLY`へ完全一致で1回反映する。RaCouponは直接取得せず、公式ページを開く補助にとどめる。
 - `performance_v1`の「誰向け」は、広い属性ではなく、商品情報から合理的に導ける具体的な利用場面・小さな困りごとへ絞る。手動入力があれば優先し、なければ商品名・説明から自動提案する。本文＋返信URL方式では親投稿にURLを入れず、返信導線を置き、確認済みaffiliateUrlと`#PR`を`THREADS_REPLY`へ反映する。
 - `destination`がない既存候補は従来どおりROOM候補として復元する。JSONバックアップ・復元では新しい区分を保持する。

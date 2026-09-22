@@ -172,6 +172,8 @@ function isRoomCandidate(item = {}) {
 let data = loadData();
 let currentProduct = null;
 let searchResults = [];
+let couponSearchResults = [];
+let couponVisibleCount = 30;
 let rankingCategoryStates = new Map();
 let rankingRequestContext = null;
 let rankingRetryInProgress = false;
@@ -186,6 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindTabs();
   bindForms();
   fillSettings();
+  setProductSearchMode();
   renderAll();
 });
 
@@ -220,6 +223,7 @@ function bindForms() {
   $("#candidateFilter").addEventListener("input", renderCandidates);
   $("#candidateStatusFilter").addEventListener("change", renderCandidates);
   $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
+  $$('input[name="productSearchMode"]').forEach((input) => input.addEventListener("change", setProductSearchMode));
   $("#searchCouponProducts")?.addEventListener("click", searchCouponProducts);
   $("#openRaCoupon")?.addEventListener("click", () => window.open("https://event.rakuten.co.jp/coupon/", "_blank", "noopener,noreferrer"));
   $("#apply-codex-result").addEventListener("click", applyCodexResult);
@@ -227,7 +231,7 @@ function bindForms() {
   $("#favoriteFilter").addEventListener("input", renderFavorites);
   $("#favoriteTypeFilter")?.addEventListener("change", renderFavorites);
   $("#calendarMonth").addEventListener("change", renderCalendar);
-  $("#rankingForm").addEventListener("submit", loadRanking);
+  $("#rankingForm").addEventListener("submit", handleUnifiedProductSearch);
   $("#trendSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchTrendProducts(); });
   $("#rankingSortOrder").addEventListener("change", () => renderRankingResults(searchResults));
   $("#queue-selected-ranking").addEventListener("click", queueSelectedRanking);
@@ -242,6 +246,34 @@ function bindForms() {
   $("#saveAffiliateImport").addEventListener("click", saveAffiliateImport);
   $("#cancelAffiliateImport").addEventListener("click", closeAffiliateImport);
   $("#clearData").addEventListener("click", clearData);
+}
+
+function setProductSearchMode() {
+  const mode = $("input[name='productSearchMode']:checked")?.value || "ranking";
+  const couponPanel = $("#couponSearchPanel");
+  if (couponPanel) couponPanel.hidden = mode !== "coupon";
+  const rankingCategoriesFieldset = $("#rankingForm .ranking-category-fieldset");
+  if (rankingCategoriesFieldset) rankingCategoriesFieldset.hidden = mode === "coupon";
+  const rankingGenre = $("#rankingGenreId")?.closest("label");
+  const rankingRange = $("#rankingRangeStart")?.closest("label");
+  if (rankingGenre) rankingGenre.hidden = mode === "coupon";
+  if (rankingRange) rankingRange.hidden = mode === "coupon";
+  ["queue-selected-ranking", "retry-failed-ranking"].forEach((id) => { const button = $(`#${id}`); if (button) button.hidden = mode === "coupon" || id === "retry-failed-ranking" && button.hidden; });
+  const submitButton = $("#rankingForm button[type='submit']");
+  if (submitButton) {
+    submitButton.textContent = "ランキング取得";
+    submitButton.hidden = mode === "coupon";
+  }
+}
+
+function handleUnifiedProductSearch(event) {
+  const mode = $("input[name='productSearchMode']:checked")?.value || "ranking";
+  if (mode === "coupon") {
+    event.preventDefault();
+    searchCouponProducts();
+    return;
+  }
+  loadRanking(event);
 }
 
 function setCandidateView(view) {
@@ -624,26 +656,71 @@ function prepareCouponSearchProduct(product, searchFilters = []) {
   };
 }
 
+function getCouponDisplayState(product = {}) {
+  const evidence = getCouponEvidence(product);
+  const confirmed = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate);
+  return {
+    imageUrl: getImage(product),
+    imageAvailable: Boolean(getImage(product)),
+    rateLabel: confirmed ? `${evidence.discountRate}%OFF確認済み` : `${evidence.discountRate ? `${evidence.discountRate}%OFF` : "割引率"}候補`,
+    rateConfirmed: confirmed,
+    deadlineConfirmed: evidence.deadlineConfirmed,
+    affiliateUrlAvailable: Boolean(product.affiliateUrl)
+  };
+}
+
 function renderCouponSearchCard(product) {
   const evidence = getCouponEvidence(product);
+  const display = getCouponDisplayState(product);
   const itemCode = product.itemCode || "";
   const safeId = `coupon-${btoa(unescape(encodeURIComponent(itemCode || product.itemName || "item"))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
-  return `<article class="record-card coupon-result-card" data-coupon-item-code="${escapeAttr(itemCode)}">
-    <div><h3>${escapeHtml(product.itemName || "商品名未設定")}</h3><p>${formatYen(product.itemPrice)} / ${escapeHtml(product.shopName || "ショップ未設定")}</p>
-    <p class="coupon-candidate-badge">検索条件：${escapeHtml((product.couponSearchFilters || []).map((key) => COUPON_SEARCH_OPTIONS[key]?.label || key).join("、") || "候補")}</p>
-    <p class="coupon-status">割引率：${evidence.discountRate ? `${evidence.discountRate}%OFF` : "未確認"}（${evidence.rateConfirmed ? "確認済み" : "要確認"}）</p>
-    <p class="coupon-status">期限：${escapeHtml(evidence.couponDeadline || "未確認")}（${evidence.deadlineConfirmed ? "確認済み" : "要確認"}）</p>
-    <label>確認した割引率（任意）<input id="${safeId}-rate" type="number" min="1" max="100" placeholder="例：50"></label>
-    <label>確認した期限（任意）<input id="${safeId}-deadline" type="text" placeholder="例：2026/09/24 01:59まで"></label>
-    <label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label>
-    <label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label>
-    <div class="record-actions"><button class="secondary-button" type="button" onclick="saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')">Threads限定候補へ保存</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天商品ページを開く</a></div>
+  const image = display.imageUrl;
+  const imageHtml = image
+    ? `<img src="${escapeAttr(image)}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="product-image-placeholder" hidden>画像なし</span>`
+    : `<span class="product-image-placeholder">画像なし</span>`;
+  const rateLabel = display.rateLabel;
+  return `<article class="product-card coupon-result-card" data-coupon-item-code="${escapeAttr(itemCode)}">
+    <div class="coupon-image-wrap">${imageHtml}</div>
+    <div class="product-body">
+      <h3 class="product-title">${escapeHtml(product.itemName || "商品名未設定")}</h3>
+      <p class="price">${formatYen(product.itemPrice)}</p>
+      <p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>
+      <p class="coupon-candidate-badge">検索条件：${escapeHtml((product.couponSearchFilters || []).map((key) => COUPON_SEARCH_OPTIONS[key]?.label || key).join("、") || "候補")}</p>
+      <p class="coupon-status">${escapeHtml(rateLabel)} <span class="coupon-confirmation ${evidence.rateConfirmed && evidence.discountRateType === "exact" ? "confirmed" : "needs-confirmation"}">${evidence.rateConfirmed && evidence.discountRateType === "exact" ? "🟢 確認済み" : "🟡 要確認"}</span></p>
+      <p class="coupon-status">期限：${escapeHtml(evidence.couponDeadline || "未確認")}（${evidence.deadlineConfirmed ? "🟢 確認済み" : "🟡 要確認"}）</p>
+      <p class="affiliate-url-status">${product.affiliateUrl ? "楽天アフィリエイトURL取得済み" : "楽天アフィリエイトURL未取得"}</p>
+      <label>確認した割引率（任意）<input id="${safeId}-rate" type="number" min="1" max="100" placeholder="例：50"></label>
+      <label>確認した期限（任意）<input id="${safeId}-deadline" type="text" placeholder="例：2026/09/24 01:59まで"></label>
+      <label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label>
+      <label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label>
+      <div class="record-actions"><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">割引・期限を確認</a><button class="primary-button" type="button" onclick="saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')">Threads投稿</button></div>
     </div></article>`;
 }
 
 function renderCouponSearchResults(products = []) {
   const container = $("#couponSearchResults");
-  if (container) container.innerHTML = products.length ? products.map(renderCouponSearchCard).join("") : `<p class="message">該当する検索候補はありません。割引率を確認できた商品は、確認値を入力して保存してください。</p>`;
+  couponSearchResults = products;
+  couponVisibleCount = Math.min(30, products.length);
+  renderVisibleCouponSearchResults();
+}
+
+function renderVisibleCouponSearchResults() {
+  const container = $("#couponSearchResults");
+  if (!container) return;
+  if (!couponSearchResults.length) {
+    container.innerHTML = `<p class="message">該当する検索候補はありません。割引率を確認できた商品は、確認値を入力して保存してください。</p>`;
+    return;
+  }
+  const visible = couponSearchResults.slice(0, couponVisibleCount).map(renderCouponSearchCard).join("");
+  const more = couponVisibleCount < couponSearchResults.length
+    ? `<button class="secondary-button coupon-more-button" type="button" onclick="showMoreCouponResults()">さらに表示（残り${couponSearchResults.length - couponVisibleCount}件）</button>`
+    : "";
+  container.innerHTML = `${visible}${more}`;
+}
+
+function showMoreCouponResults() {
+  couponVisibleCount = Math.min(couponVisibleCount + 30, couponSearchResults.length);
+  renderVisibleCouponSearchResults();
 }
 
 async function searchCouponProducts() {
@@ -658,6 +735,7 @@ async function searchCouponProducts() {
     if (index) await sleep(RANKING_INTERVAL_SHORT_MS);
     const { filter, query } = queries[index];
     const params = new URLSearchParams({ format: "json", applicationId: data.settings.applicationId, accessKey: data.settings.accessKey, keyword: query, hits: "30", sort: "standard" });
+    addParam(params, "genreId", $("#couponGenreId")?.value || "");
     addAffiliateIdParam(params);
     try {
       const response = await fetch(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`);

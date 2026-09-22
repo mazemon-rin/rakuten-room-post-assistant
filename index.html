@@ -171,25 +171,6 @@
           <h3 id="threadsOnlyTitle">Threads限定投稿</h3>
           <p>ROOMへ投稿せず、Threadsだけで紹介する商品を管理します。</p>
         </div>
-        <section class="coupon-search-panel panel" aria-labelledby="couponSearchTitle">
-          <h4 id="couponSearchTitle">お得商品検索</h4>
-          <p class="small-note">楽天商品検索APIの検索候補です。商品名に割引表現があっても、現在の割引とは確定しません。確認後に割引率・期限を入力してください。</p>
-          <fieldset class="discount-filter-fieldset">
-            <legend>割引率</legend>
-            <label><input type="checkbox" name="couponDiscountFilter" value="50plus"> 50%以上</label>
-            <label><input type="checkbox" name="couponDiscountFilter" value="50"> 50%</label>
-            <label><input type="checkbox" name="couponDiscountFilter" value="40"> 40%</label>
-            <label><input type="checkbox" name="couponDiscountFilter" value="30"> 30%</label>
-            <label><input type="checkbox" name="couponDiscountFilter" value="20"> 20%</label>
-            <label><input type="checkbox" name="couponDiscountFilter" value="10"> 10%</label>
-          </fieldset>
-          <div class="button-row">
-            <button id="searchCouponProducts" class="primary-button" type="button">お得商品を検索</button>
-            <button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button>
-          </div>
-          <p id="couponSearchMessage" class="message" role="status" aria-live="polite"></p>
-          <div id="couponSearchResults" class="record-list"></div>
-        </section>
         <div id="threadsOnlyList" class="record-list"></div>
        </section>
       </section>
@@ -249,14 +230,53 @@
 
     <section id="ranking" class="tab-panel">
       <div class="section-heading">
-        <h2>楽天ランキング</h2>
-        <p>楽天アプリIDがある場合はランキングAPIを利用し、未設定時はサンプルを表示します。</p>
+        <h2>ランキング・商品検索</h2>
+        <p>通常ランキングと、お得商品を同じ画面から探します。投稿準備は保存先のボタンから行います。</p>
       </div>
       <form id="trendSearchForm" class="search-form trend-search-panel">
         <label class="wide">トレンド商品を探す（最大5ワード）<textarea id="trendKeywords" rows="2" placeholder="新米、秋コスメ、防災"></textarea></label>
         <button class="secondary-button" type="submit">トレンド商品を検索</button>
         <p id="trendMessage" class="message" role="status" aria-live="polite"></p>
       </form>
+      <fieldset class="search-mode-fieldset">
+        <legend>検索種別</legend>
+        <label><input type="radio" name="productSearchMode" value="ranking" checked> 通常ランキング</label>
+        <label><input type="radio" name="productSearchMode" value="coupon"> お得商品</label>
+      </fieldset>
+      <section id="couponSearchPanel" class="coupon-search-panel panel" aria-labelledby="couponSearchTitle" hidden>
+        <h3 id="couponSearchTitle">お得商品検索</h3>
+        <p class="small-note">楽天商品検索APIの検索候補です。商品名に割引表現があっても、現在の割引とは確定しません。確認後に割引率・期限を入力してください。</p>
+        <label class="coupon-category-control">カテゴリー
+          <select id="couponGenreId">
+            <option value="">すべて</option>
+            <option value="562637">家電</option>
+            <option value="100026">パソコン・周辺機器</option>
+            <option value="100554">日用品・生活雑貨</option>
+            <option value="558944">キッチン用品・食器・調理器具</option>
+            <option value="100227">食品</option>
+            <option value="100939">美容・コスメ・香水</option>
+            <option value="100804">インテリア・寝具・収納</option>
+            <option value="101070">スポーツ・アウトドア</option>
+            <option value="100533">ベビー・キッズ・マタニティ</option>
+            <option value="101213">ペット・ペットグッズ</option>
+          </select>
+        </label>
+        <fieldset class="discount-filter-fieldset">
+          <legend>割引率</legend>
+          <label><input type="checkbox" name="couponDiscountFilter" value="50plus"> 50%以上</label>
+          <label><input type="checkbox" name="couponDiscountFilter" value="50"> 50%</label>
+          <label><input type="checkbox" name="couponDiscountFilter" value="40"> 40%</label>
+          <label><input type="checkbox" name="couponDiscountFilter" value="30"> 30%</label>
+          <label><input type="checkbox" name="couponDiscountFilter" value="20"> 20%</label>
+          <label><input type="checkbox" name="couponDiscountFilter" value="10"> 10%</label>
+        </fieldset>
+        <div class="button-row">
+          <button id="searchCouponProducts" class="primary-button" type="button">お得商品を検索</button>
+          <button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button>
+        </div>
+        <p id="couponSearchMessage" class="message" role="status" aria-live="polite"></p>
+        <div id="couponSearchResults" class="coupon-results-grid"></div>
+      </section>
       <form id="rankingForm" class="search-form">
         <fieldset class="ranking-category-fieldset">
           <legend>対象カテゴリー</legend>

@@ -28,7 +28,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getPerformanceAudienceGuidance, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getCouponDisplayState, getImage, getPerformanceAudienceGuidance, data };`, context);
 
 const scoring = context.__scoring;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -255,6 +255,18 @@ assert(scoring.getPerformanceAudienceGuidance({ itemName: "チェスト 収納",
 const performanceReplyPrompt = scoring.buildThreadsPerformancePrompt({ ...couponCandidate, snsPosts: scoring.createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: "reply" } }) });
 assert(performanceReplyPrompt.includes("広すぎる表現は避ける") && performanceReplyPrompt.includes("対象は返信に👇") && performanceReplyPrompt.includes("親投稿にURLを書かず"), "Performance audience/reply: concrete audience and parent-to-reply guidance are included");
 assert(performanceReplyPrompt.includes("rateConfirmed===true") && performanceReplyPrompt.includes("deadlineConfirmed===true"), "Performance facts: only confirmed discount and deadline may be stated");
+
+// 統合探索画面向けの商品カード表示データと保存区分。
+const imageProduct = { itemCode: "image-1", itemName: "画像付き商品", itemPrice: 1200, itemUrl: "https://example.com/image", mediumImageUrls: [{ imageUrl: "https://example.com/image.jpg" }], affiliateUrl: "https://hb.afl.rakuten.co.jp/image" };
+const noImageProduct = { itemCode: "image-2", itemName: "画像なし商品", itemPrice: 800, itemUrl: "https://example.com/no-image" };
+const confirmedDisplay = scoring.getCouponDisplayState({ ...imageProduct, discountRate: 50, rateConfirmed: true, discountRateType: "exact" });
+const unconfirmedDisplay = scoring.getCouponDisplayState({ ...noImageProduct, discountRate: 50, rateConfirmed: false, discountRateType: "unknown" });
+assert(confirmedDisplay.imageAvailable && confirmedDisplay.imageUrl === "https://example.com/image.jpg", "Coupon UI G: existing mediumImageUrls are reused");
+assert(unconfirmedDisplay.imageAvailable === false && unconfirmedDisplay.rateLabel === "50%OFF候補" && !unconfirmedDisplay.rateConfirmed, "Coupon UI H/N: missing image and unconfirmed rate are safe");
+assert(confirmedDisplay.rateLabel === "50%OFF確認済み" && confirmedDisplay.affiliateUrlAvailable, "Coupon UI O/M: confirmed rate and affiliate URL are shown as available");
+const roomSaved = scoring.createThreadsOnlyCandidate(imageProduct, "threads-ui");
+assert(roomSaved.destination === "threads_only" && roomSaved.snsPosts.threads.threadsPostType === "performance_v1", "Coupon UI K/L: Threads save remains separated and performance_v1");
+assert(scoring.normalizeSnsRecords([{ ...roomSaved }, { itemCode: "legacy-room" }])[1].destination === "room", "Coupon UI P: legacy records default to ROOM");
 
 console.log(JSON.stringify({
   caseA: { trendFit: caseA.selectionScore.trendFit, opportunity: caseA.selectionScore.opportunity, total: caseA.selectionScore.total },
