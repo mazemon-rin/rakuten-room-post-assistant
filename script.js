@@ -123,6 +123,14 @@ const SNS_POST_TYPES = Object.freeze({
   experience: "体験型"
 });
 const SNS_X_MAX_LENGTH = 140;
+const COUPON_SEARCH_OPTIONS = Object.freeze({
+  "50plus": { label: "50%以上", queries: ["50%OFF", "50％OFF", "半額", "50%OFFクーポン", "50％OFFクーポン", "半額クーポン"] },
+  "50": { label: "50%", queries: ["50%OFF", "50％OFF", "50%OFFクーポン", "50％OFFクーポン", "半額", "半額クーポン"] },
+  "40": { label: "40%", queries: ["40%OFF", "40％OFF", "40%OFFクーポン", "40％OFFクーポン"] },
+  "30": { label: "30%", queries: ["30%OFF", "30％OFF", "30%OFFクーポン", "30％OFFクーポン"] },
+  "20": { label: "20%", queries: ["20%OFF", "20％OFF", "20%OFFクーポン", "20％OFFクーポン"] },
+  "10": { label: "10%", queries: ["10%OFF", "10％OFF", "10%OFFクーポン", "10％OFFクーポン"] }
+});
 
 function createSnsPosts(existing = {}) {
   const makePost = (post = {}, defaultType) => ({
@@ -212,6 +220,8 @@ function bindForms() {
   $("#candidateFilter").addEventListener("input", renderCandidates);
   $("#candidateStatusFilter").addEventListener("change", renderCandidates);
   $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
+  $("#searchCouponProducts")?.addEventListener("click", searchCouponProducts);
+  $("#openRaCoupon")?.addEventListener("click", () => window.open("https://event.rakuten.co.jp/coupon/", "_blank", "noopener,noreferrer"));
   $("#apply-codex-result").addEventListener("click", applyCodexResult);
   $("#historyFilter").addEventListener("input", renderHistory);
   $("#favoriteFilter").addEventListener("input", renderFavorites);
@@ -567,17 +577,139 @@ function getSaleInfo(product = {}) {
   return entries.filter(([, value]) => value !== "").map(([label, value]) => `${label}：${value}`).join("\n");
 }
 
+function getCouponEvidence(item = {}) {
+  const product = item.product || item;
+  const rate = Number(item.discountRate ?? product.discountRate ?? item.saleRate ?? product.saleRate);
+  const deadline = String(item.couponDeadline ?? product.couponDeadline ?? item.salePeriod ?? product.salePeriod ?? "").trim();
+  return {
+    discountRate: Number.isFinite(rate) && rate > 0 ? rate : null,
+    rateConfirmed: item.rateConfirmed === true || product.rateConfirmed === true,
+    discountRateType: item.discountRateType || product.discountRateType || "unknown",
+    couponDeadline: deadline,
+    deadlineConfirmed: item.deadlineConfirmed === true || product.deadlineConfirmed === true,
+    couponSource: item.couponSource || product.couponSource || "",
+    couponCheckedAt: item.couponCheckedAt || product.couponCheckedAt || ""
+  };
+}
+
+function getCouponSearchKeywords() {
+  return $$('input[name="couponDiscountFilter"]:checked').map((input) => input.value).filter((value) => COUPON_SEARCH_OPTIONS[value]);
+}
+
+function matchesCouponDiscountFilter(item, filters = []) {
+  const evidence = getCouponEvidence(item);
+  if (!evidence.rateConfirmed || evidence.discountRateType === "up_to" || !Number.isFinite(evidence.discountRate)) return false;
+  return filters.some((filter) => filter === "50plus" ? evidence.discountRate >= 50 : evidence.discountRate === Number(filter));
+}
+
+function extractCandidateDiscountRate(product = {}) {
+  const structured = getCouponEvidence(product);
+  if (structured.rateConfirmed && structured.discountRateType === "exact") return structured.discountRate;
+  return null;
+}
+
+function prepareCouponSearchProduct(product, searchFilters = []) {
+  const evidence = getCouponEvidence(product);
+  return {
+    ...product,
+    couponCandidate: true,
+    couponSearchFilters: searchFilters,
+    discountRate: evidence.discountRate,
+    rateConfirmed: evidence.rateConfirmed,
+    discountRateType: evidence.discountRateType,
+    couponDeadline: evidence.couponDeadline,
+    deadlineConfirmed: evidence.deadlineConfirmed,
+    couponSource: evidence.couponSource || "楽天商品検索API（検索候補）",
+    couponCheckedAt: evidence.couponCheckedAt
+  };
+}
+
+function renderCouponSearchCard(product) {
+  const evidence = getCouponEvidence(product);
+  const itemCode = product.itemCode || "";
+  const safeId = `coupon-${btoa(unescape(encodeURIComponent(itemCode || product.itemName || "item"))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
+  return `<article class="record-card coupon-result-card" data-coupon-item-code="${escapeAttr(itemCode)}">
+    <div><h3>${escapeHtml(product.itemName || "商品名未設定")}</h3><p>${formatYen(product.itemPrice)} / ${escapeHtml(product.shopName || "ショップ未設定")}</p>
+    <p class="coupon-candidate-badge">検索条件：${escapeHtml((product.couponSearchFilters || []).map((key) => COUPON_SEARCH_OPTIONS[key]?.label || key).join("、") || "候補")}</p>
+    <p class="coupon-status">割引率：${evidence.discountRate ? `${evidence.discountRate}%OFF` : "未確認"}（${evidence.rateConfirmed ? "確認済み" : "要確認"}）</p>
+    <p class="coupon-status">期限：${escapeHtml(evidence.couponDeadline || "未確認")}（${evidence.deadlineConfirmed ? "確認済み" : "要確認"}）</p>
+    <label>確認した割引率（任意）<input id="${safeId}-rate" type="number" min="1" max="100" placeholder="例：50"></label>
+    <label>確認した期限（任意）<input id="${safeId}-deadline" type="text" placeholder="例：2026/09/24 01:59まで"></label>
+    <label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label>
+    <label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')">Threads限定候補へ保存</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天商品ページを開く</a></div>
+    </div></article>`;
+}
+
+function renderCouponSearchResults(products = []) {
+  const container = $("#couponSearchResults");
+  if (container) container.innerHTML = products.length ? products.map(renderCouponSearchCard).join("") : `<p class="message">該当する検索候補はありません。割引率を確認できた商品は、確認値を入力して保存してください。</p>`;
+}
+
+async function searchCouponProducts() {
+  const filters = getCouponSearchKeywords();
+  const message = $("#couponSearchMessage");
+  if (!filters.length) { message.textContent = "割引率を1つ以上選択してください。"; renderCouponSearchResults([]); return; }
+  if (!hasRakutenCredentials()) { message.textContent = "楽天API認証情報が未設定のため検索できません。"; renderCouponSearchResults([]); return; }
+  const merged = new Map();
+  const queries = filters.flatMap((filter) => COUPON_SEARCH_OPTIONS[filter].queries.map((query) => ({ filter, query })));
+  message.textContent = `${queries.length}通りの検索候補を確認しています...`;
+  for (let index = 0; index < queries.length; index += 1) {
+    if (index) await sleep(RANKING_INTERVAL_SHORT_MS);
+    const { filter, query } = queries[index];
+    const params = new URLSearchParams({ format: "json", applicationId: data.settings.applicationId, accessKey: data.settings.accessKey, keyword: query, hits: "30", sort: "standard" });
+    addAffiliateIdParam(params);
+    try {
+      const response = await fetch(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      normalizeRakutenItems(await response.json()).forEach((product) => {
+        const key = rankingIdentity(product);
+        const current = merged.get(key) || prepareCouponSearchProduct(product, []);
+        current.couponSearchFilters = [...new Set([...(current.couponSearchFilters || []), filter])];
+        merged.set(key, current);
+      });
+    } catch (error) {
+      if (message) message.textContent = `${query}の検索に失敗しました。成功した検索結果は保持しています。`;
+    }
+  }
+  const results = [...merged.values()].map((product) => prepareCouponSearchProduct(product, product.couponSearchFilters));
+  renderCouponSearchResults(results);
+  message.textContent = `${results.length}件の割引・クーポン検索候補を表示しました。検索ヒットは割引確認済みを意味しません。`;
+}
+
+function saveCouponSearchCandidate(rawProduct, elementPrefix) {
+  const product = { ...rawProduct };
+  const rateInput = document.getElementById(`${elementPrefix}-rate`);
+  const deadlineInput = document.getElementById(`${elementPrefix}-deadline`);
+  const rateConfirmed = Boolean(document.getElementById(`${elementPrefix}-rate-ok`)?.checked);
+  const deadlineConfirmed = Boolean(document.getElementById(`${elementPrefix}-deadline-ok`)?.checked);
+  const discountRate = Number(rateInput?.value || product.discountRate);
+  if (rateConfirmed && (!Number.isFinite(discountRate) || discountRate <= 0 || discountRate > 100)) { toast("確認済みの割引率を入力してください。"); return; }
+  const candidateProduct = { ...product, discountRate: Number.isFinite(discountRate) && discountRate > 0 ? discountRate : null, rateConfirmed, discountRateType: rateConfirmed ? "exact" : "unknown", couponDeadline: deadlineInput?.value.trim() || product.couponDeadline || "", deadlineConfirmed, couponSource: product.couponSource || "楽天商品検索API（人間確認）", couponCheckedAt: new Date().toISOString() };
+  quickSaveThreadsOnly(candidateProduct);
+  const saved = data.candidates.find((candidate) => isThreadsOnlyItem(candidate) && rankingIdentity(candidate.product || candidate) === rankingIdentity(candidateProduct));
+  if (saved) {
+    saved.couponCandidate = true;
+    saved.snsPosts.threads.performanceUrlMode = "reply";
+    saved.snsPosts.threads.prompt = buildThreadsPerformancePrompt(saved);
+    saveData();
+  }
+  toast(rateConfirmed ? "確認済み情報を付けてThreads限定候補へ保存しました。" : "要確認の検索候補をThreads限定へ保存しました。割引を断定せず確認してください。");
+}
+
 function getThreadsPerformanceFacts(item = {}) {
   const product = item.product || item;
-  const saleInfo = getSaleInfo(product);
+  const couponCandidate = Boolean(item.couponCandidate || product.couponCandidate);
+  const evidence = getCouponEvidence(item);
+  const saleInfo = couponCandidate ? "" : getSaleInfo(product);
   const event = data.eventSettings || {};
   const structured = [
-    ["割引率", product.discountRate ?? product.saleRate],
-    ["セール価格", product.salePrice ?? product.discountPrice ?? product.campaignPrice],
-    ["通常価格", product.regularPrice ?? product.originalPrice ?? product.listPrice],
-    ["クーポン", product.coupon ?? product.couponInfo ?? product.couponText],
-    ["セール期間", product.salePeriod ?? product.campaignPeriod ?? product.saleStartEnd],
-    ["ポイント還元", product.pointBack ?? product.pointRate ?? product.pointCampaign],
+    ["割引率", couponCandidate ? (evidence.rateConfirmed && evidence.discountRateType === "exact" ? evidence.discountRate : undefined) : (product.discountRate ?? product.saleRate)],
+    ["セール価格", couponCandidate ? undefined : (product.salePrice ?? product.discountPrice ?? product.campaignPrice)],
+    ["通常価格", couponCandidate ? undefined : (product.regularPrice ?? product.originalPrice ?? product.listPrice)],
+    ["クーポン", couponCandidate ? (evidence.rateConfirmed ? (product.coupon ?? product.couponInfo ?? product.couponText) : undefined) : (product.coupon ?? product.couponInfo ?? product.couponText)],
+    ["セール期間", couponCandidate ? (evidence.deadlineConfirmed ? evidence.couponDeadline : undefined) : (product.salePeriod ?? product.campaignPeriod ?? product.saleStartEnd)],
+    ["ポイント還元", couponCandidate ? undefined : (product.pointBack ?? product.pointRate ?? product.pointCampaign)],
     ["送料無料", product.postageFlag === 1 ? "確認済み" : ""],
     ["商品セール情報", saleInfo]
   ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
@@ -607,6 +739,19 @@ function buildGenerationContext(product = {}, usageStatus = "不明") {
   const saleReason = saleInfo ? saleInfo.split("\n").slice(0, 2).join("、") : "";
   const safeUsageStatus = usageStatus.includes("実際") || usageStatus.includes("購入") ? "購入・使用済み（入力された体験のみ使用）" : "未使用または不明（使用体験を書かない）";
   return { targetUser, problem, mainBenefit, usageScene, usageStatus: safeUsageStatus, saleReason, generatedHook: `${targetUser}に。${problem}を確認したい方に向く商品です。` };
+}
+
+function getPerformanceAudienceGuidance(item = {}) {
+  const product = item.product || item;
+  const text = `${product.itemName || ""} ${stripHtml(product.itemCaption || "")} ${product.categoryName || ""}`;
+  if (/(チェスト|クローゼット|衣類|押入れ)/i.test(text)) return "クローゼットの収納が足りない人";
+  if (/(収納|ラック|ボックス|ケース)/i.test(text)) return "収納を増やしたい人";
+  if (/(モバイルバッテリー|充電器|バッテリー)/i.test(text)) return "外出先でスマホの充電切れが気になる人";
+  if (/(日傘|晴雨兼用傘|UV|紫外線)/i.test(text)) return "通勤時の日差しが気になる人";
+  if (/(キッチン|調理|鍋|フライパン|水筒|マグ)/i.test(text)) return "料理や家事の中で置き場所・扱いやすさに困る人";
+  if (/(バッグ|トート|リュック)/i.test(text)) return "荷物を整理して持ち歩きたい人";
+  if (/(スマホ|iPhone|ケース|フィルム)/i.test(text)) return "スマホ本体やカメラまわりを守りたい人";
+  return "商品情報から、具体的な利用場面または小さな困りごとを1つ選ぶ（根拠がなければ人間が修正する）";
 }
 
 function addSelectionReason(reasons, text) {
@@ -1227,7 +1372,15 @@ function createThreadsOnlyCandidate(product, id = crypto.randomUUID()) {
     matchedTrendKeywords: productWithUrl.matchedTrendKeywords || [],
     trendSearchPosition: productWithUrl.trendSearchPosition || null,
     performance: productWithUrl.performance || { clicks: null, orders: null, reward: null },
-    snsPosts: createSnsPosts({ threads: { threadsPostType: "performance_v1" } })
+    couponCandidate: Boolean(productWithUrl.couponCandidate),
+    discountRate: productWithUrl.discountRate ?? null,
+    rateConfirmed: productWithUrl.rateConfirmed === true,
+    discountRateType: productWithUrl.discountRateType || "unknown",
+    couponDeadline: productWithUrl.couponDeadline || "",
+    deadlineConfirmed: productWithUrl.deadlineConfirmed === true,
+    couponSource: productWithUrl.couponSource || "",
+    couponCheckedAt: productWithUrl.couponCheckedAt || "",
+    snsPosts: createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: "body" } })
   };
 }
 
@@ -1345,7 +1498,7 @@ function renderSnsPostEditor(item, medium, label) {
   const textLength = Array.from(post.text || "").length;
   const lengthLabel = medium === "x" ? `${textLength} / ${SNS_X_MAX_LENGTH}` : textLength;
   const lengthWarning = medium === "x" && textLength > SNS_X_MAX_LENGTH ? "140文字を超えています" : "";
-  const performanceControls = medium === "threads" ? `<label>文章モード<select onchange="saveSnsPost('${item.id}', 'threads', 'threadsPostType', this.value); generateSnsPrompt('${item.id}', 'threads'); renderCandidates()"><option value="normal" ${post.threadsPostType !== "performance_v1" ? "selected" : ""}>通常Threads紹介文</option><option value="performance_v1" ${post.threadsPostType === "performance_v1" ? "selected" : ""}>Threads成果型 Ver.1</option></select></label>${post.threadsPostType === "performance_v1" ? `<label>誰向け（任意・修正可）<input value="${escapeAttr(post.performanceAudience || "")}" placeholder="例：iPhone18を買った人へ" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label><label>ROOM URLの扱い<select onchange="saveSnsPost('${item.id}', 'threads', 'performanceUrlMode', this.value); generateSnsPrompt('${item.id}', 'threads'); renderCandidates()"><option value="body" ${post.performanceUrlMode !== "reply" ? "selected" : ""}>本文に含める</option><option value="reply" ${post.performanceUrlMode === "reply" ? "selected" : ""}>返信用URLとして別生成</option></select></label>` : ""}` : "";
+  const performanceControls = medium === "threads" ? `<label>文章モード<select onchange="saveSnsPost('${item.id}', 'threads', 'threadsPostType', this.value); generateSnsPrompt('${item.id}', 'threads'); renderCandidates()"><option value="normal" ${post.threadsPostType !== "performance_v1" ? "selected" : ""}>通常Threads紹介文</option><option value="performance_v1" ${post.threadsPostType === "performance_v1" ? "selected" : ""}>Threads成果型 Ver.1</option></select></label>${post.threadsPostType === "performance_v1" ? `<label>誰向け（任意・修正可）<input value="${escapeAttr(post.performanceAudience || "")}" placeholder="例：iPhone18を買った人へ" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label><label>${isThreadsOnlyItem(item) ? "投稿方式" : "ROOM URLの扱い"}<select onchange="saveSnsPost('${item.id}', 'threads', 'performanceUrlMode', this.value); generateSnsPrompt('${item.id}', 'threads'); renderCandidates()"><option value="reply" ${post.performanceUrlMode === "reply" ? "selected" : ""}>本文＋返信URL</option><option value="body" ${post.performanceUrlMode !== "reply" ? "selected" : ""}>本文にURL</option></select></label>` : ""}` : "";
   const replyEditor = medium === "threads" && post.threadsPostType === "performance_v1" && post.performanceUrlMode === "reply" ? `<label>返信用文章<textarea id="sns-reply-text-${item.id}" oninput="saveSnsPost('${item.id}', 'threads', 'replyText', this.value)">${escapeHtml(post.replyText || "")}</textarea></label>` : "";
   return `<section class="sns-post-editor" data-sns-medium="${medium}">
     <h4>${label}</h4>
@@ -1666,7 +1819,7 @@ function renderThreadsOnlyEditor(item) {
   const promptId = `threads-only-prompt-${item.id}`;
   return `<section class="threads-only-editor" aria-label="Threads限定文章">
     <h4>Threads限定文章（成果型 Ver.1）</h4>
-    <label>誰向け（任意・修正可）<input value="${escapeAttr(threads.performanceAudience || "")}" placeholder="例：セール商品を探している人へ" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label>
+    <label>誰向け（任意・修正可）<input value="${escapeAttr(threads.performanceAudience || "")}" placeholder="例：クローゼットの収納が足りない人" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label>
     <p class="meta">ROOM URLは使用しません。楽天アフィリエイトURLの取得状態に応じて、成果型文章へ反映します。</p>
     <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(threads.prompt || "")}</textarea></label>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="generateThreadsOnlyPrompt('${item.id}')">成果型プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">プロンプトをコピー</button><button class="primary-button" type="button" onclick="startThreadsOnlyCodex('${item.id}')">CodexでThreads文章作成</button></div>
@@ -1681,6 +1834,8 @@ function renderThreadsOnlyCard(item) {
   const threads = item.snsPosts?.threads || createSnsPosts().threads;
   const trust = item.trustStatus ? item : { ...item, ...checkProductTrust(item.product || item) };
   const affiliateUrl = String(item.affiliateUrl || item.product?.affiliateUrl || "").trim();
+  const coupon = getCouponEvidence(item);
+  const urlMode = threads.performanceUrlMode === "reply" ? "本文＋返信URL" : "本文にURL";
   return `<article class="record-card candidate-card threads-only-card" data-candidate-id="${escapeAttr(item.id)}" data-destination="threads_only">
     <img src="${escapeAttr(item.imageUrl)}" alt="">
     <div>
@@ -1688,6 +1843,7 @@ function renderThreadsOnlyCard(item) {
       <p><span class="badge">Threads限定</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
       <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
       <p class="affiliate-url-status">${affiliateUrl ? "楽天アフィリエイトURL取得済み" : "楽天アフィリエイトURL未取得"}</p>
+      ${item.couponCandidate ? `<p class="coupon-status">割引率：${coupon.discountRate ? `${coupon.discountRate}%OFF` : "未確認"}（${coupon.rateConfirmed && coupon.discountRateType === "exact" ? "確認済み" : "要確認"}）</p><p class="coupon-status">期限：${escapeHtml(coupon.couponDeadline || "未確認")}（${coupon.deadlineConfirmed ? "確認済み" : "要確認"}）</p><p class="coupon-status">投稿方式：${urlMode}</p>` : ""}
       <p class="trust-status" aria-label="商品信頼性判定">${escapeHtml(trust.trustStatus || "要確認")}（${trust.trustScore ?? "-"}点・検証中）</p>
       <p class="post-status-line"><span class="badge post-status-badge">${escapeHtml(item.threadsStatus || "文章作成待ち")}</span></p>
       ${renderThreadsOnlyEditor(item)}
@@ -2261,7 +2417,7 @@ function buildThreadsPerformancePrompt(item, options = {}) {
   const posts = item.snsPosts || createSnsPosts();
   const threads = posts.threads || createSnsPosts().threads;
   const urlMode = options.urlMode || threads.performanceUrlMode || "body";
-  const audience = options.audience || threads.performanceAudience || "自動判定できる範囲で、商品情報に合う対象者を短く示す。根拠がなければ人間が修正する。";
+  const audience = options.audience || threads.performanceAudience || getPerformanceAudienceGuidance(item);
   const context = buildGenerationContext(product, item.usageStatus || "不明");
   const facts = getThreadsPerformanceFacts(item);
   const linkUrl = getThreadsLink(item);
@@ -2272,10 +2428,10 @@ function buildThreadsPerformancePrompt(item, options = {}) {
       : `本文に登録済み${linkLabel}を完全一致で1回だけ記載する。URLは変更・短縮・省略・推測しない。`
     : `${linkLabel}は未設定。本文・返信用文章へURLを推測生成せず、内部状態を示す文言も投稿本文へ書かない。`;
   const output = urlMode === "reply"
-    ? `===THREADS_POST===\n本文（URLなし、#PR必須）\n===END_THREADS_POST===\n\n===THREADS_REPLY===\n返信用の短い導線とROOM URL（登録済みの場合のみ）\n===END_THREADS_REPLY===`
+    ? `===THREADS_POST===\n親投稿本文（URLなし。誰向け＋確認済みのお得情報＋期限または今見る理由＋「対象は返信に👇」等の返信導線＋#PR）\n===END_THREADS_POST===\n\n===THREADS_REPLY===\n返信用の短い導線、確認済みのお得情報、${linkLabel}（取得済みの場合のみ）、#PR\n===END_THREADS_REPLY===`
     : `===THREADS_POST===\n本文（${linkUrl ? `${linkLabel}と#PRを含む` : "URLなし・#PRを含む"}）\n===END_THREADS_POST===`;
   const outputWithLabel = output.replaceAll("ROOM URL（登録済みの場合のみ）", `${linkLabel}（登録済みの場合のみ）`);
-  return `Threads成果型 Ver.1の投稿文章を作成してください。通常Threads紹介文とは別の短文モードです。\n\n【基本構造】\n1. 誰向け\n2. どんなお得\n3. 期限・今見る理由\nこの3要素を短く自然にまとめる。商品説明を長く言い換えず、最も強いお得情報を1つ優先する。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品名：${product.itemName || product.title || "未設定"}\nカテゴリー：${product.categoryName || "未設定"}\n対象者の補助情報：${context.targetUser}\n誰向けの入力・指定：${audience}\n確認済みセール情報：\n${facts.structured}\n確認済みイベント：${facts.event}\n${linkLabel}：${linkUrl || "未設定"}\n\n【安全ルール】\n${getSalePromptRule()}\nusageStatusがusedでない場合、使用・購入体験、レビュー・効果・在庫を捏造しない。存在しない割引率、期限、ポイント倍率、イベント開催状況を推測しない。期限が確認できない場合、「今日まで」「あと○時間」などを書かない。\n${urlRule}\n#PRを必ず含める。外部Threadsへ自動投稿しない。\n\n【出力形式】\n${outputWithLabel}`;
+  return `Threads成果型 Ver.1の投稿文章を作成してください。通常Threads紹介文とは別の短文モードです。\n\n【基本構造】\n1. 誰向け\n2. どんなお得（確認済みのお得情報）\n3. 期限・今見る理由（期限が確認できる場合だけ具体化）\n4. 返信への自然な導線\n5. #PR\n親投稿ですべての商品説明を完結させず、読み手が返信を確認する理由を短く残す。過度な煽りや「知らないと損」「絶対買うべき」は使わない。\n\n【誰向けのルール】\n商品カテゴリー名だけでなく、商品情報から合理的に導ける具体的な利用場面・小さな困りごとを1つ選ぶ。「お得な商品を探している人」「楽天ユーザー」「買い物好きな人」など広すぎる表現は避ける。年齢、性別、家族構成、職業、生活状況は推測しない。手動指定がある場合はそれを優先する。\n${urlMode === "reply" ? "本文＋返信URL方式では、親投稿にURLを書かず、「対象は返信に👇」「商品は返信に載せています👇」など自然な導線を本文末尾へ入れる。" : "本文にURLを入れる方式では、登録URLを本文に1回だけ入れる。"}\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品名：${product.itemName || product.title || "未設定"}\nカテゴリー：${product.categoryName || "未設定"}\n対象者の補助情報：${context.targetUser}\n誰向けの入力・指定：${audience}\n確認済みセール情報：\n${facts.structured}\n確認済みイベント：${facts.event}\n${linkLabel}：${linkUrl || "未設定"}\n\n【安全ルール】\n${getSalePromptRule()}\nusageStatusがusedでない場合、使用・購入体験、レビュー・効果・在庫を捏造しない。存在しない割引率、期限、ポイント倍率、イベント開催状況を推測しない。期限が確認できない場合、「今日まで」「あと○時間」などを書かない。割引率はrateConfirmed===trueかつdiscountRateType===exactの場合だけ書き、期限はdeadlineConfirmed===trueの場合だけ書く。\n${urlRule}\n#PRを必ず含める。外部Threadsへ自動投稿しない。\n\n【出力形式】\n${outputWithLabel}`;
 }
 
 function buildSnsPrompt(item, medium, postType) {

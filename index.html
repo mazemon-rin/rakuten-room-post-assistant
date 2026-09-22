@@ -171,6 +171,25 @@
           <h3 id="threadsOnlyTitle">Threads限定投稿</h3>
           <p>ROOMへ投稿せず、Threadsだけで紹介する商品を管理します。</p>
         </div>
+        <section class="coupon-search-panel panel" aria-labelledby="couponSearchTitle">
+          <h4 id="couponSearchTitle">お得商品検索</h4>
+          <p class="small-note">楽天商品検索APIの検索候補です。商品名に割引表現があっても、現在の割引とは確定しません。確認後に割引率・期限を入力してください。</p>
+          <fieldset class="discount-filter-fieldset">
+            <legend>割引率</legend>
+            <label><input type="checkbox" name="couponDiscountFilter" value="50plus"> 50%以上</label>
+            <label><input type="checkbox" name="couponDiscountFilter" value="50"> 50%</label>
+            <label><input type="checkbox" name="couponDiscountFilter" value="40"> 40%</label>
+            <label><input type="checkbox" name="couponDiscountFilter" value="30"> 30%</label>
+            <label><input type="checkbox" name="couponDiscountFilter" value="20"> 20%</label>
+            <label><input type="checkbox" name="couponDiscountFilter" value="10"> 10%</label>
+          </fieldset>
+          <div class="button-row">
+            <button id="searchCouponProducts" class="primary-button" type="button">お得商品を検索</button>
+            <button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button>
+          </div>
+          <p id="couponSearchMessage" class="message" role="status" aria-live="polite"></p>
+          <div id="couponSearchResults" class="record-list"></div>
+        </section>
         <div id="threadsOnlyList" class="record-list"></div>
        </section>
       </section>

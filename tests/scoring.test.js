@@ -28,7 +28,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getPerformanceAudienceGuidance, data };`, context);
 
 const scoring = context.__scoring;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -233,6 +233,28 @@ const combinedResult = scoring.parseCombinedContentResult(`===ROOM_INTRO===\n紹
 assert(combinedResult.introText === "紹介文です。" && combinedResult.hashTags === "#タグ1 #タグ2" && combinedResult.xText === "X本文です。" && combinedResult.threadsText === "Threads本文です。", "SNS combined: four blocks parse correctly");
 const invalidCombinedResult = scoring.parseCombinedContentResult("===ROOM_INTRO===\n紹介文だけ\n===END_ROOM_INTRO===");
 assert(!invalidCombinedResult.hashTags && !invalidCombinedResult.xText && !invalidCombinedResult.threadsText, "SNS combined: incomplete result is rejected");
+
+// Threads限定のお得商品検索: 検索ヒットは候補であり、割引・期限の確認済み状態を分離する。
+const confirmed70 = scoring.prepareCouponSearchProduct({ itemCode: "coupon-70", itemName: "収納用品 50%OFF候補", itemUrl: "https://example.com/70", affiliateUrl: "https://hb.afl.rakuten.co.jp/70", discountRate: 70, rateConfirmed: true, discountRateType: "exact", couponDeadline: "2026/09/24 01:59まで", deadlineConfirmed: true }, ["50plus"]);
+const unconfirmed70 = scoring.prepareCouponSearchProduct({ itemCode: "coupon-max", itemName: "割引クーポン候補", itemUrl: "https://example.com/max", discountRate: 70, rateConfirmed: false, discountRateType: "up_to" }, ["50plus"]);
+assert(scoring.matchesCouponDiscountFilter(confirmed70, ["50plus"]), "Coupon A/E: confirmed 70% matches 50%以上");
+assert(scoring.matchesCouponDiscountFilter({ ...confirmed70, discountRate: 50 }, ["50"]), "Coupon B: confirmed exact 50% matches 50% option");
+assert(scoring.matchesCouponDiscountFilter({ ...confirmed70, discountRate: 40 }, ["40"]), "Coupon C: confirmed exact 40% matches 40% option");
+assert(!scoring.matchesCouponDiscountFilter(unconfirmed70, ["50plus"]), "Coupon F: up-to/unconfirmed discount is not treated as an exact confirmed rate");
+assert(!scoring.matchesCouponDiscountFilter({ ...confirmed70, rateConfirmed: false }, ["50plus"]), "Coupon G: unconfirmed discount is excluded from confirmed filtering");
+const couponCandidate = scoring.createThreadsOnlyCandidate(confirmed70, "coupon-candidate");
+couponCandidate.couponCandidate = true;
+couponCandidate.snsPosts.threads.performanceUrlMode = "reply";
+const couponPrompt = scoring.buildThreadsPerformancePrompt(couponCandidate);
+assert(couponPrompt.includes("70") && couponPrompt.includes("THREADS_REPLY") && couponPrompt.includes("楽天アフィリエイトURL"), "Coupon E/J/L: confirmed rate, reply mode, and affiliate link are represented");
+const unconfirmedPrompt = scoring.buildThreadsPerformancePrompt(scoring.createThreadsOnlyCandidate(unconfirmed70, "coupon-unconfirmed"));
+assert(unconfirmedPrompt.includes("確認済みのセール情報なし") && !unconfirmedPrompt.includes("70%OFF"), "Coupon F/G: unconfirmed rate is not asserted in performance prompt");
+const legacyCandidate = scoring.createThreadsOnlyCandidate({ ...confirmed70, couponCandidate: false }, "coupon-legacy");
+assert(legacyCandidate.snsPosts.threads.performanceUrlMode === "body", "Existing Threads-only records retain the legacy body URL mode");
+assert(scoring.getPerformanceAudienceGuidance({ itemName: "チェスト 収納", itemCaption: "クローゼット用" }).includes("クローゼットの収納が足りない人"), "Performance audience: storage context is concrete");
+const performanceReplyPrompt = scoring.buildThreadsPerformancePrompt({ ...couponCandidate, snsPosts: scoring.createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: "reply" } }) });
+assert(performanceReplyPrompt.includes("広すぎる表現は避ける") && performanceReplyPrompt.includes("対象は返信に👇") && performanceReplyPrompt.includes("親投稿にURLを書かず"), "Performance audience/reply: concrete audience and parent-to-reply guidance are included");
+assert(performanceReplyPrompt.includes("rateConfirmed===true") && performanceReplyPrompt.includes("deadlineConfirmed===true"), "Performance facts: only confirmed discount and deadline may be stated");
 
 console.log(JSON.stringify({
   caseA: { trendFit: caseA.selectionScore.trendFit, opportunity: caseA.selectionScore.opportunity, total: caseA.selectionScore.total },
