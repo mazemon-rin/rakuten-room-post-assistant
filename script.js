@@ -2553,6 +2553,16 @@ function getThreadsLinkLabel(item = {}) {
   return isThreadsOnlyItem(item) ? "楽天アフィリエイトURL" : "ROOM個別URL";
 }
 
+function formatThreadsPerformanceDeadline(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const matches = [...text.matchAll(/(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?/g)];
+  const match = matches.at(-1);
+  if (!match) return text;
+  const [, , month, day, hour, minute] = match;
+  return `${Number(month)}/${Number(day)}${hour ? ` ${Number(hour)}:${minute}` : ""}`;
+}
+
 function buildThreadsPerformancePrompt(item, options = {}) {
   const product = item.product || item;
   const posts = item.snsPosts || createSnsPosts();
@@ -2572,7 +2582,10 @@ function buildThreadsPerformancePrompt(item, options = {}) {
     ? `===THREADS_POST===\n親投稿本文（URLなし。誰向け＋確認済みのお得情報＋期限または今見る理由＋「対象は返信に👇」等の返信導線＋#PR）\n===END_THREADS_POST===\n\n===THREADS_REPLY===\n返信用の短い導線、確認済みのお得情報、${linkLabel}（取得済みの場合のみ）、#PR\n===END_THREADS_REPLY===`
     : `===THREADS_POST===\n本文（${linkUrl ? `${linkLabel}と#PRを含む` : "URLなし・#PRを含む"}）\n===END_THREADS_POST===`;
   const outputWithLabel = output.replaceAll("ROOM URL（登録済みの場合のみ）", `${linkLabel}（登録済みの場合のみ）`);
-  return `Threads成果型 Ver.1の投稿文章を作成してください。通常Threads紹介文とは別の短文モードです。\n\n【基本構造】\n1. 誰向け\n2. どんなお得（確認済みのお得情報）\n3. 期限・今見る理由（期限が確認できる場合だけ具体化）\n4. 返信への自然な導線\n5. #PR\n親投稿ですべての商品説明を完結させず、読み手が返信を確認する理由を短く残す。過度な煽りや「知らないと損」「絶対買うべき」は使わない。\n\n【誰向けのルール】\n商品カテゴリー名だけでなく、商品情報から合理的に導ける具体的な利用場面・小さな困りごとを1つ選ぶ。「お得な商品を探している人」「楽天ユーザー」「買い物好きな人」など広すぎる表現は避ける。年齢、性別、家族構成、職業、生活状況は推測しない。手動指定がある場合はそれを優先する。\n${urlMode === "reply" ? "本文＋返信URL方式では、親投稿にURLを書かず、「対象は返信に👇」「商品は返信に載せています👇」など自然な導線を本文末尾へ入れる。" : "本文にURLを入れる方式では、登録URLを本文に1回だけ入れる。"}\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品名：${product.itemName || product.title || "未設定"}\nカテゴリー：${product.categoryName || "未設定"}\n対象者の補助情報：${context.targetUser}\n誰向けの入力・指定：${audience}\n確認済みセール情報：\n${facts.structured}\n確認済みイベント：${facts.event}\n${linkLabel}：${linkUrl || "未設定"}\n\n【安全ルール】\n${getSalePromptRule()}\nusageStatusがusedでない場合、使用・購入体験、レビュー・効果・在庫を捏造しない。存在しない割引率、期限、ポイント倍率、イベント開催状況を推測しない。期限が確認できない場合、「今日まで」「あと○時間」などを書かない。割引率はrateConfirmed===trueかつdiscountRateType===exactの場合だけ書き、期限はdeadlineConfirmed===trueの場合だけ書く。\n${urlRule}\n#PRを必ず含める。外部Threadsへ自動投稿しない。\n\n【出力形式】\n${outputWithLabel}`;
+  const evidence = getCouponEvidence(item);
+  const confirmedRate = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate);
+  const confirmedDeadline = evidence.deadlineConfirmed && Boolean(evidence.couponDeadline);
+  return `Threads成果型 Ver.1の投稿文章を作成してください。通常Threads紹介文とは別の短文モードです。\n\n【正式な2段構成】\n親投稿と、自分の親投稿への返信（コメント）を別々に作成してください。\n\n親投稿は次の順序にする：\n1. 誰向け\n2. どんなお得（確認済みのお得情報）\n3. 期限・今見る理由（確認済みの場合だけ）\n4. 返信への導線\n5. #PR\n具体的な実装内容：\n1. 商品情報から合理的に絞った具体的な誰向け\n2. ${confirmedRate ? "確認済み割引率を自然な1文で記載" : "確認済みでない割引率・クーポンは記載しない"}\n3. ${confirmedDeadline ? "確認済み期限を短く記載" : "期限の文章は省略"}\n4. 「対象は返信に👇」など返信への導線\n5. #PR\n確認済みの割引率または期限がある場合、「お得情報を確認できる商品」「割引・期限は商品ページで確認してから判断したい商品です」のような内部確認用の曖昧な説明文は使わない。\n\nコメントは次の形式にする：\n${confirmedRate ? "確認済み割引率を含む『○%OFFクーポン対象はこちら👇』などの導線" : "『商品はこちら👇』などの導線"}\n${linkUrl ? `${linkLabel}を完全一致で1回` : "URLなし"}\n#PR\n\n【基本構造】\n誰向け＋確認済みのお得情報＋期限または今見る理由＋返信への自然な導線＋#PR。親投稿ですべての商品説明を完結させず、読み手が返信を確認する理由を短く残す。過度な煽りや「知らないと損」「絶対買うべき」は使わない。\n\n【誰向けのルール】\n商品カテゴリー名だけでなく、商品情報から合理的に導ける具体的な利用場面・小さな困りごとを1つ選ぶ。「お得な商品を探している人」「楽天ユーザー」「買い物好きな人」など広すぎる表現は避ける。年齢、性別、家族構成、職業、生活状況は推測しない。手動指定がある場合はそれを優先する。\n${urlMode === "reply" ? "本文＋返信URL方式では、親投稿にURLを書かず、「対象は返信に👇」を基本として導線を置く。コメント欄にだけURLを記載する。" : "本文にURLを入れる方式では、登録URLを本文に1回だけ入れる。"}\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品名：${product.itemName || product.title || "未設定"}\nカテゴリー：${product.categoryName || "未設定"}\n対象者の補助情報：${context.targetUser}\n誰向けの入力・指定：${audience}\n確認済みセール情報：\n${facts.structured}\n確認済みイベント：${facts.event}\n${linkLabel}：${linkUrl || "未設定"}\n\n【安全ルール】\n${getSalePromptRule()}\nusageStatusがusedでない場合、使用・購入体験、レビュー・効果・在庫を捏造しない。存在しない割引率、期限、ポイント倍率、イベント開催状況を推測しない。割引率はrateConfirmed===trueかつdiscountRateType===exactの場合だけ書き、期限はdeadlineConfirmed===trueかつcouponDeadlineが存在する場合だけ書く。${confirmedDeadline ? "確認済み期限だけを短く整形して使用する。" : "期限が確認できない場合、期限の文章を生成しない。"}${confirmedRate ? "確認済み割引率だけを具体的に使用する。" : "割引率が確認できない場合、具体的な割引率や半額表現を生成しない。"}\n${urlRule}\n親投稿にもコメントにも#PRを必ず含める。外部Threadsへ自動投稿しない。\n\n【出力形式】\n${outputWithLabel}`;
 }
 
 function buildThreadsOnlyDraft(item) {
@@ -2584,17 +2597,13 @@ function buildThreadsOnlyDraft(item) {
   const urlMode = threads.performanceUrlMode || "body";
   const confirmedRate = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate);
   const confirmedDeadline = evidence.deadlineConfirmed && evidence.couponDeadline;
-  const benefit = confirmedRate
-    ? `${evidence.discountRate}%OFF${item.couponCandidate ? "クーポン対象" : ""}`
-    : "お得情報を確認できる商品";
-  const timing = confirmedDeadline
-    ? `${evidence.couponDeadline}まで、チェックしておきたい商品です。`
-    : "割引・期限は商品ページで確認してから判断したい商品です。";
+  const benefit = confirmedRate ? `${evidence.discountRate}%OFF${item.couponCandidate ? "クーポン対象" : ""}` : "";
+  const timing = confirmedDeadline ? `${formatThreadsPerformanceDeadline(evidence.couponDeadline)}まで。` : "";
   const bodyParts = [
     `${audience}へ。`,
     "",
-    `${benefit}。`,
-    timing,
+    ...(benefit ? [`${benefit}。`] : []),
+    ...(timing ? [timing] : []),
     urlMode === "reply" ? "対象は返信に👇" : link ? `商品はこちら👇\n${link}` : "商品情報は商品ページで確認してください。",
     "#PR"
   ];
