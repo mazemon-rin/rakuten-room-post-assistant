@@ -1582,17 +1582,20 @@ function renderSnsPostEditor(item, medium, label) {
   const textLength = Array.from(post.text || "").length;
   const lengthLabel = medium === "x" ? `${textLength} / ${SNS_X_MAX_LENGTH}` : textLength;
   const lengthWarning = medium === "x" && textLength > SNS_X_MAX_LENGTH ? "140文字を超えています" : "";
+  const isThreadsReply = medium === "threads" && post.threadsPostType === "performance_v1" && post.performanceUrlMode === "reply";
   const performanceControls = medium === "threads" ? `<label>文章モード<select onchange="saveSnsPost('${item.id}', 'threads', 'threadsPostType', this.value); generateSnsPrompt('${item.id}', 'threads'); renderCandidates()"><option value="normal" ${post.threadsPostType !== "performance_v1" ? "selected" : ""}>通常Threads紹介文</option><option value="performance_v1" ${post.threadsPostType === "performance_v1" ? "selected" : ""}>Threads成果型 Ver.1</option></select></label>${post.threadsPostType === "performance_v1" ? `<label>誰向け（任意・修正可）<input value="${escapeAttr(post.performanceAudience || "")}" placeholder="例：iPhone18を買った人へ" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label><label>${isThreadsOnlyItem(item) ? "投稿方式" : "ROOM URLの扱い"}<select onchange="saveSnsPost('${item.id}', 'threads', 'performanceUrlMode', this.value); generateSnsPrompt('${item.id}', 'threads'); renderCandidates()"><option value="reply" ${post.performanceUrlMode === "reply" ? "selected" : ""}>本文＋返信URL</option><option value="body" ${post.performanceUrlMode !== "reply" ? "selected" : ""}>本文にURL</option></select></label>` : ""}` : "";
-  const replyEditor = medium === "threads" && post.threadsPostType === "performance_v1" && post.performanceUrlMode === "reply" ? `<label>返信用文章<textarea id="sns-reply-text-${item.id}" oninput="saveSnsPost('${item.id}', 'threads', 'replyText', this.value)">${escapeHtml(post.replyText || "")}</textarea></label>` : "";
+  const replyEditor = isThreadsReply ? `<div class="threads-post-section"><h5>Threads生成文章｜コメント欄</h5><label>コメント本文<textarea id="sns-reply-text-${item.id}" oninput="saveSnsPost('${item.id}', 'threads', 'replyText', this.value)">${escapeHtml(post.replyText || "")}</textarea></label><div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('sns-reply-text-${item.id}')">コメントをコピー</button></div></div>` : "";
+  const textHeading = isThreadsReply ? "Threads生成文章｜親投稿" : "生成文章";
+  const copyLabel = isThreadsReply ? "親投稿をコピー" : "文章をコピー";
   return `<section class="sns-post-editor" data-sns-medium="${medium}">
     <h4>${label}</h4>
     ${performanceControls}
     <label>投稿タイプ<select onchange="saveSnsPost('${item.id}', '${medium}', 'postType', this.value); generateSnsPrompt('${item.id}', '${medium}')">${options}</select></label>
     <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(post.prompt || "")}</textarea></label>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="generateSnsPrompt('${item.id}', '${medium}')">生成プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">生成プロンプトをコピー</button><button class="secondary-button" type="button" onclick="openSnsChatGPT('${item.id}', '${medium}')">ChatGPT用プロンプトをコピー</button></div>
-    <label>生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', '${medium}', 'text', this.value)">${escapeHtml(post.text || "")}</textarea></label>
+    <div class="threads-post-section"><h5>${textHeading}</h5><label>投稿本文<textarea id="${textId}" oninput="saveSnsPost('${item.id}', '${medium}', 'text', this.value)">${escapeHtml(post.text || "")}</textarea></label>
     <p>文字数：<span data-sns-count="${textId}" class="${lengthWarning ? "sns-count-warning" : ""}">${lengthLabel}</span> <span data-sns-warning="${textId}" class="sns-count-warning">${lengthWarning}</span></p>
-    <div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${textId}')">文章をコピー</button><button class="secondary-button" type="button" onclick="markSnsPosted('${item.id}', '${medium}')">投稿済みにする</button></div>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${textId}')">${copyLabel}</button><button class="secondary-button" type="button" onclick="markSnsPosted('${item.id}', '${medium}')">投稿済みにする</button></div></div>
     ${replyEditor}
   </section>`;
 }
@@ -1902,21 +1905,31 @@ function renderThreadsOnlyEditor(item) {
   const textId = `threads-only-text-${item.id}`;
   const replyId = `threads-only-reply-${item.id}`;
   const promptId = `threads-only-prompt-${item.id}`;
+  const shortUrl = String(item.affiliateShortUrl || "").trim();
+  const affiliateUrl = String(item.affiliateUrl || item.product?.affiliateUrl || "").trim();
+  const selectedUrl = shortUrl || affiliateUrl;
+  const urlStatus = shortUrl ? "🟢 楽天公式短縮URL 登録済み" : affiliateUrl ? "🟡 API取得URLを使用" : "🔴 アフィリエイトURLなし";
   const replyEditor = threads.performanceUrlMode === "reply"
-    ? `<label>返信用文章<textarea id="${replyId}" oninput="saveSnsPost('${item.id}', 'threads', 'replyText', this.value)">${escapeHtml(threads.replyText || "")}</textarea></label><p class="meta">${item.affiliateUrl || item.product?.affiliateUrl ? "保存済み楽天アフィリエイトURLを1回だけ使用します。" : "楽天アフィリエイトURL未取得のため、返信用URLは作成していません。"}</p><div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${replyId}')">返信文をコピー</button></div>`
+    ? `<div class="threads-post-section"><h5>Threads生成文章｜コメント欄</h5><label>コメント本文<textarea id="${replyId}" oninput="saveSnsPost('${item.id}', 'threads', 'replyText', this.value)">${escapeHtml(threads.replyText || "")}</textarea></label><p class="meta">${selectedUrl ? "選択中のURLを完全一致で1回だけ使用します。" : "アフィリエイトURL未取得のため、コメント用URLは作成していません。"}</p><div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${replyId}')">コメントをコピー</button></div></div>`
     : "";
   return `<section class="threads-only-editor" aria-label="Threads限定文章">
     <h4>Threads限定文章（成果型 Ver.1）</h4>
     <label>誰向け（任意・修正可）<input value="${escapeAttr(threads.performanceAudience || "")}" placeholder="例：クローゼットの収納が足りない人" oninput="saveSnsPost('${item.id}', 'threads', 'performanceAudience', this.value)"></label>
-    <p class="meta">ROOM URLは使用しません。楽天アフィリエイトURLの取得状態に応じて、成果型文章へ反映します。</p>
+    <p class="meta">ROOM URLは使用しません。${escapeHtml(urlStatus)}</p>
+    <div class="affiliate-short-url-editor">
+      <label>楽天公式短縮URL<input id="threads-short-url-${escapeAttr(item.id)}" type="url" value="${escapeAttr(shortUrl)}" placeholder="https://a.r10.to/xxxxxx"></label>
+      <p class="small-note">楽天アフィリエイト公式で作成したa.r10.toの短縮URLを登録できます。未登録の場合はAPI取得済みaffiliateUrlを使用します。</p>
+      <div class="record-actions"><button class="secondary-button" type="button" onclick="registerAffiliateShortUrl('${item.id}')">短縮URLを登録</button>${shortUrl ? `<button class="danger-button" type="button" onclick="removeAffiliateShortUrl('${item.id}')">短縮URLを削除</button>` : ""}</div>
+    </div>
     <label>生成プロンプト<textarea id="${promptId}" readonly>${escapeHtml(threads.prompt || "")}</textarea></label>
     <div class="record-actions"><button class="secondary-button" type="button" onclick="generateThreadsOnlyPrompt('${item.id}')">成果型プロンプトを作成</button><button class="secondary-button" type="button" onclick="copyValue('${promptId}')">プロンプトをコピー</button><button class="primary-button" type="button" onclick="startThreadsOnlyCodex('${item.id}')">CodexでThreads文章作成</button></div>
     <p class="message">登録時に安全な自動下書きを作成済みです。必要に応じてCodexで書き直せます。</p>
-    <label>Threads生成文章<textarea id="${textId}" oninput="saveSnsPost('${item.id}', 'threads', 'text', this.value)">${escapeHtml(threads.text || "")}</textarea></label>
+    <div class="threads-post-section"><h5>Threads生成文章｜親投稿</h5><label>親投稿本文<textarea id="${textId}" oninput="saveSnsPost('${item.id}', 'threads', 'text', this.value)">${escapeHtml(threads.text || "")}</textarea></label>
     <p>文字数：<span>${Array.from(threads.text || "").length}</span></p>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="copyValue('${textId}')">親投稿をコピー</button></div></div>
     ${replyEditor}
     <label>Codex結果をまとめて貼り付け<textarea id="threads-only-result-${item.id}" placeholder="===THREADS_POST===\n...\n===END_THREADS_POST==="></textarea></label>
-    <div class="record-actions"><button class="secondary-button" type="button" onclick="applyThreadsOnlyResult('${item.id}')">Threads文章に反映</button><button class="secondary-button" type="button" onclick="copyValue('${textId}')">文章をコピー</button><button class="secondary-button" type="button" onclick="markThreadsOnlyPosted('${item.id}')">投稿済みにする</button></div>
+    <div class="record-actions"><button class="secondary-button" type="button" onclick="applyThreadsOnlyResult('${item.id}')">Threads文章に反映</button><button class="secondary-button" type="button" onclick="markThreadsOnlyPosted('${item.id}')">投稿済みにする</button></div>
   </section>`;
 }
 
@@ -1932,7 +1945,7 @@ function renderThreadsOnlyCard(item) {
       <h3>${escapeHtml(item.title)}</h3>
       <p><span class="badge">Threads限定</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
       <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
-      <p class="affiliate-url-status">${affiliateUrl ? "楽天アフィリエイトURL取得済み" : "楽天アフィリエイトURL未取得"}</p>
+      <p class="affiliate-url-status">${item.affiliateShortUrl ? "楽天公式短縮URL 登録済み" : affiliateUrl ? "API取得URLを使用" : "アフィリエイトURLなし"}</p>
       ${item.couponCandidate ? `<p class="coupon-status">割引率：${coupon.discountRate ? `${coupon.discountRate}%OFF` : "未確認"}（${coupon.rateConfirmed && coupon.discountRateType === "exact" ? "確認済み" : "要確認"}）</p><p class="coupon-status">期限：${escapeHtml(coupon.couponDeadline || "未確認")}（${coupon.deadlineConfirmed ? "確認済み" : "要確認"}）</p><p class="coupon-status">投稿方式：${urlMode}</p>` : ""}
       <p class="trust-status" aria-label="商品信頼性判定">${escapeHtml(trust.trustStatus || "要確認")}（${trust.trustScore ?? "-"}点・検証中）</p>
       <p class="post-status-line"><span class="badge post-status-badge">${escapeHtml(item.threadsStatus || "文章作成待ち")}</span></p>
@@ -1944,9 +1957,9 @@ function renderThreadsOnlyCard(item) {
 
 function buildThreadsOnlyCodexInstructions(item) {
   const threads = item.snsPosts?.threads || createSnsPosts().threads;
-  const affiliateUrl = String(item.affiliateUrl || item.product?.affiliateUrl || "").trim();
-  const linkStatus = affiliateUrl ? `楽天アフィリエイトURL取得済み：${affiliateUrl}` : "楽天アフィリエイトURL未取得。URLを推測・生成・代用しない。";
-  return `Threads限定投稿の商品について、CodexがChrome上の楽天ROOM投稿アシスタントを操作して文章を作成し、結果欄へ直接反映してください。ROOM投稿、ROOM URL取得、X文章作成は行いません。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${item.itemUrl || "未設定"}\n${linkStatus}\n\n【文章モード】\nThreads成果型 Ver.1（performance_v1）\n誰向け：${threads.performanceAudience || "商品情報から根拠のある対象者を短く示し、人間が確認できるようにする"}\nROOM URL：使用しない（Threads限定投稿）\nThreads限定投稿用URLは楽天APIが返したaffiliateUrlだけを使用する。itemUrlやROOM URLを代用しない。\n\n【作成ルール】\n${buildThreadsPerformancePrompt(item)}\n未確認のセール、割引率、クーポン、期限、イベント情報を追加しない。外部Threadsへ投稿せず、アプリへ反映して人間の確認待ちで停止する。`;
+  const affiliateUrl = getThreadsLink(item);
+  const linkStatus = affiliateUrl ? `使用する楽天アフィリエイトURL：${affiliateUrl}` : "楽天アフィリエイトURL未取得。使用するURLなし。URLを推測・生成・代用しない。";
+  return `Threads限定投稿の商品について、CodexがChrome上の楽天ROOM投稿アシスタントを操作して文章を作成し、結果欄へ直接反映してください。ROOM投稿、ROOM URL取得、X文章作成は行いません。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${item.itemUrl || "未設定"}\n${linkStatus}\n\n【文章モード】\nThreads成果型 Ver.1（performance_v1）\n誰向け：${threads.performanceAudience || "商品情報から根拠のある対象者を短く示し、人間が確認できるようにする"}\nROOM URL：使用しない（Threads限定投稿）\nThreads限定投稿用URLは保存済みの楽天公式短縮URLを優先し、未登録なら楽天APIが返したaffiliateUrlを使用する。itemUrlやROOM URLを代用しない。\n\n【作成ルール】\n${buildThreadsPerformancePrompt(item)}\n未確認のセール、割引率、クーポン、期限、イベント情報を追加しない。外部Threadsへ投稿せず、アプリへ反映して人間の確認待ちで停止する。`;
 }
 
 function generateThreadsOnlyPrompt(id) {
@@ -2494,8 +2507,46 @@ function getSnsTypeSpecificRule(medium, postType) {
 
 function getThreadsLink(item = {}) {
   const product = item.product || item;
-  if (isThreadsOnlyItem(item)) return String(item.affiliateUrl || product.affiliateUrl || "").trim();
+  if (isThreadsOnlyItem(item)) return String(item.affiliateShortUrl || item.affiliateUrl || product.affiliateUrl || "").trim();
   return String(item.roomUrl || "").trim();
+}
+
+function isValidAffiliateShortUrl(value = "") {
+  return /^https:\/\/a\.r10\.to\/[^\s/]+$/i.test(String(value || "").trim());
+}
+
+function refreshThreadsOnlyReply(item) {
+  if (!isThreadsOnlyItem(item)) return;
+  item.snsPosts = createSnsPosts(item.snsPosts);
+  if (item.snsPosts.threads.performanceUrlMode !== "reply") return;
+  item.snsPosts.threads.replyText = buildThreadsOnlyDraft(item).replyText;
+  item.snsPosts.threads.prompt = buildThreadsPerformancePrompt(item);
+}
+
+function registerAffiliateShortUrl(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id && isThreadsOnlyItem(candidate));
+  const input = document.querySelector(`#threads-short-url-${id}`);
+  if (!item || !input) return;
+  const value = String(input.value || "").trim();
+  if (!isValidAffiliateShortUrl(value)) {
+    toast("楽天公式短縮URL（a.r10.to）を入力してください。");
+    return;
+  }
+  item.affiliateShortUrl = value;
+  refreshThreadsOnlyReply(item);
+  saveData();
+  renderCandidates();
+  toast("楽天公式短縮URLを登録し、コメント欄へ反映しました。");
+}
+
+function removeAffiliateShortUrl(id) {
+  const item = data.candidates.find((candidate) => candidate.id === id && isThreadsOnlyItem(candidate));
+  if (!item) return;
+  item.affiliateShortUrl = "";
+  refreshThreadsOnlyReply(item);
+  saveData();
+  renderCandidates();
+  toast("楽天公式短縮URLを削除し、API取得URLへ戻しました。");
 }
 
 function getThreadsLinkLabel(item = {}) {

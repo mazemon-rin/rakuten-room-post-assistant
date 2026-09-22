@@ -403,6 +403,26 @@ main {
 .coupon-confirmation.confirmed { color: var(--green); font-weight: 700; }
 .coupon-confirmation.needs-confirmation { color: #9a5b13; font-weight: 700; }
 
+.threads-post-section {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.threads-post-section h5 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.affiliate-short-url-editor {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
 .affiliate-import-panel {
   margin: 18px 0;
 }

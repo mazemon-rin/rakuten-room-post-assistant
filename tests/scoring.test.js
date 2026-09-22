@@ -28,7 +28,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getCouponDisplayState, getImage, getPerformanceAudienceGuidance, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getCouponDisplayState, getImage, getPerformanceAudienceGuidance, data };`, context);
 
 const scoring = context.__scoring;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -138,6 +138,24 @@ assert(threadsOnlyCandidate.snsPosts.threads.threadsPostType === "performance_v1
 const threadsOnlyPrompt = scoring.buildThreadsPerformancePrompt(threadsOnlyCandidate);
 assert(threadsOnlyPrompt.includes("誰向け") && threadsOnlyPrompt.includes("どんなお得") && threadsOnlyPrompt.includes("期限・今見る理由"), "Threads-only E: performance prompt is reused");
 assert(threadsOnlyPrompt.includes("50%OFFクーポン") && threadsOnlyPrompt.includes("2026-09-24 01:59まで"), "Threads-only K: only stored sale facts are used");
+
+const affiliateLongUrl = "https://hb.afl.rakuten.co.jp/hgc/example";
+const affiliateShortUrl = "https://a.r10.to/AbCd12";
+const shortUrlCandidate = scoring.createThreadsOnlyCandidate({ ...threadsOnlyProduct, affiliateUrl: affiliateLongUrl }, "short-url-candidate");
+shortUrlCandidate.affiliateShortUrl = affiliateShortUrl;
+shortUrlCandidate.snsPosts.threads.performanceUrlMode = "reply";
+const shortUrlDraft = scoring.buildThreadsOnlyDraft(shortUrlCandidate);
+assert(scoring.isValidAffiliateShortUrl(affiliateShortUrl), "Short URL G: official a.r10.to URL is accepted");
+assert(!scoring.isValidAffiliateShortUrl("https://bit.ly/example") && !scoring.isValidAffiliateShortUrl("https://item.rakuten.co.jp/example"), "Short URL F: external and product URLs are rejected");
+assert(scoring.getThreadsLink(shortUrlCandidate) === affiliateShortUrl, "Short URL A: short URL has priority over affiliateUrl");
+assert(!shortUrlDraft.text.includes(affiliateShortUrl) && shortUrlDraft.replyText.includes(affiliateShortUrl) && shortUrlDraft.replyText.split(affiliateShortUrl).length === 2, "Short URL D/E: parent omits URL and reply uses short URL once");
+const fallbackCandidate = scoring.createThreadsOnlyCandidate({ ...threadsOnlyProduct, affiliateUrl: affiliateLongUrl }, "fallback-url-candidate");
+fallbackCandidate.snsPosts.threads.performanceUrlMode = "reply";
+assert(scoring.getThreadsLink(fallbackCandidate) === affiliateLongUrl && scoring.buildThreadsOnlyDraft(fallbackCandidate).replyText.includes(affiliateLongUrl), "Short URL B: affiliateUrl remains the fallback");
+const noUrlCandidate = scoring.createThreadsOnlyCandidate(threadsOnlyProduct, "no-url-candidate");
+noUrlCandidate.snsPosts.threads.performanceUrlMode = "reply";
+assert(scoring.getThreadsLink(noUrlCandidate) === "" && scoring.buildThreadsOnlyDraft(noUrlCandidate).replyText === "", "Short URL C: missing URLs are not invented");
+assert(scoring.normalizeSnsRecords([{ ...shortUrlCandidate }])[0].affiliateShortUrl === affiliateShortUrl, "Short URL J/L: normalization preserves optional short URL and legacy records remain loadable");
 const threadsOnlyCodex = scoring.buildThreadsOnlyCodexInstructions(threadsOnlyCandidate);
 assert(threadsOnlyCodex.includes("楽天アフィリエイトURL未取得") && threadsOnlyCodex.includes("ROOM URL取得、X文章作成は行いません"), "Threads-only URL: missing affiliate URL is explicit and no ROOM URL is generated");
 const threadsOnlyText = "セール商品を探している人へ\n50%OFFクーポンあり\n期間：2026-09-24 01:59まで\n#PR";
