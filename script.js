@@ -2612,15 +2612,22 @@ function buildThreadsOnlyDraft(item) {
   return { text: bodyParts.join("\n"), replyText };
 }
 
+function hasThreadsInstructionText(text = "") {
+  return /具体的な利用場面または小さな困りごとを1つ選ぶ|根拠がなければ人間が修正する/.test(String(text || ""));
+}
+
 function ensureThreadsOnlyDraft(item) {
   if (!isThreadsOnlyItem(item)) return false;
   item.snsPosts = createSnsPosts(item.snsPosts);
   item.snsPosts.threads.threadsPostType = "performance_v1";
-  if (item.snsPosts.threads.text?.trim()) return false;
+  const existingText = item.snsPosts.threads.text?.trim() || "";
+  const needsRepair = hasThreadsInstructionText(existingText);
+  if (existingText && !needsRepair) return false;
+  if (needsRepair) item.snsPosts.threads.text = "";
   if (item.couponCandidate) item.snsPosts.threads.performanceUrlMode = "reply";
   const draft = buildThreadsOnlyDraft(item);
   item.snsPosts.threads.text = draft.text;
-  item.snsPosts.threads.replyText = draft.replyText;
+  if (!item.snsPosts.threads.replyText?.trim()) item.snsPosts.threads.replyText = draft.replyText;
   item.snsPosts.threads.status = "draft";
   item.snsPosts.threads.generatedAt = item.snsPosts.threads.generatedAt || new Date().toISOString();
   item.threadsStatus = "確認待ち";

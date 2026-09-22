@@ -313,6 +313,11 @@ const legacyCandidate = scoring.createThreadsOnlyCandidate({ ...confirmed70, cou
 assert(legacyCandidate.snsPosts.threads.performanceUrlMode === "body", "Existing Threads-only records retain the legacy body URL mode");
 assert(scoring.getPerformanceAudienceGuidance({ itemName: "チェスト 収納", itemCaption: "クローゼット用" }).includes("クローゼットの収納が足りない人"), "Performance audience: storage context is concrete");
 assert(!scoring.getPerformanceAudienceGuidance({ itemName: "用途不明の商品" }).includes("具体的な利用場面または小さな困りごとを1つ選ぶ"), "Performance audience: fallback is post-ready text, not an instruction");
+const staleDraft = scoring.createThreadsOnlyCandidate({ itemName: "用途不明の商品", affiliateUrl }, "stale-draft");
+staleDraft.snsPosts.threads.text = "商品情報から、具体的な利用場面または小さな困りごとを1つ選ぶ（根拠がなければ人間が修正する）へ。\n\n対象は返信に👇\n#PR";
+staleDraft.snsPosts.threads.replyText = "保存済みの返信\n#PR";
+const repairedDraft = scoring.normalizeSnsRecords([staleDraft])[0];
+assert(!repairedDraft.snsPosts.threads.text.includes("具体的な利用場面または小さな困りごとを1つ選ぶ") && repairedDraft.snsPosts.threads.replyText === "保存済みの返信\n#PR", "Performance stale draft: instruction text is repaired without overwriting the saved reply");
 const performanceReplyPrompt = scoring.buildThreadsPerformancePrompt({ ...couponCandidate, snsPosts: scoring.createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: "reply" } }) });
 assert(performanceReplyPrompt.includes("広すぎる表現は避ける") && performanceReplyPrompt.includes("対象は返信に👇") && performanceReplyPrompt.includes("親投稿にURLを書かず"), "Performance audience/reply: concrete audience and parent-to-reply guidance are included");
 assert(performanceReplyPrompt.includes("rateConfirmed===true") && performanceReplyPrompt.includes("deadlineConfirmed===true"), "Performance facts: only confirmed discount and deadline may be stated");
