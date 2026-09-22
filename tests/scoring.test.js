@@ -28,15 +28,25 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, data };`, context);
 
 const scoring = context.__scoring;
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
 scoring.data.eventSettings = {};
+const noAffiliateParams = new URLSearchParams({ format: "json" });
+scoring.data.settings.affiliateId = "";
+scoring.addAffiliateIdParam(noAffiliateParams);
+assert(!noAffiliateParams.has("affiliateId"), "Affiliate A: missing affiliateId keeps the request unchanged");
+const affiliateParams = new URLSearchParams({ format: "json" });
+scoring.data.settings.affiliateId = "test-affiliate-id";
+scoring.addAffiliateIdParam(affiliateParams);
+assert(affiliateParams.get("affiliateId") === "test-affiliate-id", "Affiliate B: configured affiliateId is added to requests");
+const wrappedAffiliate = scoring.normalizeRakutenItems({ Items: [{ Item: { itemName: "商品", itemUrl: "https://example.com/item", affiliateUrl: "https://hb.afl.rakuten.co.jp/xyz" }, affiliateUrl: "https://hb.afl.rakuten.co.jp/outer" }] });
+assert(wrappedAffiliate[0].itemName === "商品" && wrappedAffiliate[0].affiliateUrl === "https://hb.afl.rakuten.co.jp/xyz", "Affiliate C: API affiliateUrl is preserved from the item payload");
+scoring.data.settings.affiliateId = "";
 const keyword = "iPhone 18 Pro ケース";
 const base = { matchedTrendKeywords: [keyword], itemPrice: 1980, reviewAverage: 4.5, reviewCount: 1200, itemCaption: "MagSafe対応", itemUrl: "https://example.com/item" };
 const trend = (itemName, extra = {}) => scoring.calculateTrendSelectionScore({ ...base, itemName, ...extra }, { matchedTrendKeywords: [keyword], postedIdentities: new Set(), queuedIdentities: new Set() });
-const assert = (condition, message) => { if (!condition) throw new Error(message); };
-
 const caseA = trend("iPhone18Pro ケース MagSafe対応");
 assert(caseA.selectionScore.trendFit >= 27, "A: exact model and product type should score high");
 const caseB = trend("iPhone18Pro ガラスフィルム");
@@ -129,7 +139,7 @@ const threadsOnlyPrompt = scoring.buildThreadsPerformancePrompt(threadsOnlyCandi
 assert(threadsOnlyPrompt.includes("誰向け") && threadsOnlyPrompt.includes("どんなお得") && threadsOnlyPrompt.includes("期限・今見る理由"), "Threads-only E: performance prompt is reused");
 assert(threadsOnlyPrompt.includes("50%OFFクーポン") && threadsOnlyPrompt.includes("2026-09-24 01:59まで"), "Threads-only K: only stored sale facts are used");
 const threadsOnlyCodex = scoring.buildThreadsOnlyCodexInstructions(threadsOnlyCandidate);
-assert(threadsOnlyCodex.includes("Threads限定投稿用URL：未実装") && threadsOnlyCodex.includes("ROOM URL取得、X文章作成は行いません"), "Threads-only URL: no ROOM or unimplemented affiliate URL is generated");
+assert(threadsOnlyCodex.includes("楽天アフィリエイトURL未取得") && threadsOnlyCodex.includes("ROOM URL取得、X文章作成は行いません"), "Threads-only URL: missing affiliate URL is explicit and no ROOM URL is generated");
 const threadsOnlyText = "セール商品を探している人へ\n50%OFFクーポンあり\n期間：2026-09-24 01:59まで\n#PR";
 scoring.applyThreadsOnlyResultToItem(threadsOnlyCandidate, { threadsText: threadsOnlyText, threadsReplyText: "" });
 assert(scoring.validateThreadsOnlyResult(threadsOnlyCandidate, { threadsText: threadsOnlyText, threadsReplyText: "" }) === "" && threadsOnlyCandidate.threadsStatus === "確認待ち", "Threads-only: text is saved and enters confirmation wait");
@@ -139,7 +149,17 @@ const backupRoundTrip = JSON.parse(JSON.stringify(scoring.normalizeSnsRecords([t
 assert(backupRoundTrip[0].destination === "threads_only" && backupRoundTrip[0].snsPosts.threads.threadsPostType === "performance_v1" && backupRoundTrip[1].destination === "room", "Threads-only L: JSON backup/restore preserves the new destination and legacy default");
 const replyCandidate = scoring.createThreadsOnlyCandidate(threadsOnlyProduct, "threads-only-reply");
 replyCandidate.snsPosts.threads.performanceUrlMode = "reply";
-assert(scoring.validateThreadsOnlyResult(replyCandidate, { threadsText: "お得情報です\n#PR", threadsReplyText: "商品はこちら\nhttps://example.com/threads-only" }) === "", "Threads-only: reply mode remains available without ROOM URL");
+assert(scoring.validateThreadsOnlyResult(replyCandidate, { threadsText: "お得情報です\n#PR", threadsReplyText: "" }) === "", "Threads-only: reply mode remains available without affiliate URL");
+const affiliateUrl = "https://hb.afl.rakuten.co.jp/xyz123";
+const threadsOnlyWithAffiliate = scoring.createThreadsOnlyCandidate({ ...threadsOnlyProduct, affiliateUrl }, "threads-only-affiliate");
+assert(threadsOnlyWithAffiliate.affiliateUrl === affiliateUrl && threadsOnlyWithAffiliate.product.affiliateUrl === affiliateUrl, "Affiliate D: Threads-only candidate preserves affiliateUrl");
+const affiliatePrompt = scoring.buildThreadsPerformancePrompt(threadsOnlyWithAffiliate);
+assert(affiliatePrompt.includes("楽天アフィリエイトURL") && affiliatePrompt.includes(affiliateUrl) && affiliatePrompt.includes("楽天アフィリエイトURLと#PRを含む"), "Affiliate F: performance prompt uses affiliateUrl, not ROOM URL");
+const affiliateText = `お得情報です\n${affiliateUrl}\n#PR`;
+assert(scoring.validateThreadsOnlyResult(threadsOnlyWithAffiliate, { threadsText: affiliateText, threadsReplyText: "" }) === "", "Affiliate E: Threads-only body validates the exact affiliateUrl");
+threadsOnlyWithAffiliate.snsPosts.threads.performanceUrlMode = "reply";
+assert(scoring.validateThreadsOnlyResult(threadsOnlyWithAffiliate, { threadsText: "お得情報です\n#PR", threadsReplyText: `商品はこちら\n${affiliateUrl}` }) === "", "Affiliate I: reply mode validates the exact affiliateUrl");
+assert(scoring.validateThreadsOnlyResult(threadsOnlyWithAffiliate, { threadsText: "お得情報です\n#PR", threadsReplyText: "商品はこちら" }).includes("アフィリエイトURL"), "Affiliate I: reply mode rejects missing affiliateUrl");
 
 // Threads成果型 Ver.1: existing normal records remain normal and the new mode is isolated.
 const performanceItem = {

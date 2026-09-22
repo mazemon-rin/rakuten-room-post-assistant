@@ -101,6 +101,7 @@ const defaultData = {
   settings: {
     applicationId: "",
     accessKey: "",
+    affiliateId: "",
     defaultTone: "やさしい",
     defaultEmoji: "少なめ",
     defaultTagCount: 8,
@@ -240,6 +241,7 @@ function saveRankingCategorySelection() {
 function fillSettings() {
   $("#applicationId").value = data.settings.applicationId || "";
   $("#accessKey").value = data.settings.accessKey || "";
+  $("#affiliateId").value = data.settings.affiliateId || "";
   $("#defaultTone").value = data.settings.defaultTone;
   $("#defaultEmoji").value = data.settings.defaultEmoji;
   $("#defaultTagCount").value = data.settings.defaultTagCount;
@@ -277,6 +279,7 @@ async function searchProducts(event) {
     hits: $("#hits").value,
     sort: $("#sortOrder").value
   });
+  addAffiliateIdParam(params);
   addParam(params, "minPrice", $("#minPrice").value);
   addParam(params, "maxPrice", $("#maxPrice").value);
   addParam(params, "reviewAverage", $("#minReview").value);
@@ -305,6 +308,12 @@ function hasRakutenCredentials() {
   return Boolean(data.settings.applicationId && data.settings.accessKey);
 }
 
+function addAffiliateIdParam(params) {
+  const affiliateId = String(data.settings.affiliateId || "").trim();
+  if (affiliateId) params.set("affiliateId", affiliateId);
+  return params;
+}
+
 async function readRakutenApiError(response) {
   const fallback = `HTTP ${response.status}`;
   try {
@@ -330,6 +339,7 @@ async function fetchRankingCategory(category, page = 1, fallbackWaitMs = RANKING
     page: String(page),
     genreId: category.id
   });
+  addAffiliateIdParam(params);
   const url = `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`;
   let retryCount = 0;
   while (true) {
@@ -436,12 +446,16 @@ function formatRakutenApiError(message) {
 function hideCredentials(text) {
   return text
     .replaceAll(data.settings.applicationId || "no-application-id", "[applicationId]")
-    .replaceAll(data.settings.accessKey || "no-access-key", "[accessKey]");
+    .replaceAll(data.settings.accessKey || "no-access-key", "[accessKey]")
+    .replaceAll(data.settings.affiliateId || "no-affiliate-id", "[affiliateId]");
 }
 
 function normalizeRakutenItems(json) {
   const items = json.items || json.Items || [];
-  return items.map((entry) => entry.item || entry.Item || entry);
+  return items.map((entry) => {
+    const nested = entry.item || entry.Item;
+    return nested ? { ...entry, ...nested } : entry;
+  });
 }
 
 // 楽天APIの在庫・販売状態を確認し、販売終了商品をランキング候補から除外します。
@@ -1131,6 +1145,7 @@ function quickSave(product) {
     title: productWithUrl.itemName,
     imageUrl: getImage(productWithUrl),
     itemUrl,
+    affiliateUrl: productWithUrl.affiliateUrl || "",
     itemCode: productWithUrl.itemCode,
     price: productWithUrl.itemPrice,
     shopName: productWithUrl.shopName,
@@ -1164,8 +1179,9 @@ function quickSave(product) {
 }
 
 function createThreadsOnlyCandidate(product, id = crypto.randomUUID()) {
-  const itemUrl = product.itemUrl || product.affiliateUrl || "";
-  const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
+  const itemUrl = product.itemUrl || "";
+  const affiliateUrl = product.affiliateUrl || "";
+  const productWithUrl = { ...product, itemUrl, affiliateUrl };
   return {
     id,
     destination: "threads_only",
@@ -1173,6 +1189,7 @@ function createThreadsOnlyCandidate(product, id = crypto.randomUUID()) {
     title: productWithUrl.itemName,
     imageUrl: getImage(productWithUrl),
     itemUrl,
+    affiliateUrl,
     itemCode: productWithUrl.itemCode,
     price: productWithUrl.itemPrice,
     shopName: productWithUrl.shopName,
@@ -1200,8 +1217,7 @@ function createThreadsOnlyCandidate(product, id = crypto.randomUUID()) {
 }
 
 function quickSaveThreadsOnly(product) {
-  const itemUrl = product.itemUrl || product.affiliateUrl || "";
-  const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
+  const productWithUrl = { ...product, itemUrl: product.itemUrl || "", affiliateUrl: product.affiliateUrl || "" };
   const existing = data.candidates.find((item) => isThreadsOnlyItem(item) && rankingIdentity(item.product || item) === rankingIdentity(productWithUrl));
   if (existing) {
     toast("この商品はThreads限定候補へ保存済みです。");
@@ -1432,6 +1448,7 @@ function buildQueueCandidate(product) {
     title: productWithUrl.itemName,
     imageUrl: getImage(productWithUrl),
     itemUrl,
+    affiliateUrl: productWithUrl.affiliateUrl || "",
     itemCode: productWithUrl.itemCode || "",
     price: productWithUrl.itemPrice,
     shopName: productWithUrl.shopName || "",
@@ -1640,12 +1657,14 @@ function renderThreadsOnlyEditor(item) {
 function renderThreadsOnlyCard(item) {
   const threads = item.snsPosts?.threads || createSnsPosts().threads;
   const trust = item.trustStatus ? item : { ...item, ...checkProductTrust(item.product || item) };
+  const affiliateUrl = String(item.affiliateUrl || item.product?.affiliateUrl || "").trim();
   return `<article class="record-card candidate-card threads-only-card" data-candidate-id="${escapeAttr(item.id)}" data-destination="threads_only">
     <img src="${escapeAttr(item.imageUrl)}" alt="">
     <div>
       <h3>${escapeHtml(item.title)}</h3>
       <p><span class="badge">Threads限定</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
       <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
+      <p class="affiliate-url-status">${affiliateUrl ? "楽天アフィリエイトURL取得済み" : "楽天アフィリエイトURL未取得"}</p>
       <p class="trust-status" aria-label="商品信頼性判定">${escapeHtml(trust.trustStatus || "要確認")}（${trust.trustScore ?? "-"}点・検証中）</p>
       <p class="post-status-line"><span class="badge post-status-badge">${escapeHtml(item.threadsStatus || "文章作成待ち")}</span></p>
       ${renderThreadsOnlyEditor(item)}
@@ -1656,7 +1675,9 @@ function renderThreadsOnlyCard(item) {
 
 function buildThreadsOnlyCodexInstructions(item) {
   const threads = item.snsPosts?.threads || createSnsPosts().threads;
-  return `Threads限定投稿の商品について、CodexがChrome上の楽天ROOM投稿アシスタントを操作して文章を作成し、結果欄へ直接反映してください。ROOM投稿、ROOM URL取得、X文章作成は行いません。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${item.itemUrl || "未設定"}\n\n【文章モード】\nThreads成果型 Ver.1（performance_v1）\n誰向け：${threads.performanceAudience || "商品情報から根拠のある対象者を短く示し、人間が確認できるようにする"}\nROOM URL：使用しない（Threads限定投稿）\nThreads限定投稿用URL：未実装。商品URL・アフィリエイトURL・ROOM URLを本文へ自動挿入、推測、代用しない。\n\n【作成ルール】\n${buildThreadsPerformancePrompt(item)}\n未確認のセール、割引率、クーポン、期限、イベント情報を追加しない。外部Threadsへ投稿せず、アプリへ反映して人間の確認待ちで停止する。`;
+  const affiliateUrl = String(item.affiliateUrl || item.product?.affiliateUrl || "").trim();
+  const linkStatus = affiliateUrl ? `楽天アフィリエイトURL取得済み：${affiliateUrl}` : "楽天アフィリエイトURL未取得。URLを推測・生成・代用しない。";
+  return `Threads限定投稿の商品について、CodexがChrome上の楽天ROOM投稿アシスタントを操作して文章を作成し、結果欄へ直接反映してください。ROOM投稿、ROOM URL取得、X文章作成は行いません。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${item.itemUrl || "未設定"}\n${linkStatus}\n\n【文章モード】\nThreads成果型 Ver.1（performance_v1）\n誰向け：${threads.performanceAudience || "商品情報から根拠のある対象者を短く示し、人間が確認できるようにする"}\nROOM URL：使用しない（Threads限定投稿）\nThreads限定投稿用URLは楽天APIが返したaffiliateUrlだけを使用する。itemUrlやROOM URLを代用しない。\n\n【作成ルール】\n${buildThreadsPerformancePrompt(item)}\n未確認のセール、割引率、クーポン、期限、イベント情報を追加しない。外部Threadsへ投稿せず、アプリへ反映して人間の確認待ちで停止する。`;
 }
 
 function generateThreadsOnlyPrompt(id) {
@@ -1688,9 +1709,13 @@ function startThreadsOnlyCodex(id) {
 
 function validateThreadsOnlyResult(item, parsed) {
   const threads = item.snsPosts?.threads || {};
-  const bodyError = validateSnsPostText({ ...item, roomUrl: "" }, "threads", parsed.threadsText);
+  const bodyError = validateSnsPostText(threads.performanceUrlMode === "reply" ? { ...item, skipRequiredLink: true } : item, "threads", parsed.threadsText);
   if (bodyError) return bodyError;
-  if (threads.performanceUrlMode === "reply" && parsed.threadsReplyText && parsed.threadsReplyText.includes("ROOM個別URL未設定")) return "Threads限定投稿ではROOM URL未設定という文言を本文・返信用文章へ入れません。";
+  if (threads.performanceUrlMode === "reply") {
+    const affiliateUrl = getThreadsLink(item);
+    if (affiliateUrl && countTextOccurrences(parsed.threadsReplyText, affiliateUrl) !== 1) return "Threads返信用文章に登録済み楽天アフィリエイトURLを1回だけ含めてください。";
+    if (!affiliateUrl && parsed.threadsReplyText) return "楽天アフィリエイトURL未設定時は返信用URLを作成しないでください。";
+  }
   return "";
 }
 
@@ -2198,6 +2223,16 @@ function getSnsTypeSpecificRule(medium, postType) {
   return medium === "x" ? "特徴は1〜2個に絞り、冒頭を重視する。" : "共感・困りごと・発見から入り、なぜ気になったかを伝える。";
 }
 
+function getThreadsLink(item = {}) {
+  const product = item.product || item;
+  if (isThreadsOnlyItem(item)) return String(item.affiliateUrl || product.affiliateUrl || "").trim();
+  return String(item.roomUrl || "").trim();
+}
+
+function getThreadsLinkLabel(item = {}) {
+  return isThreadsOnlyItem(item) ? "楽天アフィリエイトURL" : "ROOM個別URL";
+}
+
 function buildThreadsPerformancePrompt(item, options = {}) {
   const product = item.product || item;
   const posts = item.snsPosts || createSnsPosts();
@@ -2206,16 +2241,18 @@ function buildThreadsPerformancePrompt(item, options = {}) {
   const audience = options.audience || threads.performanceAudience || "自動判定できる範囲で、商品情報に合う対象者を短く示す。根拠がなければ人間が修正する。";
   const context = buildGenerationContext(product, item.usageStatus || "不明");
   const facts = getThreadsPerformanceFacts(item);
-  const roomUrl = String(item.roomUrl || "").trim();
-  const urlRule = roomUrl
+  const linkUrl = getThreadsLink(item);
+  const linkLabel = getThreadsLinkLabel(item);
+  const urlRule = linkUrl
     ? urlMode === "reply"
-      ? `本文にはROOM URLを入れず、返信用文章に登録済みURLを完全一致で1回だけ記載する。URLは変更・短縮・省略・推測しない。`
-      : `本文に登録済みROOM URLを完全一致で1回だけ記載する。URLは変更・短縮・省略・推測しない。`
-    : "ROOM URLは未設定。本文・返信用文章へURLを推測生成せず、「ROOM個別URL未設定」という文言も書かない。";
+      ? `本文には${linkLabel}を入れず、返信用文章に登録済み${linkLabel}を完全一致で1回だけ記載する。URLは変更・短縮・省略・推測しない。`
+      : `本文に登録済み${linkLabel}を完全一致で1回だけ記載する。URLは変更・短縮・省略・推測しない。`
+    : `${linkLabel}は未設定。本文・返信用文章へURLを推測生成せず、内部状態を示す文言も投稿本文へ書かない。`;
   const output = urlMode === "reply"
     ? `===THREADS_POST===\n本文（URLなし、#PR必須）\n===END_THREADS_POST===\n\n===THREADS_REPLY===\n返信用の短い導線とROOM URL（登録済みの場合のみ）\n===END_THREADS_REPLY===`
-    : `===THREADS_POST===\n本文（ROOM URLと#PRを含む）\n===END_THREADS_POST===`;
-  return `Threads成果型 Ver.1の投稿文章を作成してください。通常Threads紹介文とは別の短文モードです。\n\n【基本構造】\n1. 誰向け\n2. どんなお得\n3. 期限・今見る理由\nこの3要素を短く自然にまとめる。商品説明を長く言い換えず、最も強いお得情報を1つ優先する。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品名：${product.itemName || product.title || "未設定"}\nカテゴリー：${product.categoryName || "未設定"}\n対象者の補助情報：${context.targetUser}\n誰向けの入力・指定：${audience}\n確認済みセール情報：\n${facts.structured}\n確認済みイベント：${facts.event}\nROOM個別URL：${roomUrl || "未設定"}\n\n【安全ルール】\n${getSalePromptRule()}\nusageStatusがusedでない場合、使用・購入体験、レビュー・効果・在庫を捏造しない。存在しない割引率、期限、ポイント倍率、イベント開催状況を推測しない。期限が確認できない場合、「今日まで」「あと○時間」などを書かない。\n${urlRule}\n#PRを必ず含める。外部Threadsへ自動投稿しない。\n\n【出力形式】\n${output}`;
+    : `===THREADS_POST===\n本文（${linkUrl ? `${linkLabel}と#PRを含む` : "URLなし・#PRを含む"}）\n===END_THREADS_POST===`;
+  const outputWithLabel = output.replaceAll("ROOM URL（登録済みの場合のみ）", `${linkLabel}（登録済みの場合のみ）`);
+  return `Threads成果型 Ver.1の投稿文章を作成してください。通常Threads紹介文とは別の短文モードです。\n\n【基本構造】\n1. 誰向け\n2. どんなお得\n3. 期限・今見る理由\nこの3要素を短く自然にまとめる。商品説明を長く言い換えず、最も強いお得情報を1つ優先する。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品名：${product.itemName || product.title || "未設定"}\nカテゴリー：${product.categoryName || "未設定"}\n対象者の補助情報：${context.targetUser}\n誰向けの入力・指定：${audience}\n確認済みセール情報：\n${facts.structured}\n確認済みイベント：${facts.event}\n${linkLabel}：${linkUrl || "未設定"}\n\n【安全ルール】\n${getSalePromptRule()}\nusageStatusがusedでない場合、使用・購入体験、レビュー・効果・在庫を捏造しない。存在しない割引率、期限、ポイント倍率、イベント開催状況を推測しない。期限が確認できない場合、「今日まで」「あと○時間」などを書かない。\n${urlRule}\n#PRを必ず含める。外部Threadsへ自動投稿しない。\n\n【出力形式】\n${outputWithLabel}`;
 }
 
 function buildSnsPrompt(item, medium, postType) {
@@ -2349,12 +2386,13 @@ function validateSnsPostText(item, medium, text) {
   if (medium === "x" && Array.from(value).length > SNS_X_MAX_LENGTH) {
     return `X投稿が${Array.from(value).length}文字を超えています（${Array.from(value).length}/${SNS_X_MAX_LENGTH}）。`;
   }
-  const roomUrl = String(item.roomUrl || "").trim();
-  if (roomUrl && countTextOccurrences(value, roomUrl) !== 1) {
-    return `${medium === "x" ? "X" : "Threads"}投稿に登録済みROOM個別URLを1回だけ含めてください。`;
+  const requiredUrl = item.skipRequiredLink ? "" : getThreadsLink(item);
+  const linkLabel = getThreadsLinkLabel(item);
+  if (requiredUrl && countTextOccurrences(value, requiredUrl) !== 1) {
+    return `${medium === "x" ? "X" : "Threads"}投稿に登録済み${linkLabel}を1回だけ含めてください。`;
   }
-  if (!roomUrl && value.includes("ROOM個別URL未設定")) {
-    return "ROOM個別URL未設定という文言をSNS本文へ入れず、URL導線を省略してください。";
+  if (!requiredUrl && (value.includes("ROOM個別URL未設定") || value.includes("楽天アフィリエイトURL未取得") || value.includes("Threads限定投稿用URL未設定"))) {
+    return `${linkLabel}未設定を示す内部文言をSNS本文へ入れず、URL導線を省略してください。`;
   }
   return "";
 }
@@ -2367,11 +2405,12 @@ function parseSnsPostsResult(rawText = "") {
 function validateSnsPostsResult(item, parsed) {
   const threads = item.snsPosts?.threads || {};
   if (threads.threadsPostType === "performance_v1" && threads.performanceUrlMode === "reply") {
-    const bodyError = validateSnsPostText({ ...item, roomUrl: "" }, "threads", parsed.threadsText);
+    const bodyError = validateSnsPostText({ ...item, skipRequiredLink: true }, "threads", parsed.threadsText);
     if (bodyError) return bodyError;
-    const roomUrl = String(item.roomUrl || "").trim();
-    if (roomUrl && countTextOccurrences(parsed.threadsReplyText, roomUrl) !== 1) return "Threads返信用文章に登録済みROOM個別URLを1回だけ含めてください。";
-    if (!roomUrl && parsed.threadsReplyText) return "ROOM URL未設定時は返信用URLを作成しないでください。";
+    const requiredUrl = getThreadsLink(item);
+    const linkLabel = getThreadsLinkLabel(item);
+    if (requiredUrl && countTextOccurrences(parsed.threadsReplyText, requiredUrl) !== 1) return `Threads返信用文章に登録済み${linkLabel}を1回だけ含めてください。`;
+    if (!requiredUrl && parsed.threadsReplyText) return `${linkLabel}未設定時は返信用URLを作成しないでください。`;
     return validateSnsPostText(item, "x", parsed.xText);
   }
   return validateSnsPostText(item, "x", parsed.xText) || validateSnsPostText(item, "threads", parsed.threadsText);
@@ -3008,6 +3047,7 @@ function saveSettings(event) {
   data.settings = {
     applicationId: $("#applicationId").value.trim(),
     accessKey: $("#accessKey").value.trim(),
+    affiliateId: $("#affiliateId").value.trim(),
     defaultTone: $("#defaultTone").value,
     defaultEmoji: $("#defaultEmoji").value,
     defaultTagCount: Number($("#defaultTagCount").value) || 8,
@@ -3114,7 +3154,7 @@ function importJson(event) {
       if (!Array.isArray(imported.candidates) || !Array.isArray(imported.history) || typeof imported.settings !== "object") {
         throw new Error("バックアップ形式が違います。");
       }
-      data = { ...defaultData, ...imported, candidates: normalizeSnsRecords(Array.isArray(imported.candidates) ? imported.candidates : []), history: normalizeSnsRecords(Array.isArray(imported.history) ? imported.history : []), sales: Array.isArray(imported.sales) ? imported.sales : [] };
+      data = { ...defaultData, ...imported, candidates: normalizeSnsRecords(Array.isArray(imported.candidates) ? imported.candidates : []), history: normalizeSnsRecords(Array.isArray(imported.history) ? imported.history : []), sales: Array.isArray(imported.sales) ? imported.sales : [], settings: { ...defaultData.settings, ...(imported.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(imported.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(imported.eventSettings || {}) } };
       saveData();
       fillSettings();
       toast("バックアップを復元しました。");
@@ -3600,6 +3640,7 @@ async function searchTrendProducts() {
   for (let i = 0; i < keywords.length; i += 1) {
     if (i) await sleep(keywords.length <= 3 ? RANKING_INTERVAL_SHORT_MS : RANKING_INTERVAL_LONG_MS);
     const params = new URLSearchParams({ format: "json", applicationId: data.settings.applicationId, accessKey: data.settings.accessKey, keyword: keywords[i], hits: String(TREND_PRODUCTS_PER_KEYWORD), sort: "standard" });
+    addAffiliateIdParam(params);
     let succeeded = false;
     for (let attempt = 0; attempt <= 1 && !succeeded; attempt += 1) {
       try {
