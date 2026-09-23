@@ -328,10 +328,12 @@ const wagyuUnconfirmed = scoring.createThreadsOnlyCandidate({ ...wagyuProduct, a
 wagyuUnconfirmed.snsPosts.threads.performanceUrlMode = "reply";
 scoring.ensureThreadsOnlyDraft(wagyuUnconfirmed);
 assert(wagyuUnconfirmed.snsPosts.threads.text.includes("自宅でちょっと贅沢なステーキを楽しみたい人へ。") && wagyuUnconfirmed.snsPosts.threads.text.includes("秋田県産の黒毛和牛サーロイン400g") && !wagyuUnconfirmed.snsPosts.threads.text.includes("50%OFF") && !wagyuUnconfirmed.snsPosts.threads.text.includes("期限は"), "Performance A/J: unconfirmed sale facts are omitted while product features remain");
+assert(wagyuUnconfirmed.snsPosts.threads.replyText.startsWith("商品はこちら👇") && !wagyuUnconfirmed.snsPosts.threads.replyText.includes("お得情報はこちら👇"), "Performance comment: unconfirmed discount uses a neutral product label");
 const wagyuConfirmed = scoring.createThreadsOnlyCandidate({ ...wagyuProduct, affiliateUrl, rateConfirmed: true, discountRate: 50, discountRateType: "exact", deadlineConfirmed: true, couponDeadline: "2026/09/24 01:59" }, "wagyu-confirmed");
 wagyuConfirmed.snsPosts.threads.performanceUrlMode = "reply";
 scoring.ensureThreadsOnlyDraft(wagyuConfirmed);
 assert(wagyuConfirmed.snsPosts.threads.text.includes("50%OFF") && wagyuConfirmed.snsPosts.threads.text.includes("9/24 1:59まで。") && !wagyuConfirmed.snsPosts.threads.text.includes("お得情報を確認できる商品"), "Performance B/H: confirmed discount and deadline are natural, not internal-status wording");
+assert(wagyuConfirmed.snsPosts.threads.replyText.startsWith("50%OFFクーポン対象はこちら👇"), "Performance comment: confirmed discount keeps the confirmed-rate label");
 
 // 統合探索画面向けの商品カード表示データと保存区分。
 const imageProduct = { itemCode: "image-1", itemName: "画像付き商品", itemPrice: 1200, itemUrl: "https://example.com/image", mediumImageUrls: [{ imageUrl: "https://example.com/image.jpg" }], affiliateUrl: "https://hb.afl.rakuten.co.jp/image" };

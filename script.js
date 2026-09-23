@@ -2658,7 +2658,7 @@ function buildThreadsOnlyDraft(item) {
     urlMode === "reply" ? "対象は返信に👇" : link ? `商品はこちら👇\n${link}` : "商品情報は商品ページで確認してください。",
     "#PR"
   ];
-  const replyLabel = confirmedRate ? `${evidence.discountRate}%OFFクーポン対象はこちら👇` : "お得情報はこちら👇";
+  const replyLabel = confirmedRate ? `${evidence.discountRate}%OFFクーポン対象はこちら👇` : "商品はこちら👇";
   const replyText = urlMode === "reply" && link ? `${replyLabel}\n${link}\n#PR` : "";
   return { text: bodyParts.join("\n"), replyText };
 }
