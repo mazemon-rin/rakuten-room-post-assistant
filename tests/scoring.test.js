@@ -28,7 +28,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getCouponDisplayState, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDeadlineCandidate, extractCouponCandidates, matchesCouponDiscountFilter, prepareCouponSearchProduct, getCouponDisplayState, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, data };`, context);
 
 const scoring = context.__scoring;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -296,6 +296,24 @@ assert(!invalidCombinedResult.hashTags && !invalidCombinedResult.xText && !inval
 
 // Threads限定のお得商品検索: 検索ヒットは候補であり、割引・期限の確認済み状態を分離する。
 const confirmed70 = scoring.prepareCouponSearchProduct({ itemCode: "coupon-70", itemName: "収納用品 50%OFF候補", itemUrl: "https://example.com/70", affiliateUrl: "https://hb.afl.rakuten.co.jp/70", discountRate: 70, rateConfirmed: true, discountRateType: "exact", couponDeadline: "2026/09/24 01:59まで", deadlineConfirmed: true }, ["50plus"]);
+const detectedHalf = scoring.extractDiscountCandidate("★50％OFF！対象商品");
+const detectedSpaced = scoring.extractDiscountCandidate("50% OFF クーポン");
+const detectedJapaneseHalf = scoring.extractDiscountCandidate("半額セール");
+assert(detectedHalf.discountRate === 50 && detectedHalf.source === "itemName", "Coupon candidate A/B: full-width percent and OFF are detected without confirming");
+assert(detectedSpaced.discountRate === 50 && detectedJapaneseHalf.discountRate === 50, "Coupon candidate C/D: spaces and 半額 are detected");
+assert(scoring.extractDiscountCandidate("最大50%OFF").discountRate === null, "Coupon candidate E: 最大50%OFF is not treated as an exact candidate");
+assert(scoring.extractDiscountCandidate("ポイント最大50%").discountRate === null, "Coupon candidate F: point rate is not treated as a discount candidate");
+assert(scoring.extractDiscountCandidate("実質50%OFF").discountRate === null && scoring.extractDiscountCandidate("50%OFF相当").discountRate === null, "Coupon candidate G/H: ambiguous discount wording is excluded");
+const detectedDeadline1 = scoring.extractDeadlineCandidate("19日20:00〜24日01:59", { endDate: "2026-09-24" });
+const detectedDeadline2 = scoring.extractDeadlineCandidate("9.19 20:00〜9.24 01:59", {});
+const detectedDeadline3 = scoring.extractDeadlineCandidate("9/19 20:00〜9/24 01:59", {});
+assert(detectedDeadline1.start === "19 20:00" && detectedDeadline1.end === "2026/09/24 01:59", "Coupon deadline I: day-only range uses matching event date safely");
+assert(detectedDeadline2.start === "9/19 20:00" && detectedDeadline2.end === "9/24 01:59", "Coupon deadline J: dot-separated month/day range is detected");
+assert(detectedDeadline3.start === "9/19 20:00" && detectedDeadline3.end === "9/24 01:59", "Coupon deadline K: slash-separated month/day range is detected");
+assert(scoring.extractDeadlineCandidate("通常商品").end === "", "Coupon deadline L: no range yields no deadline candidate");
+const detectedProduct = scoring.prepareCouponSearchProduct({ itemCode: "detected-1", itemName: "★50％OFF！19日20:00〜24日01:59★ 黒毛和牛", itemUrl: "https://example.com/detected" }, ["50"]);
+const detectedCandidate = scoring.createThreadsOnlyCandidate(detectedProduct, "detected-candidate");
+assert(detectedCandidate.detectedDiscountRate === 50 && detectedCandidate.detectedDeadline === "24 01:59" && detectedCandidate.rateConfirmed === false && detectedCandidate.deadlineConfirmed === false, "Coupon candidate M/N: extracted values persist separately from confirmation flags");
 const unconfirmed70 = scoring.prepareCouponSearchProduct({ itemCode: "coupon-max", itemName: "割引クーポン候補", itemUrl: "https://example.com/max", discountRate: 70, rateConfirmed: false, discountRateType: "up_to" }, ["50plus"]);
 assert(scoring.matchesCouponDiscountFilter(confirmed70, ["50plus"]), "Coupon A/E: confirmed 70% matches 50%以上");
 assert(scoring.matchesCouponDiscountFilter({ ...confirmed70, discountRate: 50 }, ["50"]), "Coupon B: confirmed exact 50% matches 50% option");

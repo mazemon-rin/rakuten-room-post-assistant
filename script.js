@@ -628,6 +628,69 @@ function getCouponEvidence(item = {}) {
   };
 }
 
+function normalizeCouponCandidateText(value = "") {
+  return String(value || "").normalize("NFKC").replace(/[～〜]/g, "〜").replace(/[‐‑‒–—−]/g, "-");
+}
+
+function extractDiscountCandidate(itemName = "") {
+  const text = normalizeCouponCandidateText(itemName);
+  const percentMatches = [...text.matchAll(/(\d{1,3})\s*%\s*(?:OFF|オフ)/gi)];
+  for (const match of percentMatches) {
+    const before = text.slice(Math.max(0, match.index - 8), match.index);
+    const after = text.slice(match.index + match[0].length, match.index + match[0].length + 4);
+    if (/(最大|実質|ポイント)/.test(before) || /^相当/.test(after)) continue;
+    const rate = Number(match[1]);
+    if (rate > 0 && rate <= 100) return { discountRate: rate, source: "itemName" };
+  }
+  const halfIndex = text.indexOf("半額");
+  if (halfIndex >= 0) {
+    const before = text.slice(Math.max(0, halfIndex - 8), halfIndex);
+    const after = text.slice(halfIndex + 2, halfIndex + 6);
+    if (!/(最大|実質|ポイント)/.test(before) && !/^相当/.test(after)) return { discountRate: 50, source: "itemName" };
+  }
+  return { discountRate: null, source: "" };
+}
+
+function parseCouponDatePart(value = "") {
+  const normalized = normalizeCouponCandidateText(value).trim();
+  let match = normalized.match(/^(\d{1,2})[./月](\d{1,2})日?\s*(\d{1,2}):(\d{2})$/);
+  if (match) return { month: Number(match[1]), day: Number(match[2]), hour: Number(match[3]), minute: Number(match[4]) };
+  match = normalized.match(/^(\d{1,2})日\s*(\d{1,2}):(\d{2})$/);
+  if (match) return { month: null, day: Number(match[1]), hour: Number(match[2]), minute: Number(match[3]) };
+  return null;
+}
+
+function formatDetectedDeadline(part, eventSettings = {}) {
+  if (!part) return "";
+  const eventEnd = String(eventSettings.endDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const safeEventDate = eventEnd && (part.month === null || Number(eventEnd[2]) === part.month) && Number(eventEnd[3]) === part.day;
+  if (safeEventDate) return `${eventEnd[1]}/${eventEnd[2]}/${eventEnd[3]} ${String(part.hour).padStart(2, "0")}:${String(part.minute).padStart(2, "0")}`;
+  return `${part.month ? `${part.month}/` : ""}${part.day} ${String(part.hour).padStart(2, "0")}:${String(part.minute).padStart(2, "0")}`;
+}
+
+function extractDeadlineCandidate(itemName = "", eventSettings = data.eventSettings || {}) {
+  const text = normalizeCouponCandidateText(itemName);
+  const range = text.match(/(\d{1,2}(?:[./月]\d{1,2}日?|日)\s*\d{1,2}:\d{2})\s*〜\s*(\d{1,2}(?:[./月]\d{1,2}日?|日)\s*\d{1,2}:\d{2})/);
+  if (!range) return { start: "", end: "", source: "" };
+  const start = parseCouponDatePart(range[1]);
+  const end = parseCouponDatePart(range[2]);
+  if (!start || !end) return { start: "", end: "", source: "" };
+  return { start: formatDetectedDeadline(start, eventSettings), end: formatDetectedDeadline(end, eventSettings), source: "itemName" };
+}
+
+function extractCouponCandidates(product = {}) {
+  const itemName = product.itemName || product.title || "";
+  const discount = extractDiscountCandidate(itemName);
+  const deadline = extractDeadlineCandidate(itemName);
+  return {
+    detectedDiscountRate: discount.discountRate,
+    detectedDiscountSource: discount.source,
+    detectedDeadline: deadline.end,
+    detectedDeadlineStart: deadline.start,
+    detectedDeadlineSource: deadline.source
+  };
+}
+
 function getCouponSearchKeywords() {
   return $$('input[name="couponDiscountFilter"]:checked').map((input) => input.value).filter((value) => COUPON_SEARCH_OPTIONS[value]);
 }
@@ -646,6 +709,7 @@ function extractCandidateDiscountRate(product = {}) {
 
 function prepareCouponSearchProduct(product, searchFilters = []) {
   const evidence = getCouponEvidence(product);
+  const detected = extractCouponCandidates(product);
   return {
     ...product,
     couponCandidate: true,
@@ -656,17 +720,20 @@ function prepareCouponSearchProduct(product, searchFilters = []) {
     couponDeadline: evidence.couponDeadline,
     deadlineConfirmed: evidence.deadlineConfirmed,
     couponSource: evidence.couponSource || "楽天商品検索API（検索候補）",
-    couponCheckedAt: evidence.couponCheckedAt
+    couponCheckedAt: evidence.couponCheckedAt,
+    ...detected
   };
 }
 
 function getCouponDisplayState(product = {}) {
   const evidence = getCouponEvidence(product);
+  const detected = extractCouponCandidates(product);
   const confirmed = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate);
+  const candidateRate = evidence.discountRate ?? detected.detectedDiscountRate;
   return {
     imageUrl: getImage(product),
     imageAvailable: Boolean(getImage(product)),
-    rateLabel: confirmed ? `${evidence.discountRate}%OFF確認済み` : `${evidence.discountRate ? `${evidence.discountRate}%OFF` : "割引率"}候補`,
+    rateLabel: confirmed ? `${evidence.discountRate}%OFF確認済み` : `${candidateRate ? `${candidateRate}%OFF` : "割引率"}候補`,
     rateConfirmed: confirmed,
     deadlineConfirmed: evidence.deadlineConfirmed,
     affiliateUrlAvailable: Boolean(product.affiliateUrl)
@@ -675,6 +742,7 @@ function getCouponDisplayState(product = {}) {
 
 function renderCouponSearchCard(product) {
   const evidence = getCouponEvidence(product);
+  const detected = extractCouponCandidates(product);
   const display = getCouponDisplayState(product);
   const itemCode = product.itemCode || "";
   const safeId = `coupon-${btoa(unescape(encodeURIComponent(itemCode || product.itemName || "item"))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
@@ -691,10 +759,11 @@ function renderCouponSearchCard(product) {
       <p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>
       <p class="coupon-candidate-badge">検索条件：${escapeHtml((product.couponSearchFilters || []).map((key) => COUPON_SEARCH_OPTIONS[key]?.label || key).join("、") || "候補")}</p>
       <p class="coupon-status">${escapeHtml(rateLabel)} <span class="coupon-confirmation ${evidence.rateConfirmed && evidence.discountRateType === "exact" ? "confirmed" : "needs-confirmation"}">${evidence.rateConfirmed && evidence.discountRateType === "exact" ? "🟢 確認済み" : "🟡 要確認"}</span></p>
-      <p class="coupon-status">期限：${escapeHtml(evidence.couponDeadline || "未確認")}（${evidence.deadlineConfirmed ? "🟢 確認済み" : "🟡 要確認"}）</p>
+      <p class="coupon-status">期限：${escapeHtml(evidence.couponDeadline || detected.detectedDeadline || "未確認")}（${evidence.deadlineConfirmed ? "🟢 確認済み" : "🟡 要確認"}）</p>
       <p class="affiliate-url-status">${product.affiliateUrl ? "楽天アフィリエイトURL取得済み" : "楽天アフィリエイトURL未取得"}</p>
-      <label>確認した割引率（任意）<input id="${safeId}-rate" type="number" min="1" max="100" placeholder="例：50"></label>
-      <label>確認した期限（任意）<input id="${safeId}-deadline" type="text" placeholder="例：2026/09/24 01:59まで"></label>
+      ${detected.detectedDiscountRate || detected.detectedDeadline ? `<p class="coupon-detected-note">🟡 商品名から検出した候補です。商品ページで現在有効か確認してください。</p>` : ""}
+      <label>確認した割引率（候補）<input id="${safeId}-rate" type="number" min="1" max="100" value="${escapeAttr(String(evidence.discountRate || detected.detectedDiscountRate || ""))}" placeholder="例：50"></label>
+      <label>確認した期限（候補）<input id="${safeId}-deadline" type="text" value="${escapeAttr(String(evidence.couponDeadline || detected.detectedDeadline || ""))}" placeholder="例：2026/09/24 01:59まで"></label>
       <label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label>
       <label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label>
       <div class="record-actions"><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">割引・期限を確認</a><button class="primary-button" type="button" onclick="saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')">Threads投稿</button></div>
@@ -761,13 +830,14 @@ async function searchCouponProducts() {
 
 function saveCouponSearchCandidate(rawProduct, elementPrefix) {
   const product = { ...rawProduct };
+  const detected = extractCouponCandidates(product);
   const rateInput = document.getElementById(`${elementPrefix}-rate`);
   const deadlineInput = document.getElementById(`${elementPrefix}-deadline`);
   const rateConfirmed = Boolean(document.getElementById(`${elementPrefix}-rate-ok`)?.checked);
   const deadlineConfirmed = Boolean(document.getElementById(`${elementPrefix}-deadline-ok`)?.checked);
   const discountRate = Number(rateInput?.value || product.discountRate);
   if (rateConfirmed && (!Number.isFinite(discountRate) || discountRate <= 0 || discountRate > 100)) { toast("確認済みの割引率を入力してください。"); return; }
-  const candidateProduct = { ...product, discountRate: Number.isFinite(discountRate) && discountRate > 0 ? discountRate : null, rateConfirmed, discountRateType: rateConfirmed ? "exact" : "unknown", couponDeadline: deadlineInput?.value.trim() || product.couponDeadline || "", deadlineConfirmed, couponSource: product.couponSource || "楽天商品検索API（人間確認）", couponCheckedAt: new Date().toISOString() };
+  const candidateProduct = { ...product, discountRate: Number.isFinite(discountRate) && discountRate > 0 ? discountRate : null, rateConfirmed, discountRateType: rateConfirmed ? "exact" : "unknown", couponDeadline: deadlineInput?.value.trim() || product.couponDeadline || "", deadlineConfirmed, couponSource: product.couponSource || "楽天商品検索API（人間確認）", couponCheckedAt: new Date().toISOString(), detectedDiscountRate: product.detectedDiscountRate ?? detected.detectedDiscountRate, detectedDiscountSource: product.detectedDiscountSource || detected.detectedDiscountSource, detectedDeadline: product.detectedDeadline || detected.detectedDeadline, detectedDeadlineStart: product.detectedDeadlineStart || detected.detectedDeadlineStart, detectedDeadlineSource: product.detectedDeadlineSource || detected.detectedDeadlineSource };
   quickSaveThreadsOnly(candidateProduct);
   const saved = data.candidates.find((candidate) => isThreadsOnlyItem(candidate) && rankingIdentity(candidate.product || candidate) === rankingIdentity(candidateProduct));
   if (saved) {
@@ -1521,6 +1591,11 @@ function createThreadsOnlyCandidate(product, id = crypto.randomUUID()) {
     deadlineConfirmed: productWithUrl.deadlineConfirmed === true,
     couponSource: productWithUrl.couponSource || "",
     couponCheckedAt: productWithUrl.couponCheckedAt || "",
+    detectedDiscountRate: productWithUrl.detectedDiscountRate ?? null,
+    detectedDiscountSource: productWithUrl.detectedDiscountSource || "",
+    detectedDeadline: productWithUrl.detectedDeadline || "",
+    detectedDeadlineStart: productWithUrl.detectedDeadlineStart || "",
+    detectedDeadlineSource: productWithUrl.detectedDeadlineSource || "",
     snsPosts: createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: productWithUrl.couponCandidate ? "reply" : "body" } })
   };
 }
