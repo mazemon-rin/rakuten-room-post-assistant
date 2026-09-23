@@ -725,6 +725,24 @@ function prepareCouponSearchProduct(product, searchFilters = []) {
   };
 }
 
+function applyCouponEvidenceToCandidate(candidate, source = {}) {
+  Object.assign(candidate, {
+    discountRate: source.discountRate ?? null,
+    rateConfirmed: source.rateConfirmed === true,
+    discountRateType: source.discountRateType || "unknown",
+    couponDeadline: source.couponDeadline || "",
+    deadlineConfirmed: source.deadlineConfirmed === true,
+    couponSource: source.couponSource || "",
+    couponCheckedAt: source.couponCheckedAt || "",
+    detectedDiscountRate: source.detectedDiscountRate ?? null,
+    detectedDiscountSource: source.detectedDiscountSource || "",
+    detectedDeadline: source.detectedDeadline || "",
+    detectedDeadlineStart: source.detectedDeadlineStart || "",
+    detectedDeadlineSource: source.detectedDeadlineSource || ""
+  });
+  return candidate;
+}
+
 function getCouponDisplayState(product = {}) {
   const evidence = getCouponEvidence(product);
   const detected = extractCouponCandidates(product);
@@ -841,9 +859,12 @@ function saveCouponSearchCandidate(rawProduct, elementPrefix) {
   quickSaveThreadsOnly(candidateProduct);
   const saved = data.candidates.find((candidate) => isThreadsOnlyItem(candidate) && rankingIdentity(candidate.product || candidate) === rankingIdentity(candidateProduct));
   if (saved) {
+    applyCouponEvidenceToCandidate(saved, candidateProduct);
     saved.couponCandidate = true;
     saved.snsPosts.threads.performanceUrlMode = "reply";
     saved.snsPosts.threads.prompt = buildThreadsPerformancePrompt(saved);
+    saved.snsPosts.threads.text = "";
+    saved.snsPosts.threads.replyText = "";
     ensureThreadsOnlyDraft(saved);
     saveData();
   }
@@ -937,20 +958,33 @@ function getPerformanceProductFeature(item = {}) {
     const amount = text.match(/\b\d+(?:\.\d+)?\s*g\b/i)?.[0] || "";
     return `${origin}${origin === "黒毛和牛" ? "" : "の"}黒毛和牛${cut}${amount ? `${amount}` : ""}。`;
   }
+  if (/(八幡平ポーク|ポーク|豚肉)/i.test(text) && /(焼肉|焼き肉)/i.test(text)) {
+    const origin = text.match(/(秋田県産)/i)?.[1] || text.match(/(国産)/i)?.[1] || "";
+    const brand = text.match(/(八幡平ポーク)/i)?.[1] || "ポーク";
+    const amount = text.match(/\b\d+(?:\.\d+)?\s*g\b/i)?.[0] || "";
+    return `${origin ? `${origin}の` : ""}${brand}焼肉セット${amount ? `${amount}` : ""}。`;
+  }
   if (/(さば|鯖|鮭|サーモン|魚)/i.test(text)) {
     const feature = /(骨取り|骨なし|個包装|切り身|国産|秋田県産)/i.exec(text)?.[1];
     return `${feature ? `${feature}で` : ""}魚を手軽に食卓へ取り入れられそう。`;
   }
-  if (/チェスト|収納ラック|収納ボックス/i.test(text)) return "収納を増やせるチェスト。";
+  if (/チェスト|収納ラック|収納ボックス/i.test(text)) {
+    const tiers = text.match(/(\d+)段/);
+    return tiers ? `${tiers[1]}段の収納チェスト。` : "収納を増やせるチェスト。";
+  }
   if (/モバイルバッテリー/i.test(text)) {
     const capacity = text.match(/\b\d+(?:\.\d+)?\s*mAh\b/i)?.[0] || "";
     return `${capacity ? `${capacity}の` : ""}モバイルバッテリー。`;
   }
   if (/日傘|晴雨兼用傘/i.test(text)) return `${/UV|紫外線|UVカット/i.test(text) ? "UVカットの" : ""}日傘。`;
   if (/バッグ|リュック|トート/i.test(text)) return `${/PC収納/i.test(text) ? "PC収納付きの" : ""}大容量バッグ。`;
-  if (product.postageFlag === 1) return `${name}。送料無料でチェックできます。`;
-  const cleaned = name.replace(/\d+%\s*OFF[^\s]*/gi, "").replace(/\d{1,2}\/\d{1,2}[^\s]*/g, "").replace(/\s+/g, " ").trim();
-  const shortName = cleaned.length > 70 ? `${cleaned.slice(0, 70)}…` : cleaned;
+  const cleaned = name
+    .replace(/(?:最大|実質)?\d{1,3}\s*%\s*(?:OFF|オフ)(?:相当)?/gi, "")
+    .replace(/半額(?:相当)?/gi, "")
+    .replace(/\d{1,2}(?:[./月]\d{1,2}日?|日)\s*\d{1,2}:\d{2}\s*[〜～-]\s*\d{1,2}(?:[./月]\d{1,2}日?|日)\s*\d{1,2}:\d{2}/g, "")
+    .replace(/送料無料|ポイント(?:最大)?\d+倍?|ギフト|贈り物|プレゼント|内祝い|誕生日|お歳暮|お中元|母の日|父の日|敬老の日/gi, "")
+    .replace(/\s+/g, " ").trim();
+  const shortName = cleaned.length > 40 ? `${cleaned.slice(0, 40).replace(/[\s、,]+$/, "")}…` : cleaned;
   return shortName ? `${shortName}。` : "";
 }
 
