@@ -793,6 +793,7 @@ function renderCouponSearchCard(product) {
   const deadlineLabel = evidence.deadlineConfirmed
     ? "期限"
     : (detected.detectedDeadline || evidence.couponDeadline ? "期限候補" : "期限");
+  const roomDuplicate = findDuplicate(product);
   return `<article class="product-card coupon-result-card" data-coupon-item-code="${escapeAttr(itemCode)}">
     <div class="coupon-image-wrap">${imageHtml}</div>
     <div class="product-body">
@@ -808,7 +809,8 @@ function renderCouponSearchCard(product) {
       <label>確認した期限（候補）<input id="${safeId}-deadline" type="text" value="${escapeAttr(String(deadlineInputValue))}" oninput="saveCouponSearchInput('${safeId}', 'deadline', this.value)" placeholder="例：2026/09/24 01:59まで"></label>
       <label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label>
       <label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label>
-      <div class="record-actions"><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">割引・期限を確認</a><button class="primary-button" type="button" onclick="saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')">Threads投稿</button></div>
+      <div class="record-actions"><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">割引・期限を確認</a></div>
+      <div class="record-actions"><button class="primary-button" type="button" ${roomDuplicate ? "disabled" : `onclick="saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')"`}>${roomDuplicate ? "✓ ROOM投稿候補に保存済み" : "ROOM投稿候補に保存"}</button><button class="secondary-button" type="button" onclick="saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')">Threads投稿</button></div>
     </div></article>`;
 }
 
@@ -870,7 +872,7 @@ async function searchCouponProducts() {
   message.textContent = `${results.length}件の割引・クーポン検索候補を表示しました。検索ヒットは割引確認済みを意味しません。`;
 }
 
-function saveCouponSearchCandidate(rawProduct, elementPrefix) {
+function getCouponSearchProductWithEvidence(rawProduct, elementPrefix) {
   const product = { ...rawProduct };
   const detected = extractCouponCandidates(product);
   const rateInput = document.getElementById(`${elementPrefix}-rate`);
@@ -879,7 +881,12 @@ function saveCouponSearchCandidate(rawProduct, elementPrefix) {
   const deadlineConfirmed = Boolean(document.getElementById(`${elementPrefix}-deadline-ok`)?.checked);
   const discountRate = Number(rateInput?.value || product.discountRate);
   if (rateConfirmed && (!Number.isFinite(discountRate) || discountRate <= 0 || discountRate > 100)) { toast("確認済みの割引率を入力してください。"); return; }
-  const candidateProduct = { ...product, discountRate: Number.isFinite(discountRate) && discountRate > 0 ? discountRate : null, rateConfirmed, discountRateType: rateConfirmed ? "exact" : "unknown", couponDeadline: deadlineInput?.value.trim() || product.couponDeadline || "", deadlineConfirmed, couponSource: product.couponSource || "楽天商品検索API（人間確認）", couponCheckedAt: new Date().toISOString(), detectedDiscountRate: product.detectedDiscountRate ?? detected.detectedDiscountRate, detectedDiscountSource: product.detectedDiscountSource || detected.detectedDiscountSource, detectedDeadline: product.detectedDeadline || detected.detectedDeadline, detectedDeadlineStart: product.detectedDeadlineStart || detected.detectedDeadlineStart, detectedDeadlineSource: product.detectedDeadlineSource || detected.detectedDeadlineSource };
+  return { ...product, discountRate: Number.isFinite(discountRate) && discountRate > 0 ? discountRate : null, rateConfirmed, discountRateType: rateConfirmed ? "exact" : "unknown", couponDeadline: deadlineInput?.value.trim() || product.couponDeadline || "", deadlineConfirmed, couponSource: product.couponSource || "楽天商品検索API（人間確認）", couponCheckedAt: new Date().toISOString(), detectedDiscountRate: product.detectedDiscountRate ?? detected.detectedDiscountRate, detectedDiscountSource: product.detectedDiscountSource || detected.detectedDiscountSource, detectedDeadline: product.detectedDeadline || detected.detectedDeadline, detectedDeadlineStart: product.detectedDeadlineStart || detected.detectedDeadlineStart, detectedDeadlineSource: product.detectedDeadlineSource || detected.detectedDeadlineSource };
+}
+
+function saveCouponSearchCandidate(rawProduct, elementPrefix) {
+  const candidateProduct = getCouponSearchProductWithEvidence(rawProduct, elementPrefix);
+  if (!candidateProduct) return;
   quickSaveThreadsOnly(candidateProduct);
   const saved = data.candidates.find((candidate) => isThreadsOnlyItem(candidate) && rankingIdentity(candidate.product || candidate) === rankingIdentity(candidateProduct));
   if (saved) {
@@ -892,7 +899,24 @@ function saveCouponSearchCandidate(rawProduct, elementPrefix) {
     ensureThreadsOnlyDraft(saved);
     saveData();
   }
-  toast(rateConfirmed ? "確認済み情報を付けて保存し、Threads文章の自動下書きを作成しました。" : "要確認の検索候補を保存し、Threads文章の自動下書きを作成しました。割引を断定せず確認してください。");
+  toast(candidateProduct.rateConfirmed ? "確認済み情報を付けて保存し、Threads文章の自動下書きを作成しました。" : "要確認の検索候補を保存し、Threads文章の自動下書きを作成しました。割引を断定せず確認してください。");
+}
+
+function saveCouponSearchRoomCandidate(rawProduct, elementPrefix) {
+  const candidateProduct = getCouponSearchProductWithEvidence(rawProduct, elementPrefix);
+  if (!candidateProduct) return;
+  const duplicate = findDuplicate(candidateProduct);
+  if (duplicate) {
+    toast("すでにROOM投稿候補または投稿履歴に登録されています。");
+    return;
+  }
+  const candidate = buildQueueCandidate(candidateProduct);
+  candidate.couponCandidate = true;
+  data.candidates.unshift(candidate);
+  saveData();
+  renderCandidates();
+  showTab("candidates");
+  toast("ROOM投稿候補に保存しました。割引・期限の確認状態も保持しています。");
 }
 
 function getThreadsPerformanceFacts(item = {}) {
@@ -1933,8 +1957,11 @@ function buildQueueCandidate(product) {
     favoriteType: "今すぐ投稿",
     matchedTrendKeywords: productWithUrl.matchedTrendKeywords || [],
     trendSearchPosition: productWithUrl.trendSearchPosition || null,
-    performance: productWithUrl.performance || { clicks: null, orders: null, reward: null }
+    performance: productWithUrl.performance || { clicks: null, orders: null, reward: null },
+    couponCandidate: Boolean(productWithUrl.couponCandidate),
+    couponSearchFilters: productWithUrl.couponSearchFilters || []
   };
+  applyCouponEvidenceToCandidate(candidate, productWithUrl);
   Object.assign(candidate, checkProductTrust(productWithUrl));
   applySelectionScore(candidate);
   applyStrategyScores(candidate);
@@ -2258,6 +2285,7 @@ function markThreadsOnlyPosted(id) {
 
 function candidateCard(item) {
   const trust = item.trustStatus ? item : { ...item, ...checkProductTrust(item.product || item) };
+  const coupon = item.couponCandidate ? getCouponEvidence(item) : null;
   const trustLabels = { "通常投稿候補": "🟢 通常投稿候補", "要確認": "🟡 要確認", "注意喚起候補": "🟠 注意喚起候補", "投稿対象外": "🔴 投稿対象外" };
   const trustReasonText = (trust.trustReasons || []).map((reason) => `${reason.label}：${reason.detail}`).join("\n");
   const itemUrl = item.itemUrl || item.product?.itemUrl || item.product?.affiliateUrl || "";
@@ -2276,6 +2304,7 @@ function candidateCard(item) {
         <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
         <p class="trust-status" aria-label="商品信頼性判定">${trustLabels[trust.trustStatus] || "🟡 要確認"}（${trust.trustScore ?? "-"}点・検証中）</p>
         <p class="collection-status"><strong>投稿タイプ：</strong>${escapeHtml({ normal: "通常商品", sale: "セール商品", used: "使用済み商品", warning: "注意喚起商品" }[item.postType] || "通常商品")}</p>
+        ${coupon ? `<p class="coupon-status">割引率：${coupon.discountRate ? `${coupon.discountRate}%OFF` : "未確認"}（${coupon.rateConfirmed && coupon.discountRateType === "exact" ? "確認済み" : "要確認"}） / 期限：${escapeHtml(coupon.couponDeadline || "未確認")}（${coupon.deadlineConfirmed ? "確認済み" : "要確認"}）</p>` : ""}
         ${item.recommendedCollection ? `<p class="collection-status"><strong>推奨コレクション：</strong>${escapeHtml(getCollectionById(item.recommendedCollection)?.name || item.recommendedCollection)}</p><details class="collection-details"><summary>推奨理由を見る</summary><p>${escapeHtml(item.collectionReason || "既存の信頼性チェック結果に基づく推奨です。")}</p></details>` : ""}
         <label class="collection-select"><strong>選択コレクション</strong><select onchange="updateCandidate('${item.id}', 'selectedCollection', this.value)">${collectionOptions(item.selectedCollection)}</select></label>
         <p class="selection-score">選定スコア：${getSelectionTotal(item)} / 100</p><p class="selection-score">${item.matchedTrendKeywords?.length ? "購買トレンド適合" : "トレンド適合"}：${item.trendScore?.total ?? 0} / ${item.matchedTrendKeywords?.length ? 30 : 20}　投稿機会：${item.opportunityScore?.total ?? 0} / 20</p><p class="selection-score"><strong>今日の投稿優先度：${item.todayPriorityScore ?? getSelectionTotal(item)} / ${item.matchedTrendKeywords?.length ? 100 : 140}</strong></p><p class="selection-grade">${escapeHtml(item.selectionGrade || selectionGrade(getSelectionTotal(item)))}</p><details class="selection-details"><summary>選定理由・訴求材料を見る</summary><p>${escapeHtml((item.priorityReasons || item.selectionReason || item.selectionReasons || []).join("\n")).replaceAll("\n", "<br>")}</p><p>${item.buyAroundCandidate ? "買い回り候補" : ""}</p></details>
