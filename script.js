@@ -827,6 +827,9 @@ function buildGenerationContext(product = {}, usageStatus = "不明") {
 function getPerformanceAudienceGuidance(item = {}) {
   const product = item.product || item;
   const text = `${product.itemName || ""} ${stripHtml(product.itemCaption || "")} ${product.categoryName || ""}`;
+  if (/(黒毛和牛|和牛|サーロイン|ステーキ|牛肉)/i.test(text)) return "自宅でちょっと贅沢なステーキを楽しみたい人";
+  if (/(さば|鯖|鮭|サーモン|魚|海鮮|水産)/i.test(text)) return "魚を手軽に食卓へ取り入れたい人";
+  if (/(スイーツ|ケーキ|チョコ|お菓子|アイス|和菓子)/i.test(text)) return "家でゆっくり甘いものを楽しみたい人";
   if (/(チェスト|クローゼット|衣類|押入れ)/i.test(text)) return "クローゼットの収納が足りない人";
   if (/(収納|ラック|ボックス|ケース)/i.test(text)) return "収納を増やしたい人";
   if (/(モバイルバッテリー|充電器|バッテリー)/i.test(text)) return "外出先でスマホの充電切れが気になる人";
@@ -835,6 +838,53 @@ function getPerformanceAudienceGuidance(item = {}) {
   if (/(バッグ|トート|リュック)/i.test(text)) return "荷物を整理して持ち歩きたい人";
   if (/(スマホ|iPhone|ケース|フィルム)/i.test(text)) return "スマホ本体やカメラまわりを守りたい人";
   return "用途に合う商品を探している人";
+}
+
+function isGenericPerformanceAudience(value = "") {
+  return [
+    "用途に合う商品を探している人",
+    "このカテゴリーの商品を探している方",
+    "商品を探している人",
+    "お得な商品を探している人",
+    "楽天ユーザー",
+    "買い物好きな人"
+  ].includes(String(value || "").trim());
+}
+
+function getPerformanceAudience(item = {}) {
+  const value = String(item.snsPosts?.threads?.performanceAudience || "").trim();
+  return value && !isGenericPerformanceAudience(value) ? value : getPerformanceAudienceGuidance(item);
+}
+
+function getPerformanceProductFeature(item = {}) {
+  const product = item.product || item;
+  const plain = (value) => String(value || "").replace(/<[^>]*>/g, " ");
+  const text = plain(`${product.itemName || ""} ${product.itemCaption || ""}`);
+  const name = plain(product.itemName || product.title || "商品").replace(/[★☆【】\[\]（）()]/g, " ").replace(/\s+/g, " ").trim();
+  if (/(黒毛和牛|和牛)/i.test(text) && /(サーロイン|ステーキ)/i.test(text)) {
+    const origin = text.match(/(秋田県産)/i)?.[1] || text.match(/(国産)/i)?.[1] || text.match(/(A4\s*\/\s*A5ランク|A4・?A5ランク)/i)?.[1] || "黒毛和牛";
+    const cut = /サーロイン/i.test(text) ? "サーロイン" : "ステーキ";
+    const amount = text.match(/\b\d+(?:\.\d+)?\s*g\b/i)?.[0] || "";
+    return `${origin}${origin === "黒毛和牛" ? "" : "の"}黒毛和牛${cut}${amount ? `${amount}` : ""}。`;
+  }
+  if (/(さば|鯖|鮭|サーモン|魚)/i.test(text)) {
+    const feature = /(骨取り|骨なし|個包装|切り身|国産|秋田県産)/i.exec(text)?.[1];
+    return `${feature ? `${feature}で` : ""}魚を手軽に食卓へ取り入れられそう。`;
+  }
+  if (product.postageFlag === 1) return `${name}。送料無料でチェックできます。`;
+  const cleaned = name.replace(/\d+%\s*OFF[^\s]*/gi, "").replace(/\d{1,2}\/\d{1,2}[^\s]*/g, "").replace(/\s+/g, " ").trim();
+  return cleaned ? `${shorten(cleaned, 70)}。` : "";
+}
+
+function getPerformanceBenefitLine(item = {}, evidence = {}) {
+  const feature = getPerformanceProductFeature(item);
+  const confirmedRate = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate);
+  if (confirmedRate) {
+    const baseFeature = feature.split("。", 1)[0].trim();
+    if (baseFeature) return `${baseFeature}が${evidence.discountRate}%OFF。`;
+    return `${evidence.discountRate}%OFFクーポン対象。`;
+  }
+  return feature;
 }
 
 function addSelectionReason(reasons, text) {
@@ -2568,7 +2618,7 @@ function buildThreadsPerformancePrompt(item, options = {}) {
   const posts = item.snsPosts || createSnsPosts();
   const threads = posts.threads || createSnsPosts().threads;
   const urlMode = options.urlMode || threads.performanceUrlMode || "body";
-  const audience = options.audience || threads.performanceAudience || getPerformanceAudienceGuidance(item);
+  const audience = options.audience || getPerformanceAudience(item);
   const context = buildGenerationContext(product, item.usageStatus || "不明");
   const facts = getThreadsPerformanceFacts(item);
   const linkUrl = getThreadsLink(item);
@@ -2585,6 +2635,7 @@ function buildThreadsPerformancePrompt(item, options = {}) {
   const evidence = getCouponEvidence(item);
   const confirmedRate = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate);
   const confirmedDeadline = evidence.deadlineConfirmed && Boolean(evidence.couponDeadline);
+  const feature = getPerformanceProductFeature(item);
   return `Threads成果型 Ver.1の投稿文章を作成してください。通常Threads紹介文とは別の短文モードです。\n\n【正式な2段構成】\n親投稿と、自分の親投稿への返信（コメント）を別々に作成してください。\n\n親投稿は次の順序にする：\n1. 誰向け\n2. どんなお得（確認済みのお得情報）\n3. 期限・今見る理由（確認済みの場合だけ）\n4. 返信への導線\n5. #PR\n具体的な実装内容：\n1. 商品情報から合理的に絞った具体的な誰向け\n2. ${confirmedRate ? "確認済み割引率を自然な1文で記載" : "確認済みでない割引率・クーポンは記載しない"}\n3. ${confirmedDeadline ? "確認済み期限を短く記載" : "期限の文章は省略"}\n4. 「対象は返信に👇」など返信への導線\n5. #PR\n確認済みの割引率または期限がある場合、「お得情報を確認できる商品」「割引・期限は商品ページで確認してから判断したい商品です」のような内部確認用の曖昧な説明文は使わない。\n\nコメントは次の形式にする：\n${confirmedRate ? "確認済み割引率を含む『○%OFFクーポン対象はこちら👇』などの導線" : "『商品はこちら👇』などの導線"}\n${linkUrl ? `${linkLabel}を完全一致で1回` : "URLなし"}\n#PR\n\n【基本構造】\n誰向け＋確認済みのお得情報＋期限または今見る理由＋返信への自然な導線＋#PR。親投稿ですべての商品説明を完結させず、読み手が返信を確認する理由を短く残す。過度な煽りや「知らないと損」「絶対買うべき」は使わない。\n\n【誰向けのルール】\n商品カテゴリー名だけでなく、商品情報から合理的に導ける具体的な利用場面・小さな困りごとを1つ選ぶ。「お得な商品を探している人」「楽天ユーザー」「買い物好きな人」など広すぎる表現は避ける。年齢、性別、家族構成、職業、生活状況は推測しない。手動指定がある場合はそれを優先する。\n${urlMode === "reply" ? "本文＋返信URL方式では、親投稿にURLを書かず、「対象は返信に👇」を基本として導線を置く。コメント欄にだけURLを記載する。" : "本文にURLを入れる方式では、登録URLを本文に1回だけ入れる。"}\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品名：${product.itemName || product.title || "未設定"}\nカテゴリー：${product.categoryName || "未設定"}\n対象者の補助情報：${context.targetUser}\n誰向けの入力・指定：${audience}\n確認済みセール情報：\n${facts.structured}\n確認済みイベント：${facts.event}\n${linkLabel}：${linkUrl || "未設定"}\n\n【安全ルール】\n${getSalePromptRule()}\nusageStatusがusedでない場合、使用・購入体験、レビュー・効果・在庫を捏造しない。存在しない割引率、期限、ポイント倍率、イベント開催状況を推測しない。割引率はrateConfirmed===trueかつdiscountRateType===exactの場合だけ書き、期限はdeadlineConfirmed===trueかつcouponDeadlineが存在する場合だけ書く。${confirmedDeadline ? "確認済み期限だけを短く整形して使用する。" : "期限が確認できない場合、期限の文章を生成しない。"}${confirmedRate ? "確認済み割引率だけを具体的に使用する。" : "割引率が確認できない場合、具体的な割引率や半額表現を生成しない。"}\n${urlRule}\n親投稿にもコメントにも#PRを必ず含める。外部Threadsへ自動投稿しない。\n\n【出力形式】\n${outputWithLabel}`;
 }
 
@@ -2592,22 +2643,22 @@ function buildThreadsOnlyDraft(item) {
   const posts = item.snsPosts || createSnsPosts();
   const threads = posts.threads || createSnsPosts().threads;
   const evidence = getCouponEvidence(item);
-  const audience = threads.performanceAudience || getPerformanceAudienceGuidance(item);
+  const audience = getPerformanceAudience(item);
   const link = getThreadsLink(item);
   const urlMode = threads.performanceUrlMode || "body";
   const confirmedRate = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate);
   const confirmedDeadline = evidence.deadlineConfirmed && evidence.couponDeadline;
-  const benefit = confirmedRate ? `${evidence.discountRate}%OFF${item.couponCandidate ? "クーポン対象" : ""}` : "";
+  const benefit = getPerformanceBenefitLine(item, evidence);
   const timing = confirmedDeadline ? `${formatThreadsPerformanceDeadline(evidence.couponDeadline)}まで。` : "";
   const bodyParts = [
     `${audience}へ。`,
     "",
-    ...(benefit ? [`${benefit}。`] : []),
+    ...(benefit ? [benefit] : []),
     ...(timing ? [timing] : []),
     urlMode === "reply" ? "対象は返信に👇" : link ? `商品はこちら👇\n${link}` : "商品情報は商品ページで確認してください。",
     "#PR"
   ];
-  const replyLabel = confirmedRate && item.couponCandidate ? `${evidence.discountRate}%OFFクーポン対象はこちら👇` : "お得情報はこちら👇";
+  const replyLabel = confirmedRate ? `${evidence.discountRate}%OFFクーポン対象はこちら👇` : "お得情報はこちら👇";
   const replyText = urlMode === "reply" && link ? `${replyLabel}\n${link}\n#PR` : "";
   return { text: bodyParts.join("\n"), replyText };
 }

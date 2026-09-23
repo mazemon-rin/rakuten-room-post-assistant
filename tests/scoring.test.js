@@ -28,7 +28,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getCouponDisplayState, getImage, getPerformanceAudienceGuidance, data };`, context);
+vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, matchesCouponDiscountFilter, prepareCouponSearchProduct, getCouponDisplayState, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, data };`, context);
 
 const scoring = context.__scoring;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -313,6 +313,9 @@ const legacyCandidate = scoring.createThreadsOnlyCandidate({ ...confirmed70, cou
 assert(legacyCandidate.snsPosts.threads.performanceUrlMode === "body", "Existing Threads-only records retain the legacy body URL mode");
 assert(scoring.getPerformanceAudienceGuidance({ itemName: "チェスト 収納", itemCaption: "クローゼット用" }).includes("クローゼットの収納が足りない人"), "Performance audience: storage context is concrete");
 assert(!scoring.getPerformanceAudienceGuidance({ itemName: "用途不明の商品" }).includes("具体的な利用場面または小さな困りごとを1つ選ぶ"), "Performance audience: fallback is post-ready text, not an instruction");
+const wagyuProduct = { itemName: "★50%OFF！19日20:00〜24日01:59★ 国産 秋田県産 黒毛和牛 特上 サーロイン ステーキ 400g", itemCaption: "A4/A5ランク 送料無料", categoryName: "食品" };
+assert(scoring.getPerformanceAudience(wagyuProduct) === "自宅でちょっと贅沢なステーキを楽しみたい人", "Performance audience: generic audience is replaced with a concrete food use case");
+assert(scoring.getPerformanceProductFeature(wagyuProduct).includes("秋田県産の黒毛和牛サーロイン400g"), "Performance feature: food product facts are summarized without using unconfirmed sale text");
 const staleDraft = scoring.createThreadsOnlyCandidate({ itemName: "用途不明の商品", affiliateUrl }, "stale-draft");
 staleDraft.snsPosts.threads.text = "商品情報から、具体的な利用場面または小さな困りごとを1つ選ぶ（根拠がなければ人間が修正する）へ。\n\n対象は返信に👇\n#PR";
 staleDraft.snsPosts.threads.replyText = "保存済みの返信\n#PR";
@@ -321,6 +324,14 @@ assert(!repairedDraft.snsPosts.threads.text.includes("具体的な利用場面�
 const performanceReplyPrompt = scoring.buildThreadsPerformancePrompt({ ...couponCandidate, snsPosts: scoring.createSnsPosts({ threads: { threadsPostType: "performance_v1", performanceUrlMode: "reply" } }) });
 assert(performanceReplyPrompt.includes("広すぎる表現は避ける") && performanceReplyPrompt.includes("対象は返信に👇") && performanceReplyPrompt.includes("親投稿にURLを書かず"), "Performance audience/reply: concrete audience and parent-to-reply guidance are included");
 assert(performanceReplyPrompt.includes("rateConfirmed===true") && performanceReplyPrompt.includes("deadlineConfirmed===true"), "Performance facts: only confirmed discount and deadline may be stated");
+const wagyuUnconfirmed = scoring.createThreadsOnlyCandidate({ ...wagyuProduct, affiliateUrl, rateConfirmed: false, discountRate: 50, discountRateType: "unknown", deadlineConfirmed: false, couponDeadline: "2026/09/24 01:59" }, "wagyu-unconfirmed");
+wagyuUnconfirmed.snsPosts.threads.performanceUrlMode = "reply";
+scoring.ensureThreadsOnlyDraft(wagyuUnconfirmed);
+assert(wagyuUnconfirmed.snsPosts.threads.text.includes("自宅でちょっと贅沢なステーキを楽しみたい人へ。") && wagyuUnconfirmed.snsPosts.threads.text.includes("秋田県産の黒毛和牛サーロイン400g") && !wagyuUnconfirmed.snsPosts.threads.text.includes("50%OFF") && !wagyuUnconfirmed.snsPosts.threads.text.includes("期限は"), "Performance A/J: unconfirmed sale facts are omitted while product features remain");
+const wagyuConfirmed = scoring.createThreadsOnlyCandidate({ ...wagyuProduct, affiliateUrl, rateConfirmed: true, discountRate: 50, discountRateType: "exact", deadlineConfirmed: true, couponDeadline: "2026/09/24 01:59" }, "wagyu-confirmed");
+wagyuConfirmed.snsPosts.threads.performanceUrlMode = "reply";
+scoring.ensureThreadsOnlyDraft(wagyuConfirmed);
+assert(wagyuConfirmed.snsPosts.threads.text.includes("50%OFF") && wagyuConfirmed.snsPosts.threads.text.includes("9/24 1:59まで。") && !wagyuConfirmed.snsPosts.threads.text.includes("お得情報を確認できる商品"), "Performance B/H: confirmed discount and deadline are natural, not internal-status wording");
 
 // 統合探索画面向けの商品カード表示データと保存区分。
 const imageProduct = { itemCode: "image-1", itemName: "画像付き商品", itemPrice: 1200, itemUrl: "https://example.com/image", mediumImageUrls: [{ imageUrl: "https://example.com/image.jpg" }], affiliateUrl: "https://hb.afl.rakuten.co.jp/image" };
