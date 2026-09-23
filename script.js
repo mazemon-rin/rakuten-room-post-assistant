@@ -982,6 +982,16 @@ function getPerformanceProductFeature(item = {}) {
     const amount = text.match(/\b\d+(?:\.\d+)?\s*g\b/i)?.[0] || "";
     return `${origin}${origin === "黒毛和牛" ? "" : "の"}黒毛和牛${cut}${amount ? `${amount}` : ""}。`;
   }
+  if (/(ポーク|豚肉|牛肉|ビーフ|和牛)/i.test(text)) {
+    const origin = text.match(/([一-龥]{2,8}(?:都|道|府|県)産)/)?.[1] || (/(?:^|\s)国産(?:\s|$)/.test(text) ? "国産" : "");
+    const brand = text.match(/([一-龥A-Za-z0-9・]{2,16}(?:ポーク|ビーフ|和牛|牛肉|豚肉))/i)?.[1] || "";
+    const typeMatch = text.match(/(しゃぶしゃぶセット|焼肉(?:セット|詰め合わせ)?|ステーキ(?:用)?|サーロイン)/i);
+    const type = typeMatch?.[1]
+      ? typeMatch[1].replace(/焼肉詰め合わせ/i, "焼肉セット").replace(/ステーキ用/i, "ステーキ")
+      : "";
+    const amount = text.match(/\b\d+(?:\.\d+)?\s*g\b/i)?.[0] || "";
+    if (brand && type) return `${origin ? `${origin}の` : ""}${brand}${type}${amount}。`;
+  }
   if (/(八幡平ポーク|ポーク|豚肉)/i.test(text) && /(焼肉|焼き肉)/i.test(text)) {
     const origin = text.match(/(秋田県産)/i)?.[1] || text.match(/(国産)/i)?.[1] || "";
     const brand = text.match(/(八幡平ポーク)/i)?.[1] || "ポーク";

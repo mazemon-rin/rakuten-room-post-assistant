@@ -347,6 +347,12 @@ assert(scoring.getPerformanceAudience(wagyuProduct) === "自宅でちょっと�
 assert(scoring.getPerformanceProductFeature(wagyuProduct).includes("秋田県産の黒毛和牛サーロイン400g"), "Performance feature: food product facts are summarized without using unconfirmed sale text");
 const porkProduct = { itemName: "国産 八幡平ポーク 焼肉詰め合わせ600g 秋田県産 贈り物 ギフト お肉 お取り寄せ 高級 焼肉 焼き肉", categoryName: "食品" };
 assert(scoring.getPerformanceProductFeature(porkProduct) === "秋田県産の八幡平ポーク焼肉セット600g。", "Performance feature: pork SEO terms are reduced to origin, brand, type, and amount");
+const shabuPorkProduct = { itemName: "50％OFF！19日20:00〜24日01:59 国産 八幡平ポーク しゃぶしゃぶセット 500g ロース・バラ各250g 送料無料 秋田県産 お歳暮 敬老の日 暑中見舞い 贈り物 ギフト お肉 お取り寄せ 高級 焼肉 焼き肉 鉄板焼 すき焼き しゃぶしゃぶ サーロイン ヒレ ミスジ ランプ", categoryName: "食品" };
+assert(scoring.getPerformanceProductFeature(shabuPorkProduct) === "秋田県産の八幡平ポークしゃぶしゃぶセット500g。", "Performance feature: long food SEO title is reduced to origin, brand, type, and amount");
+const shabuConfirmed = scoring.createThreadsOnlyCandidate({ ...shabuPorkProduct, affiliateUrl, rateConfirmed: true, discountRate: 50, discountRateType: "exact", deadlineConfirmed: true, couponDeadline: "2026/09/24 01:59" }, "shabu-confirmed");
+shabuConfirmed.snsPosts.threads.performanceUrlMode = "reply";
+scoring.ensureThreadsOnlyDraft(shabuConfirmed);
+assert(shabuConfirmed.snsPosts.threads.text.includes("秋田県産の八幡平ポークしゃぶしゃぶセット500gが50%OFF、9/24 1:59まで。") && !shabuConfirmed.snsPosts.threads.text.includes("ロース・バラ") && !shabuConfirmed.snsPosts.threads.text.includes("送料無料"), "Performance feature merge: shortened food feature is combined with confirmed rate and deadline only");
 assert(scoring.getPerformanceProductFeature({ itemName: "10000mAh モバイルバッテリー 急速充電 USB-C対応" }) === "10000mAhのモバイルバッテリー。", "Performance feature: battery keeps capacity and product type only");
 assert(scoring.getPerformanceProductFeature({ itemName: "収納チェスト 5段 大容量 クローゼット" }) === "5段の収納チェスト。", "Performance feature: storage keeps tier count and product type only");
 const staleDraft = scoring.createThreadsOnlyCandidate({ itemName: "用途不明の商品", affiliateUrl }, "stale-draft");
