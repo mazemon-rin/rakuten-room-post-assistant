@@ -830,12 +830,12 @@ function getPerformanceAudienceGuidance(item = {}) {
   if (/(黒毛和牛|和牛|サーロイン|ステーキ|牛肉)/i.test(text)) return "自宅でちょっと贅沢なお肉を楽しみたい人";
   if (/(さば|鯖|鮭|サーモン|魚|海鮮|水産)/i.test(text)) return "魚を手軽に食卓へ取り入れたい人";
   if (/(スイーツ|ケーキ|チョコ|お菓子|アイス|和菓子)/i.test(text)) return "家でゆっくり甘いものを楽しみたい人";
+  if (/(バッグ|トート|リュック)/i.test(text)) return "荷物を整理して持ち歩きたい人";
   if (/(チェスト|クローゼット|衣類|押入れ)/i.test(text)) return "クローゼットの収納が足りない人";
   if (/(収納|ラック|ボックス|ケース)/i.test(text)) return "収納を増やしたい人";
   if (/(モバイルバッテリー|充電器|バッテリー)/i.test(text)) return "外出先でスマホの充電切れが気になる人";
   if (/(日傘|晴雨兼用傘|UV|紫外線)/i.test(text)) return "通勤時の日差しが気になる人";
   if (/(キッチン|調理|鍋|フライパン|水筒|マグ)/i.test(text)) return "料理や家事の中で置き場所・扱いやすさに困る人";
-  if (/(バッグ|トート|リュック)/i.test(text)) return "荷物を整理して持ち歩きたい人";
   if (/(スマホ|iPhone|ケース|フィルム)/i.test(text)) return "スマホ本体やカメラまわりを守りたい人";
   return "";
 }
@@ -871,9 +871,17 @@ function getPerformanceProductFeature(item = {}) {
     const feature = /(骨取り|骨なし|個包装|切り身|国産|秋田県産)/i.exec(text)?.[1];
     return `${feature ? `${feature}で` : ""}魚を手軽に食卓へ取り入れられそう。`;
   }
+  if (/チェスト|収納ラック|収納ボックス/i.test(text)) return "収納を増やせるチェスト。";
+  if (/モバイルバッテリー/i.test(text)) {
+    const capacity = text.match(/\b\d+(?:\.\d+)?\s*mAh\b/i)?.[0] || "";
+    return `${capacity ? `${capacity}の` : ""}モバイルバッテリー。`;
+  }
+  if (/日傘|晴雨兼用傘/i.test(text)) return `${/UV|紫外線|UVカット/i.test(text) ? "UVカットの" : ""}日傘。`;
+  if (/バッグ|リュック|トート/i.test(text)) return `${/PC収納/i.test(text) ? "PC収納付きの" : ""}大容量バッグ。`;
   if (product.postageFlag === 1) return `${name}。送料無料でチェックできます。`;
   const cleaned = name.replace(/\d+%\s*OFF[^\s]*/gi, "").replace(/\d{1,2}\/\d{1,2}[^\s]*/g, "").replace(/\s+/g, " ").trim();
-  return cleaned ? `${shorten(cleaned, 70)}。` : "";
+  const shortName = cleaned.length > 70 ? `${cleaned.slice(0, 70)}…` : cleaned;
+  return shortName ? `${shortName}。` : "";
 }
 
 function getPerformanceBenefitLine(item = {}, evidence = {}) {

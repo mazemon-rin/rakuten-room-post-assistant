@@ -196,12 +196,12 @@ assert(confirmedDraft.snsPosts.threads.replyText.includes("50%OFFクーポン対
 const confirmedDeadlineDraft = scoring.createThreadsOnlyCandidate({ itemName: "収納チェスト", categoryName: "インテリア", itemUrl: "https://example.com/chest", affiliateUrl, couponCandidate: true, discountRate: 50, rateConfirmed: true, discountRateType: "exact", couponDeadline: "2026/09/24 01:59", deadlineConfirmed: true }, "confirmed-deadline-draft");
 confirmedDeadlineDraft.snsPosts.threads.performanceUrlMode = "reply";
 scoring.ensureThreadsOnlyDraft(confirmedDeadlineDraft);
-assert(confirmedDeadlineDraft.snsPosts.threads.text.includes("50%OFFクーポン対象") && confirmedDeadlineDraft.snsPosts.threads.text.includes("9/24 1:59まで。"), "Performance A: confirmed discount and deadline are used in the parent post");
+assert(confirmedDeadlineDraft.snsPosts.threads.text.includes("収納を増やせるチェストが50%OFF") && confirmedDeadlineDraft.snsPosts.threads.text.includes("9/24 1:59まで。"), "Performance A: confirmed discount and deadline are used in the parent post");
 assert(!confirmedDeadlineDraft.snsPosts.threads.text.includes("お得情報を確認できる商品") && !confirmedDeadlineDraft.snsPosts.threads.text.includes("商品ページで確認してから判断したい"), "Performance H: confirmed facts do not fall back to internal confirmation wording");
 const confirmedRateNoDeadline = scoring.createThreadsOnlyCandidate({ itemName: "収納チェスト", categoryName: "インテリア", itemUrl: "https://example.com/chest", affiliateUrl, couponCandidate: true, discountRate: 50, rateConfirmed: true, discountRateType: "exact", couponDeadline: "2026/09/24 01:59", deadlineConfirmed: false }, "confirmed-rate-only-draft");
 confirmedRateNoDeadline.snsPosts.threads.performanceUrlMode = "reply";
 scoring.ensureThreadsOnlyDraft(confirmedRateNoDeadline);
-assert(confirmedRateNoDeadline.snsPosts.threads.text.includes("50%OFFクーポン対象") && !confirmedRateNoDeadline.snsPosts.threads.text.includes("まで。") && !confirmedRateNoDeadline.snsPosts.threads.text.includes("期限は商品ページで確認"), "Performance B: unconfirmed deadline is omitted without explanatory filler");
+assert(confirmedRateNoDeadline.snsPosts.threads.text.includes("収納を増やせるチェストが50%OFF") && !confirmedRateNoDeadline.snsPosts.threads.text.includes("まで。") && !confirmedRateNoDeadline.snsPosts.threads.text.includes("期限は商品ページで確認"), "Performance B: unconfirmed deadline is omitted without explanatory filler");
 const unconfirmedDraft = scoring.createThreadsOnlyCandidate({ itemName: "収納チェスト", categoryName: "インテリア", itemUrl: "https://example.com/chest", affiliateUrl, couponCandidate: true, discountRate: 50, rateConfirmed: false, discountRateType: "unknown", couponDeadline: "2026/09/24 01:59", deadlineConfirmed: false }, "unconfirmed-draft");
 unconfirmedDraft.snsPosts.threads.performanceUrlMode = "reply";
 scoring.ensureThreadsOnlyDraft(unconfirmedDraft);
