@@ -178,6 +178,7 @@ let currentProduct = null;
 let searchResults = [];
 let couponSearchResults = [];
 let couponVisibleCount = 30;
+const couponSearchInputOverrides = new Map();
 let rankingCategoryStates = new Map();
 let rankingRequestContext = null;
 let rankingRetryInProgress = false;
@@ -691,6 +692,23 @@ function extractCouponCandidates(product = {}) {
   };
 }
 
+function getCouponCandidateInputValue(product = {}, field = "rate", override = {}) {
+  if (Object.prototype.hasOwnProperty.call(override, field)) return override[field];
+  const detected = extractCouponCandidates(product);
+  if (field === "rate") {
+    if (product.rateConfirmed && product.discountRateType === "exact" && Number.isFinite(Number(product.discountRate))) return product.discountRate;
+    return product.detectedDiscountRate ?? detected.detectedDiscountRate ?? "";
+  }
+  if (product.deadlineConfirmed && product.couponDeadline) return product.couponDeadline;
+  return product.detectedDeadline || detected.detectedDeadline || "";
+}
+
+function saveCouponSearchInput(safeId, field, value) {
+  const current = couponSearchInputOverrides.get(safeId) || {};
+  current[field] = value;
+  couponSearchInputOverrides.set(safeId, current);
+}
+
 function getCouponSearchKeywords() {
   return $$('input[name="couponDiscountFilter"]:checked').map((input) => input.value).filter((value) => COUPON_SEARCH_OPTIONS[value]);
 }
@@ -761,14 +779,20 @@ function getCouponDisplayState(product = {}) {
 function renderCouponSearchCard(product) {
   const evidence = getCouponEvidence(product);
   const detected = extractCouponCandidates(product);
+  const safeId = `coupon-${btoa(unescape(encodeURIComponent(product.itemCode || product.itemName || "item"))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
+  const inputOverride = couponSearchInputOverrides.get(safeId) || {};
+  const rateInputValue = getCouponCandidateInputValue(product, "rate", inputOverride);
+  const deadlineInputValue = getCouponCandidateInputValue(product, "deadline", inputOverride);
   const display = getCouponDisplayState(product);
   const itemCode = product.itemCode || "";
-  const safeId = `coupon-${btoa(unescape(encodeURIComponent(itemCode || product.itemName || "item"))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
   const image = display.imageUrl;
   const imageHtml = image
     ? `<img src="${escapeAttr(image)}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="product-image-placeholder" hidden>画像なし</span>`
     : `<span class="product-image-placeholder">画像なし</span>`;
   const rateLabel = display.rateLabel;
+  const deadlineLabel = evidence.deadlineConfirmed
+    ? "期限"
+    : (detected.detectedDeadline || evidence.couponDeadline ? "期限候補" : "期限");
   return `<article class="product-card coupon-result-card" data-coupon-item-code="${escapeAttr(itemCode)}">
     <div class="coupon-image-wrap">${imageHtml}</div>
     <div class="product-body">
@@ -777,11 +801,11 @@ function renderCouponSearchCard(product) {
       <p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>
       <p class="coupon-candidate-badge">検索条件：${escapeHtml((product.couponSearchFilters || []).map((key) => COUPON_SEARCH_OPTIONS[key]?.label || key).join("、") || "候補")}</p>
       <p class="coupon-status">${escapeHtml(rateLabel)} <span class="coupon-confirmation ${evidence.rateConfirmed && evidence.discountRateType === "exact" ? "confirmed" : "needs-confirmation"}">${evidence.rateConfirmed && evidence.discountRateType === "exact" ? "🟢 確認済み" : "🟡 要確認"}</span></p>
-      <p class="coupon-status">期限：${escapeHtml(evidence.couponDeadline || detected.detectedDeadline || "未確認")}（${evidence.deadlineConfirmed ? "🟢 確認済み" : "🟡 要確認"}）</p>
+      <p class="coupon-status">${deadlineLabel}：${escapeHtml(evidence.couponDeadline || detected.detectedDeadline || "未確認")}（${evidence.deadlineConfirmed ? "🟢 確認済み" : "🟡 要確認"}）</p>
       <p class="affiliate-url-status">${product.affiliateUrl ? "楽天アフィリエイトURL取得済み" : "楽天アフィリエイトURL未取得"}</p>
       ${detected.detectedDiscountRate || detected.detectedDeadline ? `<p class="coupon-detected-note">🟡 商品名から検出した候補です。商品ページで現在有効か確認してください。</p>` : ""}
-      <label>確認した割引率（候補）<input id="${safeId}-rate" type="number" min="1" max="100" value="${escapeAttr(String(evidence.discountRate || detected.detectedDiscountRate || ""))}" placeholder="例：50"></label>
-      <label>確認した期限（候補）<input id="${safeId}-deadline" type="text" value="${escapeAttr(String(evidence.couponDeadline || detected.detectedDeadline || ""))}" placeholder="例：2026/09/24 01:59まで"></label>
+      <label>確認した割引率（候補）<input id="${safeId}-rate" type="number" min="1" max="100" value="${escapeAttr(String(rateInputValue))}" oninput="saveCouponSearchInput('${safeId}', 'rate', this.value)" placeholder="例：50"></label>
+      <label>確認した期限（候補）<input id="${safeId}-deadline" type="text" value="${escapeAttr(String(deadlineInputValue))}" oninput="saveCouponSearchInput('${safeId}', 'deadline', this.value)" placeholder="例：2026/09/24 01:59まで"></label>
       <label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label>
       <label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label>
       <div class="record-actions"><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">割引・期限を確認</a><button class="primary-button" type="button" onclick="saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')">Threads投稿</button></div>
