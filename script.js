@@ -827,7 +827,7 @@ function buildGenerationContext(product = {}, usageStatus = "不明") {
 function getPerformanceAudienceGuidance(item = {}) {
   const product = item.product || item;
   const text = `${product.itemName || ""} ${stripHtml(product.itemCaption || "")} ${product.categoryName || ""}`;
-  if (/(黒毛和牛|和牛|サーロイン|ステーキ|牛肉)/i.test(text)) return "自宅でちょっと贅沢なステーキを楽しみたい人";
+  if (/(黒毛和牛|和牛|サーロイン|ステーキ|牛肉)/i.test(text)) return "自宅でちょっと贅沢なお肉を楽しみたい人";
   if (/(さば|鯖|鮭|サーモン|魚|海鮮|水産)/i.test(text)) return "魚を手軽に食卓へ取り入れたい人";
   if (/(スイーツ|ケーキ|チョコ|お菓子|アイス|和菓子)/i.test(text)) return "家でゆっくり甘いものを楽しみたい人";
   if (/(チェスト|クローゼット|衣類|押入れ)/i.test(text)) return "クローゼットの収納が足りない人";
@@ -837,7 +837,7 @@ function getPerformanceAudienceGuidance(item = {}) {
   if (/(キッチン|調理|鍋|フライパン|水筒|マグ)/i.test(text)) return "料理や家事の中で置き場所・扱いやすさに困る人";
   if (/(バッグ|トート|リュック)/i.test(text)) return "荷物を整理して持ち歩きたい人";
   if (/(スマホ|iPhone|ケース|フィルム)/i.test(text)) return "スマホ本体やカメラまわりを守りたい人";
-  return "用途に合う商品を探している人";
+  return "";
 }
 
 function isGenericPerformanceAudience(value = "") {
@@ -2649,15 +2649,15 @@ function buildThreadsOnlyDraft(item) {
   const confirmedRate = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate);
   const confirmedDeadline = evidence.deadlineConfirmed && evidence.couponDeadline;
   const benefit = getPerformanceBenefitLine(item, evidence);
-  const timing = confirmedDeadline ? `${formatThreadsPerformanceDeadline(evidence.couponDeadline)}まで。` : "";
+  const timing = confirmedDeadline ? `${formatThreadsPerformanceDeadline(evidence.couponDeadline)}まで` : "";
+  const benefitLine = [benefit.replace(/[。．]+$/, ""), timing].filter(Boolean).join("、");
+  const direction = confirmedRate ? "対象はこちら、返信に👇" : "商品はこちら、返信に👇";
   const bodyParts = [
-    `${audience}へ。`,
-    "",
-    ...(benefit ? [benefit] : []),
-    ...(timing ? [timing] : []),
-    urlMode === "reply" ? "対象は返信に👇" : link ? `商品はこちら👇\n${link}` : "商品情報は商品ページで確認してください。",
+    ...(audience ? [`${audience}へ。`] : []),
+    ...(benefitLine ? [`${benefitLine}。`] : []),
+    urlMode === "reply" ? direction : link ? `商品はこちら👇\n${link}` : "",
     "#PR"
-  ];
+  ].filter(Boolean);
   const replyLabel = confirmedRate ? `${evidence.discountRate}%OFFクーポン対象はこちら👇` : "商品はこちら👇";
   const replyText = urlMode === "reply" && link ? `${replyLabel}\n${link}\n#PR` : "";
   return { text: bodyParts.join("\n"), replyText };

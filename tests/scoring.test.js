@@ -314,7 +314,7 @@ assert(legacyCandidate.snsPosts.threads.performanceUrlMode === "body", "Existing
 assert(scoring.getPerformanceAudienceGuidance({ itemName: "チェスト 収納", itemCaption: "クローゼット用" }).includes("クローゼットの収納が足りない人"), "Performance audience: storage context is concrete");
 assert(!scoring.getPerformanceAudienceGuidance({ itemName: "用途不明の商品" }).includes("具体的な利用場面または小さな困りごとを1つ選ぶ"), "Performance audience: fallback is post-ready text, not an instruction");
 const wagyuProduct = { itemName: "★50%OFF！19日20:00〜24日01:59★ 国産 秋田県産 黒毛和牛 特上 サーロイン ステーキ 400g", itemCaption: "A4/A5ランク 送料無料", categoryName: "食品" };
-assert(scoring.getPerformanceAudience(wagyuProduct) === "自宅でちょっと贅沢なステーキを楽しみたい人", "Performance audience: generic audience is replaced with a concrete food use case");
+assert(scoring.getPerformanceAudience(wagyuProduct) === "自宅でちょっと贅沢なお肉を楽しみたい人", "Performance audience: generic audience is replaced with a concrete food use case");
 assert(scoring.getPerformanceProductFeature(wagyuProduct).includes("秋田県産の黒毛和牛サーロイン400g"), "Performance feature: food product facts are summarized without using unconfirmed sale text");
 const staleDraft = scoring.createThreadsOnlyCandidate({ itemName: "用途不明の商品", affiliateUrl }, "stale-draft");
 staleDraft.snsPosts.threads.text = "商品情報から、具体的な利用場面または小さな困りごとを1つ選ぶ（根拠がなければ人間が修正する）へ。\n\n対象は返信に👇\n#PR";
@@ -327,12 +327,16 @@ assert(performanceReplyPrompt.includes("rateConfirmed===true") && performanceRep
 const wagyuUnconfirmed = scoring.createThreadsOnlyCandidate({ ...wagyuProduct, affiliateUrl, rateConfirmed: false, discountRate: 50, discountRateType: "unknown", deadlineConfirmed: false, couponDeadline: "2026/09/24 01:59" }, "wagyu-unconfirmed");
 wagyuUnconfirmed.snsPosts.threads.performanceUrlMode = "reply";
 scoring.ensureThreadsOnlyDraft(wagyuUnconfirmed);
-assert(wagyuUnconfirmed.snsPosts.threads.text.includes("自宅でちょっと贅沢なステーキを楽しみたい人へ。") && wagyuUnconfirmed.snsPosts.threads.text.includes("秋田県産の黒毛和牛サーロイン400g") && !wagyuUnconfirmed.snsPosts.threads.text.includes("50%OFF") && !wagyuUnconfirmed.snsPosts.threads.text.includes("期限は"), "Performance A/J: unconfirmed sale facts are omitted while product features remain");
+assert(wagyuUnconfirmed.snsPosts.threads.text.startsWith("自宅でちょっと贅沢なお肉を楽しみたい人へ。\n秋田県産の黒毛和牛サーロイン400g。\n商品はこちら、返信に👇\n#PR") && !wagyuUnconfirmed.snsPosts.threads.text.includes("50%OFF") && !wagyuUnconfirmed.snsPosts.threads.text.includes("期限は"), "Performance A/J: unconfirmed sale facts are omitted while product features remain");
 assert(wagyuUnconfirmed.snsPosts.threads.replyText.startsWith("商品はこちら👇") && !wagyuUnconfirmed.snsPosts.threads.replyText.includes("お得情報はこちら👇"), "Performance comment: unconfirmed discount uses a neutral product label");
 const wagyuConfirmed = scoring.createThreadsOnlyCandidate({ ...wagyuProduct, affiliateUrl, rateConfirmed: true, discountRate: 50, discountRateType: "exact", deadlineConfirmed: true, couponDeadline: "2026/09/24 01:59" }, "wagyu-confirmed");
 wagyuConfirmed.snsPosts.threads.performanceUrlMode = "reply";
 scoring.ensureThreadsOnlyDraft(wagyuConfirmed);
-assert(wagyuConfirmed.snsPosts.threads.text.includes("50%OFF") && wagyuConfirmed.snsPosts.threads.text.includes("9/24 1:59まで。") && !wagyuConfirmed.snsPosts.threads.text.includes("お得情報を確認できる商品"), "Performance B/H: confirmed discount and deadline are natural, not internal-status wording");
+assert(wagyuConfirmed.snsPosts.threads.text.includes("自宅でちょっと贅沢なお肉を楽しみたい人へ。\n秋田県産の黒毛和牛サーロイン400gが50%OFF、9/24 1:59まで。\n対象はこちら、返信に👇\n#PR") && !wagyuConfirmed.snsPosts.threads.text.includes("お得情報を確認できる商品"), "Performance C/H: confirmed discount and deadline are natural and use the short parent-post structure");
+const wagyuRateOnly = scoring.createThreadsOnlyCandidate({ ...wagyuProduct, affiliateUrl, rateConfirmed: true, discountRate: 50, discountRateType: "exact", deadlineConfirmed: false, couponDeadline: "2026/09/24 01:59" }, "wagyu-rate-only");
+wagyuRateOnly.snsPosts.threads.performanceUrlMode = "reply";
+scoring.ensureThreadsOnlyDraft(wagyuRateOnly);
+assert(wagyuRateOnly.snsPosts.threads.text.includes("秋田県産の黒毛和牛サーロイン400gが50%OFF。") && !wagyuRateOnly.snsPosts.threads.text.includes("9/24"), "Performance B: confirmed rate without confirmed deadline omits the deadline");
 assert(wagyuConfirmed.snsPosts.threads.replyText.startsWith("50%OFFクーポン対象はこちら👇"), "Performance comment: confirmed discount keeps the confirmed-rate label");
 
 // 統合探索画面向けの商品カード表示データと保存区分。
