@@ -1937,7 +1937,7 @@ function buildQueueCandidate(product) {
     imageUrl: getImage(productWithUrl),
     itemUrl,
     affiliateUrl: productWithUrl.affiliateUrl || "",
-    itemCode: productWithUrl.itemCode || "",
+    itemCode: productWithUrl.itemCode || productWithUrl.product?.itemCode || "",
     price: productWithUrl.itemPrice,
     shopName: productWithUrl.shopName || "",
     genreId: productWithUrl.genreId || "",
@@ -2016,10 +2016,26 @@ function parseCodexResult(rawText) {
   return { itemCode, introText, hashTags, isConfirmationReady };
 }
 
+function resetCodexCandidateAfterFailure(candidate) {
+  if (!candidate) return false;
+  candidate.postStatus = "エラー";
+  candidate.status = "投稿待ち";
+  return true;
+}
+
+function recoverCodexProcessingCandidate() {
+  const candidate = data.candidates.find((item) => isRoomCandidate(item) && item.postStatus === "Codex処理中");
+  if (!candidate) return false;
+  resetCodexCandidateAfterFailure(candidate);
+  saveData();
+  renderCandidates();
+  return true;
+}
+
 function applyCodexResult() {
   const message = $("#codex-result-message");
   const parsed = parseCodexResult($("#codex-result-input").value || "");
-  const fail = (text) => { message.textContent = text; toast(text); };
+  const fail = (text) => { recoverCodexProcessingCandidate(); message.textContent = text; toast(text); };
   if (!parsed.itemCode) return fail("ITEM_CODEがないため保存していません。");
   const matches = data.candidates.filter(isRoomCandidate).filter((item) => (item.itemCode || item.product?.itemCode || "") === parsed.itemCode);
   if (matches.length !== 1) return fail(matches.length ? "ITEM_CODEが複数商品に一致したため保存していません。" : "ITEM_CODEが投稿キューに一致しないため保存していません。");
@@ -3576,6 +3592,14 @@ async function startCodexPost(id) {
     return;
   }
   const itemUrl = candidate.itemUrl || candidate.product?.itemUrl || candidate.product?.affiliateUrl || "";
+  const itemCode = candidate.itemCode || candidate.product?.itemCode || "";
+  if (!itemCode) {
+    resetCodexCandidateAfterFailure(candidate);
+    saveData();
+    renderCandidates();
+    toast("ITEM_CODEがないため、Codex投稿準備を開始できません。商品検索から候補を保存し直してください。");
+    return;
+  }
   if (!itemUrl) {
     setPostStatus(id, "エラー");
     toast("商品URLがないため、Codex投稿準備を開始できません。");
