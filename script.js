@@ -722,7 +722,7 @@ function saveCouponSearchInput(safeId, field, value) {
 }
 
 function getCouponSearchKeywords() {
-  const selected = $("input[name='unifiedDiscountFilter']:checked")?.value || "";
+  const selected = $("#unifiedDiscountFilter")?.value || "";
   return selected && COUPON_SEARCH_OPTIONS[selected] ? [selected] : [];
 }
 
@@ -766,7 +766,7 @@ function evaluateDealStatus(product = {}, dealCondition = "") {
 }
 
 function getSelectedDealCondition() {
-  return $("input[name='unifiedDiscountFilter']:checked")?.value || "";
+  return $("#unifiedDiscountFilter")?.value || "";
 }
 
 function extractCandidateDiscountRate(product = {}) {
@@ -826,7 +826,28 @@ function getCouponDisplayState(product = {}) {
   };
 }
 
+function getSourceTypeLabel(type) {
+  return ({ ranking: "ランキング", product: "商品検索", category: "カテゴリー検索", trend: "トレンド検索", deal: "お買い得候補" }[type] || type);
+}
+
+function renderUnifiedProductCard(product, index, options = {}) {
+  const isCoupon = options.mode === "coupon";
+  const rankText = options.rank != null ? `${options.rank}位 ` : product.rank ? `${product.rank}位 ` : "";
+  const dealStatus = product.dealStatus || evaluateDealStatus(product, getSelectedDealCondition());
+  const sourceTypes = [...new Set([...(product.sourceTypes || []), isCoupon ? "deal" : options.rank != null || product.rank ? "ranking" : "product"])];
+  const sourceText = sourceTypes.map(getSourceTypeLabel).join(" / ");
+  const alreadyPosted = postedHistoryMatch(product);
+  const safeId = `coupon-${btoa(unescape(encodeURIComponent(product.itemCode || product.itemName || "item"))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
+  const detected = extractCouponCandidates(product);
+  const evidence = getCouponEvidence(product);
+  const controls = isCoupon && dealStatus.status === "candidate" ? `<details class="deal-confirmation"><summary>割引・期限を確認</summary><label>確認した割引率<input id="${safeId}-rate" type="number" value="${escapeAttr(String(getCouponCandidateInputValue(product, "rate", couponSearchInputOverrides.get(safeId) || {})))}" oninput="saveCouponSearchInput('${safeId}', 'rate', this.value)"></label><label>確認した期限<input id="${safeId}-deadline" type="text" value="${escapeAttr(String(getCouponCandidateInputValue(product, "deadline", couponSearchInputOverrides.get(safeId) || {})))}" oninput="saveCouponSearchInput('${safeId}', 'deadline', this.value)"></label><label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label><label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label></details>` : "";
+  const saveButtons = `<button class="primary-button" type="button" onclick="${isCoupon ? `saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `quickSaveByIndex(${index})`}">投稿候補に保存</button><button class="secondary-button" type="button" onclick="${isCoupon ? `saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `threadsOnlySaveByIndex(${index})`}">Threads投稿</button>`;
+  return `<article class="product-card unified-product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}"><div class="coupon-image-wrap"><img src="${escapeAttr(getImage(product))}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="product-image-placeholder" hidden>画像なし</span></div><div class="product-body"><div class="product-title">${rankText}${escapeHtml(product.itemName || "商品名未設定")}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="meta">取得元：${escapeHtml(sourceText)}</p><p class="coupon-status">${escapeHtml(dealStatus.label)}</p><p class="selection-score">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-score">今日の投稿優先度：${product.todayPriorityScore ?? getSelectionTotal(product)}</p>${alreadyPosted ? `<p class="ranking-post-status">投稿済み</p>` : ""}${controls}<div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>${saveButtons}${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div></div></article>`;
+}
+
 function renderCouponSearchCard(product) {
+  return renderUnifiedProductCard(product, couponSearchResults.indexOf(product), { mode: "coupon" });
+  /* Legacy markup is retained below for data compatibility during migration. */
   const evidence = getCouponEvidence(product);
   const detected = extractCouponCandidates(product);
   const safeId = `coupon-${btoa(unescape(encodeURIComponent(product.itemCode || product.itemName || "item"))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
@@ -866,8 +887,9 @@ function renderCouponSearchCard(product) {
 
 function renderCouponSearchResults(products = []) {
   const container = $("#couponSearchResults");
-  couponSearchResults = products;
-  couponVisibleCount = Math.min(30, products.length);
+  couponSearchResults = products.filter((product) => !postedHistoryMatch(product));
+  couponSearchResults.forEach((product) => { product.sourceTypes = [...new Set([...(product.sourceTypes || []), "deal"])]; });
+  couponVisibleCount = Math.min(30, couponSearchResults.length);
   renderVisibleCouponSearchResults();
 }
 
@@ -924,10 +946,11 @@ async function searchCouponProducts(options = {}) {
   }
   const preparedResults = [...merged.values()].map((product) => prepareCouponSearchProduct(product, product.couponSearchFilters));
   const results = preparedResults.map((product) => ({ ...product, dealStatus: evaluateDealStatus(product, filters[0] || "") }));
+  const postedExcludedCount = preparedResults.filter((product) => postedHistoryMatch(product)).length;
   renderCouponSearchResults(results);
   message.textContent = filters.length
-    ? `${results.length}件のお買い得条件一致商品を表示しました。確認済みデータに基づく結果です。`
-    : `${results.length}件の商品検索結果を表示しました。割引情報は確認前の候補です。`;
+    ? `API取得：${preparedResults.length}件 / 投稿済み除外：${postedExcludedCount}件 / 表示：${couponSearchResults.length}件。お買い得条件一致商品です。`
+    : `API取得：${preparedResults.length}件 / 投稿済み除外：${postedExcludedCount}件 / 表示：${couponSearchResults.length}件。割引情報は確認前の候補です。`;
 }
 
 function getCouponSearchProductWithEvidence(rawProduct, elementPrefix) {
@@ -1463,13 +1486,15 @@ function validateGeneratedCopy(introText, product = {}) {
 }
 
 function filterAvailableProducts(products) {
-  return products.filter((product) => !isUnavailableProduct(product));
+  return products.filter((product) => !isUnavailableProduct(product) && !postedHistoryMatch(product));
 }
 
 function renderResults(products) {
-  searchResults = products;
-  products.forEach((product) => { if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); applySelectionScore(product); });
-  $("#results").innerHTML = products.map((product) => {
+  searchResults = products.filter((product) => !isUnavailableProduct(product) && !postedHistoryMatch(product));
+  searchResults.forEach((product) => { product.sourceTypes = [...new Set([...(product.sourceTypes || []), "product"])]; if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); applySelectionScore(product); });
+  $("#results").innerHTML = searchResults.map((product, index) => renderUnifiedProductCard(product, index, { mode: "product" })).join("");
+  return;
+  $("#results").innerHTML = searchResults.map((product) => {
     const index = searchResults.indexOf(product);
     const duplicate = findDuplicate(product);
     return `
@@ -4171,6 +4196,7 @@ async function loadRanking(event) {
       await sleep(requestInterval);
     }
   }
+  const postedExcludedCount = allProducts.filter((product) => postedHistoryMatch(product)).length;
   renderRankingResults(allProducts);
   renderRankingRetryControl();
   if (!allProducts.length && errors.length) {
@@ -4180,7 +4206,7 @@ async function loadRanking(event) {
     message.textContent = `${allProducts.length}件を表示しました。一部カテゴリーで取得に失敗しました：${errors.join(" / ")}`;
   } else {
     message.textContent = allProducts.length
-      ? `${allProducts.length}件のランキング商品を表示しました。${diagnostics.length ? `（${diagnostics.join("、")}）` : ""}`
+      ? `${allProducts.length}件取得 / 投稿済み除外：${postedExcludedCount}件 / 表示：${searchResults.length}件。${diagnostics.length ? `（${diagnostics.join("、")}）` : ""}`
       : `ランキング結果が0件でした。${diagnostics.length ? ` 診断：${diagnostics.join("、")}` : ""}`;
   }
 }
@@ -4399,7 +4425,9 @@ function renderRankingResults(products) {
       body.insertBefore(status, body.querySelector(".selection-score"));
     });
   };
-  const productCard = (product, index, overallRank = null) => { const alreadyPosted = product.selectionStatus === "posted_duplicate" || postedHistoryMatch(product); return `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}" data-post-status="${alreadyPosted ? "投稿済み" : "未投稿"}">
+  const productCard = (product, index, overallRank = null) => renderUnifiedProductCard(product, index, { rank: overallRank || product.rank });
+  /* Legacy ranking markup remains below until the next cleanup; the shared renderer above is authoritative. */
+  const legacyProductCard = (product, index, overallRank = null) => { const alreadyPosted = product.selectionStatus === "posted_duplicate" || postedHistoryMatch(product); return `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}" data-post-status="${alreadyPosted ? "投稿済み" : "未投稿"}">
           <img src="${escapeAttr(getImage(product))}" alt="">
           <div class="product-body"><div class="product-title">${overallRank ? `${overallRank}位 ` : product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div>${alreadyPosted ? `<p class="ranking-post-status" aria-label="投稿済み">投稿済み</p>` : ""}<p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="selection-score" aria-label="選定スコア">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade" aria-label="推薦ランク">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p><p class="selection-score" aria-label="トレンド適合と投稿機会">${product.matchedTrendKeywords?.length ? "購買トレンド適合" : "トレンド適合"}：${product.trendScore?.total ?? 0} / ${product.matchedTrendKeywords?.length ? 30 : 20}　投稿機会：${product.opportunityScore?.total ?? 0} / 20</p><p class="selection-score" aria-label="今日の投稿優先度"><strong>今日の投稿優先度：${product.todayPriorityScore ?? getSelectionTotal(product)} / ${product.matchedTrendKeywords?.length ? 100 : 140}</strong></p><details class="selection-details"><summary>スコア内訳・選定理由を見る</summary>${scoreBreakdown(product)}${scoreReasons(product)}<p>${escapeHtml((product.opportunityScore?.reasons || []).join("、"))}</p></details><p class="trust-status">${product.trustStatus === "通常投稿候補" ? "🟢 通常投稿候補" : product.trustStatus === "要確認" ? "🟡 要確認" : product.trustStatus === "注意喚起候補" ? "🟠 注意喚起候補" : product.trustStatus === "投稿対象外" ? "🔴 投稿対象外" : "信頼性未確認"}</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "投稿キュー登録済みのため除外" : product.trustStatus || "採用候補なし"}</strong><br>${escapeHtml(typeof product.selectionReason === "string" ? product.selectionReason : (product.selectionReason || []).join("、"))}</p>` : ""}</div>
           <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button><button class="secondary-button" type="button" onclick="threadsOnlySaveByIndex(${index})">Threads投稿</button>${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
