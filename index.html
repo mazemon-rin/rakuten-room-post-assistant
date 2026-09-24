@@ -255,9 +255,10 @@
             </div>
           </fieldset>
           <label>最低割引率<select id="unifiedDiscountFilter" name="unifiedDiscountFilter"><option value="">指定なし</option><option value="10">10%以上</option><option value="20">20%以上</option><option value="30">30%以上</option><option value="40">40%以上</option><option value="50">50%以上</option></select></label>
-          <div class="button-row"><button class="primary-button" type="submit">商品を検索</button><button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button></div>
+          <p class="small-note search-filter-note">割引商品を探すための検索条件です。表示商品の割引率を保証するものではありません。</p>
+          <div class="button-row"><button class="primary-button" type="submit">商品を検索</button><button id="clearSearchConditions" class="secondary-button" type="button">検索条件をクリア</button><button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button></div>
         </form>
-        <p id="couponSearchMessage" class="message" role="status" aria-live="polite"></p>
+        <p id="couponSearchMessage" class="message" role="status" aria-live="polite" style="white-space: pre-line"></p>
         <div id="couponSearchResults" class="coupon-results-grid"></div>
       </section>
       <form id="rankingForm" class="search-form">

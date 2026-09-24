@@ -525,6 +525,10 @@ textarea {
   font-size: 0.92rem;
 }
 
+#couponSearchMessage {
+  white-space: pre-line;
+}
+
 .warning {
   padding: 10px 12px;
   border: 1px solid #dfbd78;

@@ -230,6 +230,7 @@ function bindForms() {
   $("#candidateStatusFilter").addEventListener("change", renderCandidates);
   $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
   $("#productSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchUnifiedProducts(); });
+  $("#clearSearchConditions")?.addEventListener("click", clearSearchConditions);
   $("#openRaCoupon")?.addEventListener("click", () => window.open("https://event.rakuten.co.jp/coupon/", "_blank", "noopener,noreferrer"));
   $("#apply-codex-result").addEventListener("click", applyCodexResult);
   $("#historyFilter").addEventListener("input", renderHistory);
@@ -730,6 +731,46 @@ function getUnifiedSearchCategories() {
   return $$("input[name='unifiedCategory']:checked").map((input) => rankingCategories.find((category) => category.id === input.value)).filter(Boolean);
 }
 
+function summarizeDealStatuses(products = []) {
+  return products.reduce((summary, product) => {
+    const status = product.dealStatus?.status || "unknown";
+    if (status === "confirmed") summary.confirmed += 1;
+    else if (status === "candidate") summary.candidate += 1;
+    else summary.unknown += 1;
+    return summary;
+  }, { confirmed: 0, candidate: 0, unknown: 0 });
+}
+
+function clearSearchConditions() {
+  const setValue = (id, value) => { const element = $(`#${id}`); if (element) element.value = value; };
+  setValue("unifiedProductKeyword", "");
+  setValue("unifiedProductCount", "10");
+  setValue("unifiedDiscountFilter", "");
+  setValue("rankingGenreId", "");
+  setValue("rankingRangeStart", "1");
+  setValue("rankingRangeCount", "10");
+  $$('input[name="unifiedCategory"]').forEach((input) => { input.checked = false; });
+
+  searchResults = [];
+  couponSearchResults = [];
+  couponVisibleCount = 30;
+  couponSearchInputOverrides.clear();
+  rankingCategoryStates.clear();
+  rankingRequestContext = null;
+  rankingRetryInProgress = false;
+  ["#results", "#rankingResults", "#todayRecommendations", "#couponSearchResults"].forEach((selector) => {
+    const element = $(selector);
+    if (element) element.innerHTML = "";
+  });
+  ["#searchMessage", "#rankingMessage", "#couponSearchMessage"].forEach((selector) => {
+    const element = $(selector);
+    if (element) element.textContent = "";
+  });
+  const retryButton = $("#retry-failed-ranking");
+  if (retryButton) retryButton.hidden = true;
+  toast("検索条件と検索結果をクリアしました。保存済みデータは変更していません。");
+}
+
 async function searchUnifiedProducts() {
   const keyword = $("#unifiedProductKeyword")?.value.trim() || "";
   const categories = getUnifiedSearchCategories();
@@ -948,9 +989,11 @@ async function searchCouponProducts(options = {}) {
   const results = preparedResults.map((product) => ({ ...product, dealStatus: evaluateDealStatus(product, filters[0] || "") }));
   const postedExcludedCount = preparedResults.filter((product) => postedHistoryMatch(product)).length;
   renderCouponSearchResults(results);
+  const visibleResults = results.filter((product) => !postedHistoryMatch(product));
+  const statusCounts = summarizeDealStatuses(visibleResults);
   message.textContent = filters.length
-    ? `API取得：${preparedResults.length}件 / 投稿済み除外：${postedExcludedCount}件 / 表示：${couponSearchResults.length}件。お買い得条件一致商品です。`
-    : `API取得：${preparedResults.length}件 / 投稿済み除外：${postedExcludedCount}件 / 表示：${couponSearchResults.length}件。割引情報は確認前の候補です。`;
+    ? `API取得：${preparedResults.length}件 / 投稿済み除外：${postedExcludedCount}件 / 確認済み：${statusCounts.confirmed}件 / 候補・要確認：${statusCounts.candidate}件 / 割引情報未確認：${statusCounts.unknown}件 / 表示：${couponSearchResults.length}件。\n${couponSearchResults.length}件のお買い得検索候補を表示しています。`
+    : `API取得：${preparedResults.length}件 / 投稿済み除外：${postedExcludedCount}件 / 表示：${couponSearchResults.length}件。割引情報は確認前の検索候補です。`;
 }
 
 function getCouponSearchProductWithEvidence(rawProduct, elementPrefix) {
