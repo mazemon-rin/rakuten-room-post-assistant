@@ -106,7 +106,7 @@ const defaultData = {
     defaultTone: "やさしい",
     defaultEmoji: "少なめ",
     defaultTagCount: 8,
-    rankingCategoryIds: rankingCategories.map((category) => category.id)
+    rankingCategoryIds: []
   },
   candidates: [],
   history: [],
@@ -229,21 +229,20 @@ function bindForms() {
   $("#candidateFilter").addEventListener("input", renderCandidates);
   $("#candidateStatusFilter").addEventListener("change", renderCandidates);
   $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
-  $$('input[name="productSearchMode"]').forEach((input) => input.addEventListener("change", setProductSearchMode));
-  $("#searchCouponProducts")?.addEventListener("click", searchCouponProducts);
+  $("#productSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchUnifiedProducts(); });
   $("#openRaCoupon")?.addEventListener("click", () => window.open("https://event.rakuten.co.jp/coupon/", "_blank", "noopener,noreferrer"));
   $("#apply-codex-result").addEventListener("click", applyCodexResult);
   $("#historyFilter").addEventListener("input", renderHistory);
   $("#favoriteFilter").addEventListener("input", renderFavorites);
   $("#favoriteTypeFilter")?.addEventListener("change", renderFavorites);
   $("#calendarMonth").addEventListener("change", renderCalendar);
-  $("#rankingForm").addEventListener("submit", handleUnifiedProductSearch);
+  $("#rankingForm").addEventListener("submit", loadRanking);
   $("#trendSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchTrendProducts(); });
   $("#rankingSortOrder").addEventListener("change", () => renderRankingResults(searchResults));
   $("#queue-selected-ranking").addEventListener("click", queueSelectedRanking);
   $("#start-sequential-processing").addEventListener("click", startSequentialProcessing);
   $("#retry-failed-ranking").addEventListener("click", retryFailedRanking);
-  $$("input[name='rankingCategory']").forEach((input) => input.addEventListener("change", saveRankingCategorySelection));
+  $$("input[name='unifiedCategory']").forEach((input) => input.addEventListener("change", saveRankingCategorySelection));
   $("#exportJson").addEventListener("click", exportJson);
   $("#importJson").addEventListener("change", importJson);
   $("#exportCsv").addEventListener("click", exportCsv);
@@ -297,7 +296,7 @@ function setCandidateView(view) {
 }
 
 function saveRankingCategorySelection() {
-  data.settings.rankingCategoryIds = $$("input[name='rankingCategory']:checked").map((input) => input.value);
+  data.settings.rankingCategoryIds = $$("input[name='unifiedCategory']:checked").map((input) => input.value);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
@@ -313,8 +312,8 @@ function fillSettings() {
   $("#eventStartDate").value = data.eventSettings?.startDate || "";
   $("#eventEndDate").value = data.eventSettings?.endDate || "";
   if ($("#trendKeywords")) $("#trendKeywords").value = (data.trendSettings?.keywords || []).join("、");
-  const selectedIds = data.settings.rankingCategoryIds || rankingCategories.map((category) => category.id);
-  $$("input[name='rankingCategory']").forEach((input) => {
+  const selectedIds = data.settings.rankingCategoryIds || [];
+  $$("input[name='unifiedCategory']").forEach((input) => {
     input.checked = selectedIds.includes(input.value);
   });
   $("#hits").value = data.settings.defaultHits || "10";
@@ -723,7 +722,25 @@ function saveCouponSearchInput(safeId, field, value) {
 }
 
 function getCouponSearchKeywords() {
-  return $$('input[name="couponDiscountFilter"]:checked').map((input) => input.value).filter((value) => COUPON_SEARCH_OPTIONS[value]);
+  const selected = $("input[name='unifiedDiscountFilter']:checked")?.value || "";
+  return selected && COUPON_SEARCH_OPTIONS[selected] ? [selected] : [];
+}
+
+function getUnifiedSearchCategories() {
+  return $$("input[name='unifiedCategory']:checked").map((input) => rankingCategories.find((category) => category.id === input.value)).filter(Boolean);
+}
+
+async function searchUnifiedProducts() {
+  const keyword = $("#unifiedProductKeyword")?.value.trim() || "";
+  const categories = getUnifiedSearchCategories();
+  const filters = getCouponSearchKeywords();
+  if (!keyword && !categories.length) {
+    const message = $("#couponSearchMessage");
+    message.textContent = "キーワードまたは対象カテゴリーを指定してください。";
+    renderCouponSearchResults([]);
+    return;
+  }
+  await searchCouponProducts({ keyword, categories, filters });
 }
 
 function matchesCouponDiscountFilter(item, filters = []) {
@@ -853,19 +870,24 @@ function showMoreCouponResults() {
   renderVisibleCouponSearchResults();
 }
 
-async function searchCouponProducts() {
-  const filters = getCouponSearchKeywords();
+async function searchCouponProducts(options = {}) {
+  const keyword = options.keyword || "";
+  const categories = options.categories || getUnifiedSearchCategories();
+  const filters = options.filters || getCouponSearchKeywords();
   const message = $("#couponSearchMessage");
-  if (!filters.length) { message.textContent = "割引率を1つ以上選択してください。"; renderCouponSearchResults([]); return; }
   if (!hasRakutenCredentials()) { message.textContent = "楽天API認証情報が未設定のため検索できません。"; renderCouponSearchResults([]); return; }
   const merged = new Map();
-  const queries = filters.flatMap((filter) => COUPON_SEARCH_OPTIONS[filter].queries.map((query) => ({ filter, query })));
+  const queries = keyword
+    ? (categories.length ? categories.map((category) => ({ filter: filters[0] || "", query: keyword, categories: [category] })) : [{ filter: filters[0] || "", query: keyword, categories: [] }])
+    : (filters.length
+      ? filters.flatMap((filter) => COUPON_SEARCH_OPTIONS[filter].queries.map((query) => ({ filter, query, categories })))
+      : categories.map((category) => ({ filter: "", query: "", categories: [category] })));
   message.textContent = `${queries.length}通りの検索候補を確認しています...`;
   for (let index = 0; index < queries.length; index += 1) {
     if (index) await sleep(RANKING_INTERVAL_SHORT_MS);
-    const { filter, query } = queries[index];
-    const params = new URLSearchParams({ format: "json", applicationId: data.settings.applicationId, accessKey: data.settings.accessKey, keyword: query, hits: "30", sort: "standard" });
-    addParam(params, "genreId", $("#couponGenreId")?.value || "");
+    const { filter, query, categories: queryCategories } = queries[index];
+    const params = new URLSearchParams({ format: "json", applicationId: data.settings.applicationId, accessKey: data.settings.accessKey, keyword: query, hits: String(Number($("#unifiedProductCount")?.value || 10) * 3), sort: "standard" });
+    addParam(params, "genreId", queryCategories?.[0]?.id || "");
     addAffiliateIdParam(params);
     try {
       const response = await fetch(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`);
@@ -873,7 +895,7 @@ async function searchCouponProducts() {
       normalizeRakutenItems(await response.json()).forEach((product) => {
         const key = rankingIdentity(product);
         const current = merged.get(key) || prepareCouponSearchProduct(product, []);
-        current.couponSearchFilters = [...new Set([...(current.couponSearchFilters || []), filter])];
+        current.couponSearchFilters = [...new Set([...(current.couponSearchFilters || []), filter].filter(Boolean))];
         merged.set(key, current);
       });
     } catch (error) {
@@ -4055,12 +4077,8 @@ async function loadRanking(event) {
     message.textContent = "楽天アプリIDまたはアクセスキーが未設定のため、サンプル商品を表示しています。";
     return;
   }
-  const selectedCategories = $$("input[name='rankingCategory']:checked").map((input) => rankingCategories.find((category) => category.id === input.value)).filter(Boolean);
-  if (!selectedCategories.length) {
-    renderRankingResults([]);
-    message.textContent = "カテゴリーを1つ以上選択してください。";
-    return;
-  }
+  const selectedCategories = getUnifiedSearchCategories();
+  if (!selectedCategories.length) selectedCategories.push({ id: "", name: "総合ランキング" });
   const legacyGenreId = $("#rankingGenreId").value.trim();
   if (legacyGenreId) selectedCategories.unshift({ id: legacyGenreId, name: `ジャンルID ${legacyGenreId}` });
   const rankStart = Number($("#rankingRangeStart").value || 1);

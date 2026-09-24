@@ -233,67 +233,43 @@
         <h2>ランキング・商品検索</h2>
         <p>通常ランキングと、お得商品を同じ画面から探します。投稿準備は保存先のボタンから行います。</p>
       </div>
-      <form id="trendSearchForm" class="search-form trend-search-panel">
-        <label class="wide">トレンド商品を探す（最大5ワード）<textarea id="trendKeywords" rows="2" placeholder="新米、秋コスメ、防災"></textarea></label>
-        <label>表示件数<select id="trendResultCount"><option value="5">5件</option><option value="10" selected>10件</option><option value="20">20件</option></select></label>
-        <button class="secondary-button" type="submit">トレンド商品を検索</button>
-        <p id="trendMessage" class="message" role="status" aria-live="polite"></p>
-      </form>
-      <fieldset class="search-mode-fieldset">
-        <legend>検索種別</legend>
-        <label><input type="radio" name="productSearchMode" value="ranking" checked> 通常ランキング</label>
-        <label><input type="radio" name="productSearchMode" value="coupon"> お得商品</label>
-      </fieldset>
-      <section id="couponSearchPanel" class="coupon-search-panel panel" aria-labelledby="couponSearchTitle" hidden>
-        <h3 id="couponSearchTitle">お得商品検索</h3>
-        <p class="small-note">楽天商品検索APIの検索候補です。商品名に割引表現があっても、現在の割引とは確定しません。確認後に割引率・期限を入力してください。</p>
-        <label class="coupon-category-control">カテゴリー
-          <select id="couponGenreId">
-            <option value="">すべて</option>
-            <option value="562637">家電</option>
-            <option value="100026">パソコン・周辺機器</option>
-            <option value="100554">日用品・生活雑貨</option>
-            <option value="558944">キッチン用品・食器・調理器具</option>
-            <option value="100227">食品</option>
-            <option value="100939">美容・コスメ・香水</option>
-            <option value="100804">インテリア・寝具・収納</option>
-            <option value="101070">スポーツ・アウトドア</option>
-            <option value="100533">ベビー・キッズ・マタニティ</option>
-            <option value="101213">ペット・ペットグッズ</option>
-          </select>
-        </label>
-        <fieldset class="discount-filter-fieldset">
-          <legend>割引率</legend>
-          <label><input type="checkbox" name="couponDiscountFilter" value="50plus"> 50%以上</label>
-          <label><input type="checkbox" name="couponDiscountFilter" value="50"> 50%</label>
-          <label><input type="checkbox" name="couponDiscountFilter" value="40"> 40%</label>
-          <label><input type="checkbox" name="couponDiscountFilter" value="30"> 30%</label>
-          <label><input type="checkbox" name="couponDiscountFilter" value="20"> 20%</label>
-          <label><input type="checkbox" name="couponDiscountFilter" value="10"> 10%</label>
-        </fieldset>
-        <div class="button-row">
-          <button id="searchCouponProducts" class="primary-button" type="button">お得商品を検索</button>
-          <button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button>
-        </div>
+      <section class="panel unified-search-panel" aria-labelledby="productSearchTitle">
+        <h3 id="productSearchTitle">商品検索</h3>
+        <p class="small-note">キーワードまたは対象カテゴリーで商品を探します。お買い得情報は追加条件として使えます。</p>
+        <form id="productSearchForm" class="search-form">
+          <label class="wide">検索キーワード<input id="unifiedProductKeyword" type="search" placeholder="iPhone18 ケース（空欄ならカテゴリー検索）"></label>
+          <label>表示件数<select id="unifiedProductCount"><option value="5">5件</option><option value="10" selected>10件</option><option value="20">20件</option></select></label>
+          <fieldset class="ranking-category-fieldset unified-category-fieldset">
+            <legend>対象カテゴリー（商品検索・ランキング共通）</legend>
+            <div class="category-checkboxes">
+              <label><input type="checkbox" name="unifiedCategory" value="562637"> 家電</label>
+              <label><input type="checkbox" name="unifiedCategory" value="100026"> パソコン・周辺機器</label>
+              <label><input type="checkbox" name="unifiedCategory" value="100554"> 日用品・生活雑貨</label>
+              <label><input type="checkbox" name="unifiedCategory" value="558944"> キッチン用品・食器・調理器具</label>
+              <label><input type="checkbox" name="unifiedCategory" value="100227"> 食品</label>
+              <label><input type="checkbox" name="unifiedCategory" value="100939"> 美容・コスメ・香水</label>
+              <label><input type="checkbox" name="unifiedCategory" value="100804"> インテリア・寝具・収納</label>
+              <label><input type="checkbox" name="unifiedCategory" value="101070"> スポーツ・アウトドア</label>
+              <label><input type="checkbox" name="unifiedCategory" value="100533"> ベビー・キッズ・マタニティ</label>
+              <label><input type="checkbox" name="unifiedCategory" value="101213"> ペット・ペットグッズ</label>
+            </div>
+          </fieldset>
+          <fieldset class="discount-filter-fieldset">
+            <legend>お買い得情報（追加条件）</legend>
+            <label><input type="radio" name="unifiedDiscountFilter" value=""> 指定なし</label>
+            <label><input type="radio" name="unifiedDiscountFilter" value="50plus"> 50%以上</label>
+            <label><input type="radio" name="unifiedDiscountFilter" value="50"> 50%</label>
+            <label><input type="radio" name="unifiedDiscountFilter" value="40"> 40%</label>
+            <label><input type="radio" name="unifiedDiscountFilter" value="30"> 30%</label>
+            <label><input type="radio" name="unifiedDiscountFilter" value="20"> 20%</label>
+            <label><input type="radio" name="unifiedDiscountFilter" value="10"> 10%</label>
+          </fieldset>
+          <div class="button-row"><button class="primary-button" type="submit">商品を検索</button><button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button></div>
+        </form>
         <p id="couponSearchMessage" class="message" role="status" aria-live="polite"></p>
         <div id="couponSearchResults" class="coupon-results-grid"></div>
       </section>
       <form id="rankingForm" class="search-form">
-        <fieldset class="ranking-category-fieldset">
-          <legend>対象カテゴリー</legend>
-          <div class="category-checkboxes">
-            <label><input type="checkbox" name="rankingCategory" value="562637"> 家電</label>
-            <label><input type="checkbox" name="rankingCategory" value="100026"> パソコン・周辺機器</label>
-            <label><input type="checkbox" name="rankingCategory" value="100554"> 日用品・生活雑貨</label>
-            <label><input type="checkbox" name="rankingCategory" value="558944"> キッチン用品・食器・調理器具</label>
-            <label><input type="checkbox" name="rankingCategory" value="100227"> 食品</label>
-            <label><input type="checkbox" name="rankingCategory" value="100939"> 美容・コスメ・香水</label>
-            <label><input type="checkbox" name="rankingCategory" value="100804"> インテリア・寝具・収納</label>
-            <label><input type="checkbox" name="rankingCategory" value="101070"> スポーツ・アウトドア</label>
-            <label><input type="checkbox" name="rankingCategory" value="100533"> ベビー・キッズ・マタニティ</label>
-            <label><input type="checkbox" name="rankingCategory" value="101213"> ペット・ペットグッズ</label>
-          </div>
-        </fieldset>
         <label>ジャンルID<input id="rankingGenreId" type="text" placeholder="空欄で総合"></label>
         <label>開始順位<select id="rankingRangeStart"><option value="1" selected>1位</option><option value="6">6位</option><option value="11">11位</option><option value="16">16位</option><option value="21">21位</option><option value="26">26位</option><option value="31">31位</option><option value="36">36位</option><option value="41">41位</option><option value="46">46位</option></select></label>
         <label>表示件数<select id="rankingRangeCount"><option value="5">5件</option><option value="10" selected>10件</option><option value="20">20件</option></select></label>
