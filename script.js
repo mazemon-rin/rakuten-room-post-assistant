@@ -902,9 +902,12 @@ async function searchCouponProducts(options = {}) {
       if (message) message.textContent = `${query}の検索に失敗しました。成功した検索結果は保持しています。`;
     }
   }
-  const results = [...merged.values()].map((product) => prepareCouponSearchProduct(product, product.couponSearchFilters));
+  const preparedResults = [...merged.values()].map((product) => prepareCouponSearchProduct(product, product.couponSearchFilters));
+  const results = filters.length ? preparedResults.filter((product) => matchesCouponDiscountFilter(product, filters)) : preparedResults;
   renderCouponSearchResults(results);
-  message.textContent = `${results.length}件の割引・クーポン検索候補を表示しました。検索ヒットは割引確認済みを意味しません。`;
+  message.textContent = filters.length
+    ? `${results.length}件のお買い得条件一致商品を表示しました。確認済みデータに基づく結果です。`
+    : `${results.length}件の商品検索結果を表示しました。割引情報は確認前の候補です。`;
 }
 
 function getCouponSearchProductWithEvidence(rawProduct, elementPrefix) {
