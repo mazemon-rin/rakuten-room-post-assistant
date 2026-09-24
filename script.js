@@ -9,6 +9,7 @@ const APP_VERSION = "2.7.1.2";
 const RECOMMENDATION_TITLE_MAX_LENGTH = 40;
 const TREND_KEYWORD_MAX = 5;
 const TREND_PRODUCTS_PER_KEYWORD = 5;
+const TREND_RESULT_COUNT_OPTIONS = [5, 10, 20];
 const OPPORTUNITY_CONFIG = Object.freeze({ priceBands: [[1000, 1999, 6], [2000, 4999, 5], [5000, 9999, 4], [10000, 29999, 3], [30000, Infinity, 1], [0, 999, 2]] });
 const SELECTION_SCORE_CONFIG = Object.freeze({
   ranking: 30, reviewRating: 20, reviewCount: 20, price: 15, category: 10, freshness: 5,
@@ -440,6 +441,18 @@ function sleep(milliseconds) {
 
 function getRankingPageForRange(rankStart) {
   return Number(rankStart) >= 31 ? 2 : 1;
+}
+
+function getRankingPagesForRange(rankStart, count) {
+  const start = Math.max(1, Number(rankStart) || 1);
+  const end = Math.min(50, start + Math.max(1, Number(count) || 10) - 1);
+  if (start <= 30 && end > 30) return [1, 2];
+  return [start >= 31 ? 2 : 1];
+}
+
+function getRankingRange(rankStart, count) {
+  const start = Math.max(1, Number(rankStart) || 1);
+  return { start, end: Math.min(50, start + Math.max(1, Number(count) || 10) - 1) };
 }
 
 function applyOfficialRankingRank(product = {}) {
@@ -4051,10 +4064,11 @@ async function loadRanking(event) {
   const legacyGenreId = $("#rankingGenreId").value.trim();
   if (legacyGenreId) selectedCategories.unshift({ id: legacyGenreId, name: `ジャンルID ${legacyGenreId}` });
   const rankStart = Number($("#rankingRangeStart").value || 1);
-  const rankEnd = rankStart + 4;
-  const page = getRankingPageForRange(rankStart);
+  const rankCount = Math.max(1, Number($("#rankingRangeCount").value || 10));
+  const { start: requestedStart, end: requestedEnd } = getRankingRange(rankStart, rankCount);
+  const pages = getRankingPagesForRange(requestedStart, rankCount);
   const requestInterval = getRankingRequestInterval(selectedCategories.length);
-  rankingRequestContext = { categories: selectedCategories, page, requestInterval, rankStart, rankEnd };
+  rankingRequestContext = { categories: selectedCategories, pages, page: pages[0], requestInterval, rankStart: requestedStart, rankEnd: requestedEnd, rankCount };
   rankingCategoryStates = new Map(selectedCategories.map((category) => [category.id, {
     categoryId: category.id,
     categoryName: category.name,
@@ -4077,7 +4091,11 @@ async function loadRanking(event) {
     categoryState.lastTriedAt = new Date().toISOString();
     showRankingProgress(`${category.name}を取得中...`);
     try {
-      const products = filterAvailableProducts(await fetchRankingCategory(category, page, requestInterval));
+      const products = [];
+      for (const page of pages) {
+        if (products.length) await sleep(requestInterval);
+        products.push(...filterAvailableProducts(await fetchRankingCategory(category, page, requestInterval)));
+      }
       categoryState.status = "success";
       categoryState.httpStatus = 200;
       categoryState.errorMessage = "";
@@ -4087,15 +4105,15 @@ async function loadRanking(event) {
         categoryId: category.id,
         categoryName: category.name,
         fetchedAt: new Date().toISOString()
-      })).filter((product) => product.rank !== null && product.rank >= rankStart && product.rank <= rankEnd);
+      })).filter((product) => product.rank !== null && product.rank >= requestedStart && product.rank <= requestedEnd);
       const actualRanks = categoryProducts.map((product) => product.rank);
       const actualRange = actualRanks.length ? `${Math.min(...actualRanks)}〜${Math.max(...actualRanks)}位` : "該当なし";
-      diagnostics.push(`${category.name}(genreId:${category.id}, page:${page}): API取得${products.length}件 / 要求${rankStart}〜${rankEnd}位 / 実取得${actualRange}（${categoryProducts.length}件）`);
+      diagnostics.push(`${category.name}(genreId:${category.id}, page:${pages.join("+")}): API取得${products.length}件 / 要求${requestedStart}〜${requestedEnd}位 / 実取得${actualRange}（${categoryProducts.length}件）`);
       if (!selectRankingCandidate(categoryProducts, selectionContext)) {
         categoryProducts.forEach((product) => {
           if (!product.selectionStatus) {
             product.selectionStatus = "no_candidate";
-            product.selectionReason = `${rankStart}〜${rankEnd}位すべて除外`;
+            product.selectionReason = `${requestedStart}〜${requestedEnd}位すべて除外`;
           }
         });
       }
@@ -4148,7 +4166,11 @@ async function retryFailedRanking() {
     state.lastTriedAt = new Date().toISOString();
     showRankingProgress(`${category.name}を再取得中...`);
     try {
-      const products = filterAvailableProducts(await fetchRankingCategory(category, rankingRequestContext.page, rankingRequestContext.requestInterval));
+      const products = [];
+      for (const page of rankingRequestContext.pages || [rankingRequestContext.page]) {
+        if (products.length) await sleep(rankingRequestContext.requestInterval);
+        products.push(...filterAvailableProducts(await fetchRankingCategory(category, page, rankingRequestContext.requestInterval)));
+      }
       const categoryProducts = products.map((product) => applyOfficialRankingRank({
         ...product,
         categoryId: category.id,
@@ -4274,7 +4296,8 @@ async function searchTrendProducts() {
   const merged = new Map();
   for (let i = 0; i < keywords.length; i += 1) {
     if (i) await sleep(keywords.length <= 3 ? RANKING_INTERVAL_SHORT_MS : RANKING_INTERVAL_LONG_MS);
-    const params = new URLSearchParams({ format: "json", applicationId: data.settings.applicationId, accessKey: data.settings.accessKey, keyword: keywords[i], hits: String(TREND_PRODUCTS_PER_KEYWORD), sort: "standard" });
+    const requestedCount = TREND_RESULT_COUNT_OPTIONS.includes(Number($("#trendResultCount")?.value)) ? Number($("#trendResultCount").value) : 10;
+    const params = new URLSearchParams({ format: "json", applicationId: data.settings.applicationId, accessKey: data.settings.accessKey, keyword: keywords[i], hits: String(requestedCount), sort: "standard" });
     addAffiliateIdParam(params);
     let succeeded = false;
     for (let attempt = 0; attempt <= 1 && !succeeded; attempt += 1) {
@@ -4287,7 +4310,7 @@ async function searchTrendProducts() {
         }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const items = normalizeRakutenItems(await response.json());
-        items.slice(0, TREND_PRODUCTS_PER_KEYWORD).forEach((item, index) => {
+        items.slice(0, requestedCount).forEach((item, index) => {
           const key = rankingIdentity(item);
           const current = merged.get(key) || { ...item, matchedTrendKeywords: [], trendSearchPosition: index + 1 };
           current.matchedTrendKeywords = [...new Set([...current.matchedTrendKeywords, keywords[i]])];
