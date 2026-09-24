@@ -4386,6 +4386,19 @@ function renderRankingResults(products) {
     ? `<div class="selection-breakdown" aria-label="スコア内訳">購買トレンド適合 ${product.selectionScore?.trendFit || 0} / 30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0} / 20<br>レビュー実績 ${product.selectionScore?.reviewEvidence || 0} / 15<br>価格 ${product.selectionScore?.price || 0} / 10<br>投稿機会 ${product.selectionScore?.opportunity || 0} / 20<br>新規性 ${product.selectionScore?.freshness || 0} / 5</div>`
     : `<div class="selection-breakdown" aria-label="スコア内訳">ランキング ${product.selectionScore?.ranking || 0} / 30<br>レビュー評価 ${product.selectionScore?.reviewRating || 0} / 20<br>レビュー件数 ${product.selectionScore?.reviewCount || 0} / 20<br>価格 ${product.selectionScore?.price || 0} / 15<br>カテゴリー ${product.selectionScore?.category || 0} / 10<br>新規性 ${product.selectionScore?.freshness || 0} / 5</div>`;
   const scoreReasons = (product) => `${dealCondition ? `<div class="coupon-status" aria-label="お買い得判定">${escapeHtml(product.dealStatus.label)}</div>` : ""}<div class="selection-reasons" aria-label="選定理由">${(product.selectionReason || []).map((reason) => `<div>✓ ${escapeHtml(reason)}</div>`).join("") || "<div>✓ 評価理由を確認中</div>"}</div>`;
+  const renderDealStatusOnCards = () => {
+    if (!dealCondition) return;
+    $$("#rankingResults [data-ranking-item-code]").forEach((card) => {
+      const product = searchResults.find((item) => item.itemCode === card.dataset.rankingItemCode);
+      const body = card.querySelector(".product-body");
+      if (!product || !body || body.querySelector("[data-deal-status]") ) return;
+      const status = document.createElement("p");
+      status.className = "coupon-status";
+      status.dataset.dealStatus = product.dealStatus.status;
+      status.textContent = product.dealStatus.label;
+      body.insertBefore(status, body.querySelector(".selection-score"));
+    });
+  };
   const productCard = (product, index, overallRank = null) => { const alreadyPosted = product.selectionStatus === "posted_duplicate" || postedHistoryMatch(product); return `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}" data-post-status="${alreadyPosted ? "投稿済み" : "未投稿"}">
           <img src="${escapeAttr(getImage(product))}" alt="">
           <div class="product-body"><div class="product-title">${overallRank ? `${overallRank}位 ` : product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div>${alreadyPosted ? `<p class="ranking-post-status" aria-label="投稿済み">投稿済み</p>` : ""}<p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="selection-score" aria-label="選定スコア">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade" aria-label="推薦ランク">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p><p class="selection-score" aria-label="トレンド適合と投稿機会">${product.matchedTrendKeywords?.length ? "購買トレンド適合" : "トレンド適合"}：${product.trendScore?.total ?? 0} / ${product.matchedTrendKeywords?.length ? 30 : 20}　投稿機会：${product.opportunityScore?.total ?? 0} / 20</p><p class="selection-score" aria-label="今日の投稿優先度"><strong>今日の投稿優先度：${product.todayPriorityScore ?? getSelectionTotal(product)} / ${product.matchedTrendKeywords?.length ? 100 : 140}</strong></p><details class="selection-details"><summary>スコア内訳・選定理由を見る</summary>${scoreBreakdown(product)}${scoreReasons(product)}<p>${escapeHtml((product.opportunityScore?.reasons || []).join("、"))}</p></details><p class="trust-status">${product.trustStatus === "通常投稿候補" ? "🟢 通常投稿候補" : product.trustStatus === "要確認" ? "🟡 要確認" : product.trustStatus === "注意喚起候補" ? "🟠 注意喚起候補" : product.trustStatus === "投稿対象外" ? "🔴 投稿対象外" : "信頼性未確認"}</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "投稿キュー登録済みのため除外" : product.trustStatus || "採用候補なし"}</strong><br>${escapeHtml(typeof product.selectionReason === "string" ? product.selectionReason : (product.selectionReason || []).join("、"))}</p>` : ""}</div>
@@ -4394,6 +4407,7 @@ function renderRankingResults(products) {
   const sortOrder = $("#rankingSortOrder")?.value;
   if (["priority", "score"].includes(sortOrder)) {
     container.innerHTML = `<section class="ranking-scoreboard"><h3>選定スコアランキング</h3><div class="product-grid">${displayProducts.map((product, position) => productCard(product, searchResults.indexOf(product), position + 1)).join("")}</div></section>`;
+    renderDealStatusOnCards();
     return;
   }
   const groups = displayProducts.reduce((result, product) => {
@@ -4406,4 +4420,5 @@ function renderRankingResults(products) {
       <h3>${escapeHtml(group.name)}</h3>
       <div class="product-grid">${group.products.map((product) => productCard(product, searchResults.indexOf(product))).join("")}</div>
     </section>`).join("");
+  renderDealStatusOnCards();
 }
