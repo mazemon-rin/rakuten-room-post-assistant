@@ -398,9 +398,9 @@ async function fetchRankingCategory(category, page = 1, fallbackWaitMs = RANKING
     format: "json",
     applicationId: data.settings.applicationId,
     accessKey: data.settings.accessKey,
-    page: String(page),
-    genreId: category.id || "0"
+    page: String(page)
   });
+  if (category.id) params.set("genreId", category.id);
   addAffiliateIdParam(params);
   const url = `https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601?${params.toString()}`;
   let retryCount = 0;
