@@ -396,6 +396,7 @@ main {
 .coupon-image-wrap { position: relative; display: grid; place-items: center; min-height: 210px; background: #eee5d9; }
 .coupon-image-wrap img { width: 100%; height: 210px; object-fit: contain; background: #fff; }
 .product-image-placeholder { display: grid; place-items: center; width: 100%; height: 210px; color: var(--muted); background: #eee5d9; }
+.product-image-placeholder[hidden] { display: none !important; }
 .coupon-more-button { grid-column: 1 / -1; justify-self: center; }
 .coupon-result-card label { display: block; margin-top: 8px; }
 .coupon-result-card input[type="number"], .coupon-result-card input[type="text"] { width: 100%; margin-top: 4px; }

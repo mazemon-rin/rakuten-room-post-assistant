@@ -627,6 +627,18 @@ function getSaleInfo(product = {}) {
   return entries.filter(([, value]) => value !== "").map(([label, value]) => `${label}：${value}`).join("\n");
 }
 
+function getRoomIntroDeadlineRule(product = {}) {
+  const detected = extractCouponCandidates(product).detectedDeadline || product.detectedDeadline || "";
+  const evidence = getCouponEvidence(product);
+  if (evidence.deadlineConfirmed && evidence.couponDeadline) {
+    return `確認済みのクーポン最終有効日「${evidence.couponDeadline}」がある場合は、紹介文の冒頭付近へ「${evidence.couponDeadline}まで」など自然に入力する。`;
+  }
+  if (detected) {
+    return `商品タイトルから検出した期限候補「${detected}」があります。これは未確認の候補なので断定せず、商品ページ確認後に採用できる場合だけ、紹介文の冒頭付近へ「${detected}まで」など自然に入力する。確認前は期限を事実として書かない。`;
+  }
+  return "クーポン最終有効日が確認できた場合は、紹介文の冒頭付近へ自然に入力する。未確認の期限は書かない。";
+}
+
 function getCouponEvidence(item = {}) {
   const product = item.product || item;
   const rate = Number(item.discountRate ?? product.discountRate ?? item.saleRate ?? product.saleRate);
@@ -882,8 +894,13 @@ function renderUnifiedProductCard(product, index, options = {}) {
   const detected = extractCouponCandidates(product);
   const evidence = getCouponEvidence(product);
   const controls = isCoupon && dealStatus.status === "candidate" ? `<details class="deal-confirmation"><summary>割引・期限を確認</summary><label>確認した割引率<input id="${safeId}-rate" type="number" value="${escapeAttr(String(getCouponCandidateInputValue(product, "rate", couponSearchInputOverrides.get(safeId) || {})))}" oninput="saveCouponSearchInput('${safeId}', 'rate', this.value)"></label><label>確認した期限<input id="${safeId}-deadline" type="text" value="${escapeAttr(String(getCouponCandidateInputValue(product, "deadline", couponSearchInputOverrides.get(safeId) || {})))}" oninput="saveCouponSearchInput('${safeId}', 'deadline', this.value)"></label><label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label><label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label></details>` : "";
-  const saveButtons = `<button class="primary-button" type="button" onclick="${isCoupon ? `saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `quickSaveByIndex(${index})`}">投稿候補に保存</button><button class="secondary-button" type="button" onclick="${isCoupon ? `saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `threadsOnlySaveByIndex(${index})`}">Threads投稿</button>`;
-  return `<article class="product-card unified-product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}"><div class="coupon-image-wrap"><img src="${escapeAttr(getImage(product))}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="product-image-placeholder" hidden>画像なし</span></div><div class="product-body"><div class="product-title">${rankText}${escapeHtml(product.itemName || "商品名未設定")}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="meta">取得元：${escapeHtml(sourceText)}</p><p class="coupon-status">${escapeHtml(dealStatus.label)}</p><p class="selection-score">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-score">今日の投稿優先度：${product.todayPriorityScore ?? getSelectionTotal(product)}</p>${alreadyPosted ? `<p class="ranking-post-status">投稿済み</p>` : ""}${controls}<div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>${saveButtons}${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div></div></article>`;
+  const roomDuplicate = isCoupon && findDuplicate(product);
+  const roomSaveButton = roomDuplicate
+    ? `<button class="primary-button" type="button" disabled>✓ ROOM投稿候補に保存済み</button>`
+    : `<button class="primary-button" type="button" onclick="${isCoupon ? `saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `quickSaveByIndex(${index})`}">投稿候補に保存</button>`;
+  const saveButtons = `${roomSaveButton}<button class="secondary-button" type="button" onclick="${isCoupon ? `saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `threadsOnlySaveByIndex(${index})`}">Threads投稿</button>`;
+  const imageCandidates = escapeAttr(JSON.stringify(getImageCandidates(product)));
+  return `<article class="product-card unified-product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}"><div class="coupon-image-wrap"><img src="${escapeAttr(getImage(product))}" data-image-candidates="${imageCandidates}" data-image-index="0" alt="" onerror="tryNextProductImage(this)"><span class="product-image-placeholder" hidden>画像なし</span></div><div class="product-body"><div class="product-title">${rankText}${escapeHtml(product.itemName || "商品名未設定")}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="meta">取得元：${escapeHtml(sourceText)}</p><p class="coupon-status">${escapeHtml(dealStatus.label)}</p><p class="selection-score">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-score">今日の投稿優先度：${product.todayPriorityScore ?? getSelectionTotal(product)}</p>${alreadyPosted ? `<p class="ranking-post-status">投稿済み</p>` : ""}${controls}<div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>${saveButtons}${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div></div></article>`;
 }
 
 function renderCouponSearchCard(product) {
@@ -1039,7 +1056,7 @@ function saveCouponSearchRoomCandidate(rawProduct, elementPrefix) {
   data.candidates.unshift(candidate);
   saveData();
   renderCandidates();
-  showTab("candidates");
+  renderVisibleCouponSearchResults();
   toast("ROOM投稿候補に保存しました。割引・期限の確認状態も保持しています。");
 }
 
@@ -1677,6 +1694,9 @@ function generatePrompt() {
 商品URL：${currentProduct.itemUrl}
 セール情報（商品データに明記された項目のみ）：
 ${getSaleInfo(currentProduct) || "記載なし"}
+
+クーポン最終有効日の扱い：
+${getRoomIntroDeadlineRule(currentProduct)}
 
 【文章作成用の中間情報】
 対象者：${context.targetUser}
@@ -3646,6 +3666,7 @@ function buildCodexPostInstructions(candidate) {
     `ショップ名：${candidate.shopName || product.shopName || ""}`,
     `商品説明：${stripHtml(product.itemCaption || "" )}`,
     `セール情報（明記された項目のみ）：${getSaleInfo(product) || "記載なし"}`,
+    `クーポン最終有効日の扱い：${getRoomIntroDeadlineRule(product)}`,
     `文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}`,
     `商品選定情報：スコア=${getSelectionTotal(candidate)} / ${candidate.selectionGrade || "評価中"} / 選定理由=${(candidate.selectionReason || candidate.selectionReasons || []).join("、") || "未評価"} / 信頼性=${candidate.trustStatus || "未確認"}`,
     `商品URL：${itemUrl}`,
@@ -3686,7 +3707,7 @@ function buildCodexPostInstructions(candidate) {
     "24. 60秒経過後も完了操作が確認できない場合は『60秒以内に完了操作が確認できなかったため停止しました。』と表示して停止する。自動投稿へ切り替えない",
     "",
     "【紹介文条件】",
-    "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項がある場合は紹介文へ反映する。",
+    "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項がある場合は紹介文へ反映する。確認済みのクーポン最終有効日は、紹介文の冒頭付近へ優先して自然に入力する。商品タイトルからの検出だけでは確認済みにせず、確認前は断定しない。",
     "未使用または状態不明の商品は、使用体験を書かず『便利そう』『候補に入れてもよさそう』などの表現にする。レビューは取得できた情報だけを使う。",
     "生成後に、冒頭の具体性、商品固有性、使用状況、効果・レビュー・価格・クーポン・期限の事実性、煽り表現を自己点検し、条件を満たさなければ書き直す。",
     "出力は『紹介文:』『短い紹介文:』『ハッシュタグ:』『セール情報:（ある場合のみ）』『状態:確認待ち』の見出しを使う。",
@@ -3998,9 +4019,30 @@ function makeTags(product, count) {
   return [...new Set(words)].slice(0, count);
 }
 
+function getImageCandidates(product = {}) {
+  return [...new Set([
+    ...(product.mediumImageUrls || []).map((item) => item?.imageUrl),
+    ...(product.smallImageUrls || []).map((item) => item?.imageUrl),
+    product.imageUrl
+  ].filter(Boolean).map((image) => String(image).replace("?_ex=128x128", "")))];
+}
+
 function getImage(product) {
-  const image = product.mediumImageUrls?.[0]?.imageUrl || product.smallImageUrls?.[0]?.imageUrl || "";
-  return image.replace("?_ex=128x128", "");
+  return getImageCandidates(product)[0] || "";
+}
+
+function tryNextProductImage(image) {
+  const placeholder = image.nextElementSibling;
+  let candidates = [];
+  try { candidates = JSON.parse(image.dataset.imageCandidates || "[]"); } catch { candidates = []; }
+  const nextIndex = Number(image.dataset.imageIndex || 0) + 1;
+  if (candidates[nextIndex]) {
+    image.dataset.imageIndex = String(nextIndex);
+    image.src = candidates[nextIndex];
+    return;
+  }
+  image.hidden = true;
+  if (placeholder) placeholder.hidden = false;
 }
 
 function formatYen(value) {
