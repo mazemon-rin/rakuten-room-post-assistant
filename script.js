@@ -1883,7 +1883,7 @@ function quickSave(product) {
     usageStatus: sameProduct && $("#postType")?.value === "実際に購入した商品" ? "used" : "unknown",
     savedAt: new Date().toISOString(),
     plannedDate: new Date().toISOString().slice(0, 10),
-    memo: duplicate ? duplicate : "",
+    memo: "",
     status: introText ? "文章作成済み" : "未作成",
     postStatus: introText ? "紹介文作成済み" : "紹介文未作成",
     favoriteType: "今すぐ投稿",
