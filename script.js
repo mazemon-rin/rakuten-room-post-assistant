@@ -110,6 +110,7 @@ const defaultData = {
   },
   candidates: [],
   history: [],
+  pendingRoomPost: null,
   sales: [],
   favorites: [],
   trendSettings: { keywords: [], updatedAt: null },
@@ -2605,6 +2606,7 @@ function candidateCard(item) {
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '要手動確認')">要手動確認にする</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
+          ${data.pendingRoomPost?.itemCode && data.pendingRoomPost.itemCode === (item.itemCode || item.product?.itemCode || "") ? `<button class="primary-button" type="button" onclick="completePendingRoomPost()">ROOM投稿完了を記録</button>` : ""}
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button>
           ${["注意喚起候補", "要確認"].includes(trust.trustStatus) ? `<button class="secondary-button" type="button" onclick="generateWarningPrompt('${item.id}')">注意喚起文を生成</button>` : ""}
           ${item.postStatus === "投稿済み" ? `<button class="secondary-button" type="button" onclick="startNextCandidate('${item.id}')">次の商品を処理</button>` : ""}
@@ -3739,6 +3741,43 @@ function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "" }
   return existingHistory || historySnapshot;
 }
 
+function completePendingRoomPost() {
+  const pending = data.pendingRoomPost;
+  if (!pending?.itemCode) {
+    toast("投稿中の商品情報がありません。対象カードから投稿を開始してください。");
+    return false;
+  }
+  const item = data.candidates.find((candidate) => (candidate.itemCode || candidate.product?.itemCode || "") === pending.itemCode);
+  if (!item) {
+    toast("投稿開始時の商品を候補から特定できません。pending情報を保持したまま停止しました。");
+    return false;
+  }
+  if (findPostedHistoryRecord(item)) {
+    data.pendingRoomPost = null;
+    saveData();
+    toast("この商品はすでに投稿履歴にあります。重複登録は行いません。");
+    return true;
+  }
+  const previousPending = pending;
+  try {
+    recordRoomPosting(item, { postedAt: new Date().toISOString() });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    const savedHistory = (saved.history || []).find((entry) => (entry.itemCode || entry.product?.itemCode || "") === pending.itemCode);
+    if (!savedHistory?.postedAt) throw new Error("投稿履歴の保存確認に失敗しました。");
+    data.pendingRoomPost = null;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    renderAll();
+    toast("ROOM投稿完了をアプリへ記録しました。");
+    return true;
+  } catch (error) {
+    data.pendingRoomPost = previousPending;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (storageError) { console.warn("pending情報の復元保存にも失敗しました。", storageError); }
+    toast(`投稿完了の記録に失敗しました。pending情報は保持しています。${error.message ? ` ${error.message}` : ""}`);
+    return false;
+  }
+}
+
 function markPosted(id) {
   const item = data.candidates.find((candidate) => candidate.id === id);
   if (!item) return;
@@ -3872,6 +3911,12 @@ async function startCodexPost(id) {
     return;
   }
   const instructions = buildCodexPostInstructions(candidate);
+  data.pendingRoomPost = {
+    candidateId: candidate.id,
+    itemCode,
+    title: candidate.title || candidate.product?.itemName || "",
+    startedAt: new Date().toISOString()
+  };
   candidate.introPrompt = instructions;
   candidate.postStatus = "Codex処理中";
   candidate.status = "投稿待ち";
@@ -3930,6 +3975,12 @@ function prepareCandidatePost(id) {
     "6. 待機開始時に『投稿準備が完了しました。60秒以内にROOMの「完了」ボタンを押してください。』と表示する",
     "7. 60秒経過後も完了操作が確認できなければ『60秒以内に完了操作が確認できなかったため停止しました。』と表示して停止する"
   ].join("\n");
+  data.pendingRoomPost = {
+    candidateId: candidate.id,
+    itemCode: candidate.itemCode || candidate.product?.itemCode || "",
+    title: candidate.title || candidate.product?.itemName || "",
+    startedAt: new Date().toISOString()
+  };
   candidate.postStatus = "確認待ち";
   candidate.status = "投稿待ち";
   saveData();
