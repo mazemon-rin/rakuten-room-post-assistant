@@ -878,11 +878,14 @@ function prepareCouponSearchProduct(product, searchFilters = []) {
 }
 
 function applyCouponEvidenceToCandidate(candidate, source = {}) {
+  const verifiedRate = source.rateConfirmed === true && source.discountRateType === "exact" && Number.isFinite(Number(source.discountRate));
   Object.assign(candidate, {
-    discountRate: source.discountRate ?? null,
-    rateConfirmed: source.rateConfirmed === true,
+    regularPrice: source.regularPrice ?? candidate.regularPrice ?? null,
+    salePrice: source.salePrice ?? candidate.salePrice ?? null,
+    discountRate: verifiedRate ? Number(source.discountRate) : (source.discountRate ?? null),
+    rateConfirmed: verifiedRate,
     discountRateType: source.discountRateType || "unknown",
-    confirmedDiscountLabel: source.confirmedDiscountLabel || (source.rateConfirmed ? extractDiscountLabel(candidate.product?.itemName || candidate.itemName) : ""),
+    confirmedDiscountLabel: verifiedRate ? (source.confirmedDiscountLabel || extractDiscountLabel(candidate.product?.itemName || candidate.itemName) || `${source.discountRate}%OFF`) : "",
     couponDeadline: source.couponDeadline || "",
     deadlineConfirmed: source.deadlineConfirmed === true,
     couponSource: source.couponSource || "",
@@ -893,7 +896,34 @@ function applyCouponEvidenceToCandidate(candidate, source = {}) {
     detectedDeadlineStart: source.detectedDeadlineStart || "",
     detectedDeadlineSource: source.detectedDeadlineSource || ""
   });
+  if (verifiedRate && source.discountStatus === "confirmed") candidate.discountStatus = "confirmed";
+  if (source.couponConfirmed === true) {
+    candidate.coupon = source.coupon || candidate.coupon || "";
+    candidate.couponInfo = source.couponInfo || candidate.couponInfo || "";
+  }
+  if (candidate.product && typeof candidate.product === "object") {
+    Object.assign(candidate.product, {
+      regularPrice: candidate.regularPrice,
+      salePrice: candidate.salePrice,
+      discountRate: candidate.discountRate,
+      rateConfirmed: candidate.rateConfirmed,
+      discountRateType: candidate.discountRateType,
+      confirmedDiscountLabel: candidate.confirmedDiscountLabel,
+      couponDeadline: candidate.couponDeadline,
+      deadlineConfirmed: candidate.deadlineConfirmed,
+      ...(source.couponConfirmed === true ? { coupon: candidate.coupon, couponInfo: candidate.couponInfo } : {})
+    });
+  }
   return candidate;
+}
+
+function saveRoomDiscountEvidence(candidateId, source = {}) {
+  const candidate = data.candidates.find((item) => item.id === candidateId && isRoomCandidate(item));
+  if (!candidate) return false;
+  applyCouponEvidenceToCandidate(candidate, source);
+  saveData();
+  const saved = data.candidates.find((item) => item.id === candidateId);
+  return Boolean(saved && saved.rateConfirmed === true && saved.discountRateType === "exact" && saved.product?.rateConfirmed === true);
 }
 
 function getCouponDisplayState(product = {}) {
