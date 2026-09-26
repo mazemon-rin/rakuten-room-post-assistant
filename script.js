@@ -236,6 +236,7 @@ function bindForms() {
   $("#settingsForm").addEventListener("submit", saveSettings);
   $("#candidateFilter").addEventListener("input", renderCandidates);
   $("#candidateStatusFilter").addEventListener("change", renderCandidates);
+  $("#reset-room-candidates")?.addEventListener("click", resetRoomCandidates);
   $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
   $("#productSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchUnifiedProducts(); });
   $("#clearSearchConditions")?.addEventListener("click", clearSearchConditions);
@@ -260,6 +261,18 @@ function bindForms() {
   $("#saveAffiliateImport").addEventListener("click", saveAffiliateImport);
   $("#cancelAffiliateImport").addEventListener("click", closeAffiliateImport);
   $("#clearData").addEventListener("click", clearData);
+}
+
+function resetRoomCandidates() {
+  const roomCount = data.candidates.filter(isRoomCandidate).length;
+  if (!roomCount) {
+    toast("リセット対象のROOM投稿候補はありません。");
+    return;
+  }
+  if (!window.confirm(`ROOM投稿候補${roomCount}件を候補一覧からリセットします。投稿履歴・Threads候補・売上データは変更しません。`)) return;
+  data.candidates = data.candidates.filter((item) => !isRoomCandidate(item));
+  saveData();
+  toast(`ROOM投稿候補${roomCount}件をリセットしました。`);
 }
 
 function setProductSearchMode() {
