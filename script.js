@@ -234,35 +234,39 @@ function showTab(tabId) {
 }
 
 function bindForms() {
-  $("#searchForm").addEventListener("submit", searchProducts);
-  $("#settingsForm").addEventListener("submit", saveSettings);
-  $("#candidateFilter").addEventListener("input", renderCandidates);
-  $("#candidateStatusFilter").addEventListener("change", renderCandidates);
-  $("#reset-room-candidates")?.addEventListener("click", resetRoomCandidates);
+  const on = (selector, eventName, handler) => {
+    const element = $(selector);
+    if (element) element.addEventListener(eventName, handler);
+  };
+  on("#searchForm", "submit", searchProducts);
+  on("#settingsForm", "submit", saveSettings);
+  on("#candidateFilter", "input", renderCandidates);
+  on("#candidateStatusFilter", "change", renderCandidates);
+  on("#reset-room-candidates", "click", resetRoomCandidates);
   $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
-  $("#productSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchUnifiedProducts(); });
-  $("#clearSearchConditions")?.addEventListener("click", clearSearchConditions);
-  $("#openRaCoupon")?.addEventListener("click", () => window.open("https://event.rakuten.co.jp/coupon/", "_blank", "noopener,noreferrer"));
-  $("#apply-codex-result").addEventListener("click", applyCodexResult);
-  $("#historyFilter").addEventListener("input", renderHistory);
-  $("#favoriteFilter").addEventListener("input", renderFavorites);
-  $("#favoriteTypeFilter")?.addEventListener("change", renderFavorites);
-  $("#calendarMonth").addEventListener("change", renderCalendar);
-  $("#rankingForm").addEventListener("submit", loadRanking);
-  $("#trendSearchForm")?.addEventListener("submit", (event) => { event.preventDefault(); searchTrendProducts(); });
-  $("#rankingSortOrder").addEventListener("change", () => renderRankingResults(searchResults));
-  $("#queue-selected-ranking").addEventListener("click", queueSelectedRanking);
-  $("#start-sequential-processing").addEventListener("click", startSequentialProcessing);
-  $("#retry-failed-ranking").addEventListener("click", retryFailedRanking);
+  on("#productSearchForm", "submit", (event) => { event.preventDefault(); searchUnifiedProducts(); });
+  on("#clearSearchConditions", "click", clearSearchConditions);
+  on("#openRaCoupon", "click", () => window.open("https://event.rakuten.co.jp/coupon/", "_blank", "noopener,noreferrer"));
+  on("#apply-codex-result", "click", applyCodexResult);
+  on("#historyFilter", "input", renderHistory);
+  on("#favoriteFilter", "input", renderFavorites);
+  on("#favoriteTypeFilter", "change", renderFavorites);
+  on("#calendarMonth", "change", renderCalendar);
+  on("#rankingForm", "submit", loadRanking);
+  on("#trendSearchForm", "submit", (event) => { event.preventDefault(); searchTrendProducts(); });
+  on("#rankingSortOrder", "change", () => renderRankingResults(searchResults));
+  on("#queue-selected-ranking", "click", queueSelectedRanking);
+  on("#start-sequential-processing", "click", startSequentialProcessing);
+  on("#retry-failed-ranking", "click", retryFailedRanking);
   $$("input[name='unifiedCategory']").forEach((input) => input.addEventListener("change", saveRankingCategorySelection));
-  $("#exportJson").addEventListener("click", exportJson);
-  $("#importJson").addEventListener("change", importJson);
-  $("#exportCsv").addEventListener("click", exportCsv);
-  $("#exportSalesCsv").addEventListener("click", exportSalesCsv);
-  $("#affiliateCsvInput").addEventListener("change", importAffiliateCsv);
-  $("#saveAffiliateImport").addEventListener("click", saveAffiliateImport);
-  $("#cancelAffiliateImport").addEventListener("click", closeAffiliateImport);
-  $("#clearData").addEventListener("click", clearData);
+  on("#exportJson", "click", exportJson);
+  on("#importJson", "change", importJson);
+  on("#exportCsv", "click", exportCsv);
+  on("#exportSalesCsv", "click", exportSalesCsv);
+  on("#affiliateCsvInput", "change", importAffiliateCsv);
+  on("#saveAffiliateImport", "click", saveAffiliateImport);
+  on("#cancelAffiliateImport", "click", closeAffiliateImport);
+  on("#clearData", "click", clearData);
 }
 
 function resetRoomCandidates() {

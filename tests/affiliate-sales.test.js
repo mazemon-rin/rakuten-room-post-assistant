@@ -13,11 +13,11 @@ const context = {
 vm.createContext(context);
 vm.runInContext(`${source}\nthis.__sales = { parseAffiliateCsv, getAffiliateImportKey, classifyAffiliateSale, buildAffiliateImportPreview };`, context);
 const sales = context.__sales;
-const csv = fs.readFileSync(path.join(process.env.HOME, "Downloads/order.csv"), "utf8");
+const csv = fs.readFileSync(path.join(__dirname, "fixtures", "affiliate-sales.csv"), "utf8");
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 
 const rows = sales.parseAffiliateCsv(csv);
-assert(rows.length === 1, "order.csv should contain one result row");
+assert(rows.length === 1, "fixture should contain one result row");
 assert(rows[0].occurredAt === "2026-09-19 20:58:57", "occurredAt should be read by header");
 assert(rows[0].amount === 3492 && rows[0].reward === 349, "amount and reward should be numeric");
 assert(rows[0].affiliateStatus === "未確定", "status code should be normalized");
