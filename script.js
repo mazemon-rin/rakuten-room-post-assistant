@@ -252,6 +252,13 @@ document.addEventListener("DOMContentLoaded", () => {
   fillSettings();
   setProductSearchMode();
   renderAll();
+  if (new URLSearchParams(window.location.search).has("room-diagnostic")) {
+    const panel = document.createElement("pre");
+    panel.id = "room-diagnostic-panel";
+    panel.style.cssText = "white-space:pre-wrap;max-height:70vh;overflow:auto;padding:16px;margin:16px;border:2px solid #c65b36;background:#fff;font:12px/1.5 monospace;";
+    panel.textContent = JSON.stringify({ latest: getRoomCandidateDiagnostics(), events: window.__roomCandidateDiagnostics || [] }, null, 2);
+    document.body.prepend(panel);
+  }
 });
 
 function loadData() {
