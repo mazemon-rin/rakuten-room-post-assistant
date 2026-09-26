@@ -957,7 +957,10 @@ function renderUnifiedProductCard(product, index, options = {}) {
   const evidence = getCouponEvidence(product);
   const controls = isCoupon && dealStatus.status === "candidate" ? `<details class="deal-confirmation"><summary>割引・期限を確認</summary><label>確認した割引率<input id="${safeId}-rate" type="number" value="${escapeAttr(String(getCouponCandidateInputValue(product, "rate", couponSearchInputOverrides.get(safeId) || {})))}" oninput="saveCouponSearchInput('${safeId}', 'rate', this.value)"></label><label>確認した期限<input id="${safeId}-deadline" type="text" value="${escapeAttr(String(getCouponCandidateInputValue(product, "deadline", couponSearchInputOverrides.get(safeId) || {})))}" oninput="saveCouponSearchInput('${safeId}', 'deadline', this.value)"></label><label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label><label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label></details>` : "";
   const roomDuplicate = isCoupon && findDuplicate(product);
-  const roomSaveButton = roomDuplicate
+  const existingRoomCandidate = isCoupon && findRoomCandidate(product);
+  const roomSaveButton = roomDuplicate && existingRoomCandidate && !postedHistoryMatch(product)
+    ? `<button class="primary-button" type="button" onclick="restoreRoomCandidateFromSearch(${JSON.stringify(product).replaceAll('"', '&quot;')})">✓ ROOM投稿候補に保存済み（再表示）</button>`
+    : roomDuplicate
     ? `<button class="primary-button" type="button" disabled>✓ ROOM投稿候補に保存済み</button>`
     : `<button class="primary-button" type="button" onclick="${isCoupon ? `saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `quickSaveByIndex(${index})`}">投稿候補に保存</button>`;
   const saveButtons = `${roomSaveButton}<button class="secondary-button" type="button" onclick="${isCoupon ? `saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `threadsOnlySaveByIndex(${index})`}">Threads投稿</button>`;
@@ -1121,6 +1124,33 @@ function saveCouponSearchRoomCandidate(rawProduct, elementPrefix) {
   renderCandidates();
   renderVisibleCouponSearchResults();
   toast("ROOM投稿候補に保存しました。割引・期限の確認状態も保持しています。");
+}
+
+function findRoomCandidate(product, ignoreId = "") {
+  const productCodes = getItemCodes(product);
+  const identity = rankingIdentity(product);
+  return data.candidates.find((item) => {
+    if (!isRoomCandidate(item) || item.id === ignoreId) return false;
+    const itemCodes = getItemCodes(item);
+    if (productCodes.length && itemCodes.length) return itemCodes.some((code) => productCodes.includes(code));
+    return rankingIdentity(item.product || item) === identity;
+  }) || null;
+}
+
+function restoreRoomCandidateFromSearch(rawProduct) {
+  if (postedHistoryMatch(rawProduct)) {
+    toast("投稿履歴にある商品は再表示できません。");
+    return;
+  }
+  const candidate = findRoomCandidate(rawProduct);
+  if (!candidate) {
+    toast("保存済みのROOM投稿候補を確認できませんでした。");
+    return;
+  }
+  candidate.status = candidate.introText ? "文章作成済み" : "未作成";
+  candidate.postStatus = candidate.introText ? "紹介文作成済み" : "紹介文未作成";
+  saveData();
+  toast("保存済みのROOM投稿候補を再表示しました。");
 }
 
 function getThreadsPerformanceFacts(item = {}) {
