@@ -124,14 +124,22 @@ const SNS_POST_TYPES = Object.freeze({
   experience: "体験型"
 });
 const SNS_X_MAX_LENGTH = 140;
-const COUPON_SEARCH_OPTIONS = Object.freeze({
-  "50plus": { label: "50%以上", queries: ["50%OFF", "50％OFF", "半額", "50%OFFクーポン", "50％OFFクーポン", "半額クーポン"] },
-  "50": { label: "50%", queries: ["50%OFF", "50％OFF", "50%OFFクーポン", "50％OFFクーポン", "半額", "半額クーポン"] },
-  "40": { label: "40%", queries: ["40%OFF", "40％OFF", "40%OFFクーポン", "40％OFFクーポン"] },
-  "30": { label: "30%", queries: ["30%OFF", "30％OFF", "30%OFFクーポン", "30％OFFクーポン"] },
-  "20": { label: "20%", queries: ["20%OFF", "20％OFF", "20%OFFクーポン", "20％OFFクーポン"] },
-  "10": { label: "10%", queries: ["10%OFF", "10％OFF", "10%OFFクーポン", "10％OFFクーポン"] }
-});
+const DISCOUNT_RATES = Object.freeze([20, 30, 40, 50, 60, 70, 80, 90]);
+function buildDiscountSearchTerms(rate) {
+  const value = Number(rate);
+  if (!Number.isFinite(value)) return [];
+  return [`${value}%OFF`, `${value}％OFF`, `最大${value}%OFF`, `最大${value}％OFF`, `${value}%OFFクーポン`, `${value}％OFFクーポン`, `最大${value}%OFFクーポン`, `最大${value}％OFFクーポン`];
+}
+function buildDiscountSearchTermsForMinimum(minimum) {
+  const threshold = Number(minimum);
+  if (!Number.isFinite(threshold)) return [];
+  return DISCOUNT_RATES.filter((rate) => rate >= threshold).flatMap(buildDiscountSearchTerms);
+}
+const COUPON_SEARCH_OPTIONS = Object.freeze(Object.fromEntries([
+  ["10", { label: "10%以上", queries: ["10%OFF", "10％OFF", "10%OFFクーポン", "10％OFFクーポン", ...buildDiscountSearchTermsForMinimum(20)] }],
+  ...DISCOUNT_RATES.map((rate) => [String(rate), { label: `${rate}%以上`, queries: buildDiscountSearchTermsForMinimum(rate) }]),
+  ["50plus", { label: "50%以上", queries: buildDiscountSearchTermsForMinimum(50) }]
+]));
 
 function createSnsPosts(existing = {}) {
   const makePost = (post = {}, defaultType) => ({
@@ -664,7 +672,7 @@ function extractDiscountCandidate(itemName = "") {
   for (const match of percentMatches) {
     const before = text.slice(Math.max(0, match.index - 8), match.index);
     const after = text.slice(match.index + match[0].length, match.index + match[0].length + 4);
-    if (/(最大|実質|ポイント)/.test(before) || /^相当/.test(after)) continue;
+    if (/(実質|ポイント)/.test(before) || /^相当/.test(after)) continue;
     const rate = Number(match[1]);
     if (rate > 0 && rate <= 100) return { discountRate: rate, source: "itemName" };
   }
@@ -675,6 +683,27 @@ function extractDiscountCandidate(itemName = "") {
     if (!/(最大|実質|ポイント)/.test(before) && !/^相当/.test(after)) return { discountRate: 50, source: "itemName" };
   }
   return { discountRate: null, source: "" };
+}
+
+function extractDiscountLabel(itemName = "") {
+  const text = normalizeCouponCandidateText(itemName);
+  const match = text.match(/((?:最大)?\d{1,3}\s*%\s*(?:OFF|オフ)(?:クーポン)?)/i);
+  return match ? match[1].replace(/\s+/g, "") : "";
+}
+
+function buildDealHeader(product = {}) {
+  const evidence = getCouponEvidence(product);
+  const label = evidence.rateConfirmed && evidence.discountRateType === "exact"
+    ? (String(product.confirmedDiscountLabel || product.discountLabel || "").trim() || `${evidence.discountRate}%OFF`)
+    : "";
+  if (!label) return "";
+  const regular = Number(product.regularPrice ?? product.originalPrice ?? product.listPrice);
+  const current = Number(product.salePrice ?? product.discountPrice ?? product.campaignPrice ?? product.itemPrice);
+  const pricePart = Number.isFinite(regular) && regular > 0 && Number.isFinite(current) && current > 0
+    ? `${formatYen(regular)}→${formatYen(current)}🉐 `
+    : "🉐 ";
+  const deadline = evidence.deadlineConfirmed && evidence.couponDeadline ? `\n${evidence.couponDeadline}まで` : "";
+  return `${pricePart}${label}${deadline}`;
 }
 
 function parseCouponDatePart(value = "") {
@@ -710,6 +739,7 @@ function extractCouponCandidates(product = {}) {
   const deadline = extractDeadlineCandidate(itemName);
   return {
     detectedDiscountRate: discount.discountRate,
+    detectedDiscountLabel: extractDiscountLabel(itemName),
     detectedDiscountSource: discount.source,
     detectedDeadline: deadline.end,
     detectedDeadlineStart: deadline.start,
@@ -799,7 +829,7 @@ async function searchUnifiedProducts() {
 function matchesCouponDiscountFilter(item, filters = []) {
   const evidence = getCouponEvidence(item);
   if (!evidence.rateConfirmed || evidence.discountRateType === "up_to" || !Number.isFinite(evidence.discountRate)) return false;
-  return filters.some((filter) => filter === "50plus" ? evidence.discountRate >= 50 : evidence.discountRate === Number(filter));
+  return filters.some((filter) => evidence.discountRate >= (filter === "50plus" ? 50 : Number(filter)));
 }
 
 function evaluateDealStatus(product = {}, dealCondition = "") {
@@ -810,10 +840,11 @@ function evaluateDealStatus(product = {}, dealCondition = "") {
   if (!hasCondition) return { status: "unknown", rate: null, label: "お買い得情報：指定なし" };
   if (evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate)) {
     const meets = evidence.discountRate >= threshold;
-    return { status: meets ? "confirmed" : "unknown", rate: evidence.discountRate, label: meets ? `🟢 ${evidence.discountRate}%OFF確認済み` : `割引率${evidence.discountRate}%（条件未達）` };
+    const label = product.confirmedDiscountLabel || `${evidence.discountRate}%OFF`;
+    return { status: meets ? "confirmed" : "unknown", rate: evidence.discountRate, label: meets ? `🟢 ${label}確認済み` : `割引率${evidence.discountRate}%（条件未達）` };
   }
   if (Number.isFinite(detected.detectedDiscountRate) && detected.detectedDiscountRate >= threshold) {
-    return { status: "candidate", rate: detected.detectedDiscountRate, label: `🟡 ${detected.detectedDiscountRate}%OFF候補・要確認` };
+    return { status: "candidate", rate: detected.detectedDiscountRate, label: `🟡 ${detected.detectedDiscountLabel || `${detected.detectedDiscountRate}%OFF`}候補・要確認` };
   }
   return { status: "unknown", rate: null, label: "割引情報不明" };
 }
@@ -851,6 +882,7 @@ function applyCouponEvidenceToCandidate(candidate, source = {}) {
     discountRate: source.discountRate ?? null,
     rateConfirmed: source.rateConfirmed === true,
     discountRateType: source.discountRateType || "unknown",
+    confirmedDiscountLabel: source.confirmedDiscountLabel || (source.rateConfirmed ? extractDiscountLabel(candidate.product?.itemName || candidate.itemName) : ""),
     couponDeadline: source.couponDeadline || "",
     deadlineConfirmed: source.deadlineConfirmed === true,
     couponSource: source.couponSource || "",
@@ -945,7 +977,8 @@ function renderCouponSearchCard(product) {
 
 function renderCouponSearchResults(products = []) {
   const container = $("#couponSearchResults");
-  couponSearchResults = products.filter((product) => !postedHistoryMatch(product));
+  const filters = getCouponSearchKeywords();
+  couponSearchResults = products.filter((product) => !postedHistoryMatch(product) && (!filters.length || matchesCouponDiscountFilter(product, filters) || evaluateDealStatus(product, filters[0]).status === "candidate"));
   couponSearchResults.forEach((product) => { product.sourceTypes = [...new Set([...(product.sourceTypes || []), "deal"])]; });
   couponVisibleCount = Math.min(30, couponSearchResults.length);
   renderVisibleCouponSearchResults();
@@ -1006,7 +1039,7 @@ async function searchCouponProducts(options = {}) {
   const results = preparedResults.map((product) => ({ ...product, dealStatus: evaluateDealStatus(product, filters[0] || "") }));
   const postedExcludedCount = preparedResults.filter((product) => postedHistoryMatch(product)).length;
   renderCouponSearchResults(results);
-  const visibleResults = results.filter((product) => !postedHistoryMatch(product));
+  const visibleResults = results.filter((product) => !postedHistoryMatch(product) && (!filters.length || matchesCouponDiscountFilter(product, filters) || product.dealStatus.status === "candidate"));
   const statusCounts = summarizeDealStatuses(visibleResults);
   message.textContent = filters.length
     ? `API取得：${preparedResults.length}件 / 投稿済み除外：${postedExcludedCount}件 / 確認済み：${statusCounts.confirmed}件 / 候補・要確認：${statusCounts.candidate}件 / 割引情報未確認：${statusCounts.unknown}件 / 表示：${couponSearchResults.length}件。\n${couponSearchResults.length}件のお買い得検索候補を表示しています。`
@@ -1022,7 +1055,7 @@ function getCouponSearchProductWithEvidence(rawProduct, elementPrefix) {
   const deadlineConfirmed = Boolean(document.getElementById(`${elementPrefix}-deadline-ok`)?.checked);
   const discountRate = Number(rateInput?.value || product.discountRate);
   if (rateConfirmed && (!Number.isFinite(discountRate) || discountRate <= 0 || discountRate > 100)) { toast("確認済みの割引率を入力してください。"); return; }
-  return { ...product, discountRate: Number.isFinite(discountRate) && discountRate > 0 ? discountRate : null, rateConfirmed, discountRateType: rateConfirmed ? "exact" : "unknown", couponDeadline: deadlineInput?.value.trim() || product.couponDeadline || "", deadlineConfirmed, couponSource: product.couponSource || "楽天商品検索API（人間確認）", couponCheckedAt: new Date().toISOString(), detectedDiscountRate: product.detectedDiscountRate ?? detected.detectedDiscountRate, detectedDiscountSource: product.detectedDiscountSource || detected.detectedDiscountSource, detectedDeadline: product.detectedDeadline || detected.detectedDeadline, detectedDeadlineStart: product.detectedDeadlineStart || detected.detectedDeadlineStart, detectedDeadlineSource: product.detectedDeadlineSource || detected.detectedDeadlineSource };
+  return { ...product, discountRate: Number.isFinite(discountRate) && discountRate > 0 ? discountRate : null, rateConfirmed, discountRateType: rateConfirmed ? "exact" : "unknown", confirmedDiscountLabel: rateConfirmed ? (product.confirmedDiscountLabel || detected.detectedDiscountLabel || `${discountRate}%OFF`) : "", couponDeadline: deadlineInput?.value.trim() || product.couponDeadline || "", deadlineConfirmed, couponSource: product.couponSource || "楽天商品検索API（人間確認）", couponCheckedAt: new Date().toISOString(), detectedDiscountRate: product.detectedDiscountRate ?? detected.detectedDiscountRate, detectedDiscountSource: product.detectedDiscountSource || detected.detectedDiscountSource, detectedDiscountLabel: product.detectedDiscountLabel || detected.detectedDiscountLabel, detectedDeadline: product.detectedDeadline || detected.detectedDeadline, detectedDeadlineStart: product.detectedDeadlineStart || detected.detectedDeadlineStart, detectedDeadlineSource: product.detectedDeadlineSource || detected.detectedDeadlineSource };
 }
 
 function saveCouponSearchCandidate(rawProduct, elementPrefix) {
@@ -1694,6 +1727,9 @@ function generatePrompt() {
 商品URL：${currentProduct.itemUrl}
 セール情報（商品データに明記された項目のみ）：
 ${getSaleInfo(currentProduct) || "記載なし"}
+
+確認済みのお得情報ヘッダー（確認済みの場合だけ紹介文の冒頭へ使用）：
+${buildDealHeader(currentProduct) || "なし。未確認の割引率・クーポン・期限は書かない。"}
 
 クーポン最終有効日の扱い：
 ${getRoomIntroDeadlineRule(currentProduct)}
