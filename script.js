@@ -3723,7 +3723,7 @@ function findPostedHistoryRecord(item) {
   return data.history.find((historyItem) => (historyItem.itemCode || historyItem.product?.itemCode || "") === itemCode) || null;
 }
 
-function createHistoryRecord(candidate, { roomUrl = candidate.roomUrl || "", postedAt = "" } = {}) {
+function createHistoryRecord(candidate, { roomUrl = candidate.roomUrl || "", postedAt = "", introText = candidate.introText || "" } = {}) {
   const product = candidate.product || {};
   const record = {
     id: candidate.id,
@@ -3733,7 +3733,7 @@ function createHistoryRecord(candidate, { roomUrl = candidate.roomUrl || "", pos
     itemUrl: candidate.itemUrl || product.itemUrl || product.affiliateUrl || "",
     imageUrl: candidate.imageUrl || product.imageUrl || "",
     postedAt: postedAt || candidate.postedAt || "",
-    introText: candidate.introText || "",
+    introText,
     hashTags: candidate.hashTags || "",
     roomUrl,
     genreId: candidate.genreId || product.genreId || product.categoryId || "",
@@ -3757,7 +3757,7 @@ function createHistoryRecord(candidate, { roomUrl = candidate.roomUrl || "", pos
   return record;
 }
 
-function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "" } = {}) {
+function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "", introText = item.introText || "" } = {}) {
   const existingHistory = findPostedHistoryRecord(item);
   const resolvedPostedAt = existingHistory?.postedAt || item.postedAt || postedAt || new Date().toISOString();
   const resolvedRoomUrl = roomUrl || item.roomUrl || existingHistory?.roomUrl || "";
@@ -3766,7 +3766,8 @@ function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "" }
   item.postStatus = "投稿済み";
   item.postedAt = resolvedPostedAt;
   item.roomUrl = resolvedRoomUrl;
-  const historySnapshot = createHistoryRecord(item, { roomUrl: resolvedRoomUrl, postedAt: resolvedPostedAt });
+  item.introText = introText;
+  const historySnapshot = createHistoryRecord(item, { roomUrl: resolvedRoomUrl, postedAt: resolvedPostedAt, introText });
   historySnapshot.id = historyId;
   historySnapshot.originalPhoto = existingHistory?.originalPhoto ?? historySnapshot.originalPhoto;
   if (existingHistory) Object.assign(existingHistory, historySnapshot);
@@ -3793,7 +3794,12 @@ function completePendingRoomPost() {
   }
   const previousPending = pending;
   try {
-    recordRoomPosting(item, { postedAt: new Date().toISOString() });
+    const introText = String(pending.introText || item.introText || "").trim();
+    if (!introText) {
+      toast("投稿開始時の紹介文が保存されていないため、投稿完了を記録できません。紹介文を入力してから投稿を開始してください。");
+      return false;
+    }
+    recordRoomPosting(item, { postedAt: new Date().toISOString(), introText });
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     const savedHistory = (saved.history || []).find((entry) => (entry.itemCode || entry.product?.itemCode || "") === pending.itemCode);
@@ -3943,11 +3949,20 @@ async function startCodexPost(id) {
     toast("商品URLがないため、Codex投稿準備を開始できません。");
     return;
   }
+  const introText = String(candidate.introText || "").trim();
+  if (!introText) {
+    toast("紹介文がアプリに保存されていません。紹介文を入力・保存してからROOM投稿を開始してください。");
+    openDetailByCandidate(id);
+    return;
+  }
+  candidate.introText = introText;
+  saveData();
   const instructions = buildCodexPostInstructions(candidate);
   data.pendingRoomPost = {
     candidateId: candidate.id,
     itemCode,
     title: candidate.title || candidate.product?.itemName || "",
+    introText,
     startedAt: new Date().toISOString()
   };
   candidate.introPrompt = instructions;
@@ -4008,10 +4023,13 @@ function prepareCandidatePost(id) {
     "6. 待機開始時に『投稿準備が完了しました。60秒以内にROOMの「完了」ボタンを押してください。』と表示する",
     "7. 60秒経過後も完了操作が確認できなければ『60秒以内に完了操作が確認できなかったため停止しました。』と表示して停止する"
   ].join("\n");
+  candidate.introText = candidate.introText.trim();
+  saveData();
   data.pendingRoomPost = {
     candidateId: candidate.id,
     itemCode: candidate.itemCode || candidate.product?.itemCode || "",
     title: candidate.title || candidate.product?.itemName || "",
+    introText: candidate.introText.trim(),
     startedAt: new Date().toISOString()
   };
   candidate.postStatus = "確認待ち";

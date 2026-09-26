@@ -499,6 +499,28 @@ assert(nestedItemCandidate.itemCode === "nested-room-1", "Coupon ROOM H: nested 
 const failedCodexCandidate = { status: "投稿待ち", postStatus: "Codex処理中" };
 assert(scoring.resetCodexCandidateAfterFailure(failedCodexCandidate) && failedCodexCandidate.postStatus === "エラー" && failedCodexCandidate.status === "投稿待ち", "Codex recovery: missing ITEM_CODE returns the candidate to a retryable error state");
 
+const introCandidate = {
+  id: "intro-persistence-candidate",
+  itemCode: "intro-persistence-1",
+  title: "紹介文保存テスト",
+  shopName: "テストショップ",
+  itemUrl: "https://example.com/intro-persistence-1",
+  imageUrl: "https://example.com/intro-persistence-1.jpg",
+  introText: "テスト用紹介文",
+  hashTags: "#テスト",
+  product: { itemCode: "intro-persistence-1", itemName: "商品詳細", itemCaption: "大きな候補データ" },
+  snsPosts: scoring.createSnsPosts()
+};
+const pendingIntro = introCandidate.introText;
+const introHistory = scoring.createHistoryRecord(introCandidate, { postedAt: "2026-09-26T00:00:00.000Z", introText: pendingIntro });
+assert(introHistory.introText === pendingIntro, "Intro persistence A: pending intro text reaches lightweight history");
+assert(!Object.prototype.hasOwnProperty.call(introHistory, "product") && !Object.prototype.hasOwnProperty.call(introHistory, "introPrompt") && !Object.prototype.hasOwnProperty.call(introHistory, "priorityReasons"), "Intro persistence B: lightweight history excludes prompt and product data");
+const previousHistory = scoring.data.history;
+scoring.data.history = [];
+scoring.recordRoomPosting(introCandidate, { postedAt: "2026-09-26T00:00:00.000Z", introText: pendingIntro });
+assert(scoring.data.history[0].introText === pendingIntro && introCandidate.introText === pendingIntro, "Intro persistence C: posting record keeps the same intro text on candidate and history");
+scoring.data.history = previousHistory;
+
 console.log(JSON.stringify({
   caseA: { trendFit: caseA.selectionScore.trendFit, opportunity: caseA.selectionScore.opportunity, total: caseA.selectionScore.total },
   caseB: { trendFit: caseB.selectionScore.trendFit, opportunity: caseB.selectionScore.opportunity, total: caseB.selectionScore.total },
