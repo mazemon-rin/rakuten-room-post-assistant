@@ -1971,8 +1971,8 @@ function quickSaveThreadsOnly(product) {
 }
 
 function renderAll() {
-  renderDashboard();
   renderCandidates();
+  renderDashboard();
   renderHistory();
   renderFavorites();
   renderCalendar();
