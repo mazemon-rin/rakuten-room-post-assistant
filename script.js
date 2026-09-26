@@ -3723,6 +3723,40 @@ function findPostedHistoryRecord(item) {
   return data.history.find((historyItem) => (historyItem.itemCode || historyItem.product?.itemCode || "") === itemCode) || null;
 }
 
+function createHistoryRecord(candidate, { roomUrl = candidate.roomUrl || "", postedAt = "" } = {}) {
+  const product = candidate.product || {};
+  const record = {
+    id: candidate.id,
+    itemCode: candidate.itemCode || product.itemCode || "",
+    title: candidate.title || product.itemName || "",
+    shopName: candidate.shopName || product.shopName || "",
+    itemUrl: candidate.itemUrl || product.itemUrl || product.affiliateUrl || "",
+    imageUrl: candidate.imageUrl || product.imageUrl || "",
+    postedAt: postedAt || candidate.postedAt || "",
+    introText: candidate.introText || "",
+    hashTags: candidate.hashTags || "",
+    roomUrl,
+    genreId: candidate.genreId || product.genreId || product.categoryId || "",
+    categoryName: candidate.categoryName || product.categoryName || "",
+    postType: candidate.postType || "normal",
+    trustStatus: candidate.trustStatus || "",
+    selectionScoreTotal: candidate.selectionScoreTotal ?? getSelectionTotal(candidate),
+    selectionVersion: candidate.selectionVersion || "",
+    snsPosts: createSnsPosts(candidate.snsPosts),
+    originalPhoto: candidate.originalPhoto ?? false,
+    rank: candidate.rank ?? product.rank ?? "",
+    apiRank: candidate.apiRank ?? product.apiRank ?? "",
+    sourceRank: candidate.sourceRank ?? product.sourceRank ?? "",
+    matchedTrendKeywords: [...(candidate.matchedTrendKeywords || product.matchedTrendKeywords || [])],
+    selectedCollection: candidate.selectedCollection || "",
+    recommendedCollection: candidate.recommendedCollection || "",
+    memo: candidate.memo || ""
+  };
+  const affiliateUrl = candidate.affiliateUrl || product.affiliateUrl || "";
+  if (affiliateUrl) record.affiliateUrl = affiliateUrl;
+  return record;
+}
+
 function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "" } = {}) {
   const existingHistory = findPostedHistoryRecord(item);
   const resolvedPostedAt = existingHistory?.postedAt || item.postedAt || postedAt || new Date().toISOString();
@@ -3732,14 +3766,9 @@ function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "" }
   item.postStatus = "投稿済み";
   item.postedAt = resolvedPostedAt;
   item.roomUrl = resolvedRoomUrl;
-  const historySnapshot = {
-    ...item,
-    id: historyId,
-    postedAt: resolvedPostedAt,
-    roomUrl: resolvedRoomUrl,
-    snsPosts: createSnsPosts(item.snsPosts),
-    originalPhoto: existingHistory?.originalPhoto ?? false
-  };
+  const historySnapshot = createHistoryRecord(item, { roomUrl: resolvedRoomUrl, postedAt: resolvedPostedAt });
+  historySnapshot.id = historyId;
+  historySnapshot.originalPhoto = existingHistory?.originalPhoto ?? historySnapshot.originalPhoto;
   if (existingHistory) Object.assign(existingHistory, historySnapshot);
   else data.history.unshift(historySnapshot);
   return existingHistory || historySnapshot;

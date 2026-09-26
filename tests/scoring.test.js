@@ -28,7 +28,7 @@ const context = {
   window: {}
 };
 vm.createContext(context);
- vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, data };`, context);
+ vm.runInContext(`${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, data };`, context);
 
 const scoring = context.__scoring;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -288,6 +288,41 @@ scoring.data.candidates.push(roomPostingCandidate);
 const firstHistory = scoring.recordRoomPosting(roomPostingCandidate, { roomUrl, postedAt: "2026-09-22T10:00:00.000Z" });
 assert(roomPostingCandidate.status === "投稿済み" && roomPostingCandidate.postStatus === "投稿済み", "ROOM URL registration: candidate becomes posted");
 assert(firstHistory.roomUrl === roomUrl && firstHistory.postedAt === "2026-09-22T10:00:00.000Z" && scoring.data.history.length === 1, "ROOM URL registration: URL and postedAt are stored in one history record");
+const heavyHistoryCandidate = {
+  id: "history-lightweight-test",
+  itemCode: "shop:lightweight-test",
+  title: "軽量化テスト商品",
+  shopName: "テストショップ",
+  itemUrl: "https://example.com/lightweight-test",
+  imageUrl: "https://example.com/lightweight.jpg",
+  introText: "保存する紹介文",
+  hashTags: "#テスト",
+  affiliateUrl: "https://hb.afl.rakuten.co.jp/test",
+  genreId: "100",
+  postType: "normal",
+  trustStatus: "通常投稿候補",
+  selectionScoreTotal: 80,
+  selectionVersion: "v1",
+  product: {
+    itemCode: "shop:lightweight-test",
+    itemName: "軽量化テスト商品",
+    itemCaption: "大きな商品説明".repeat(1000),
+    Item: "大きなAPIラッパー".repeat(1000),
+    mediumImageUrls: [{ imageUrl: "https://example.com/medium.jpg".repeat(1000) }],
+    smallImageUrls: [{ imageUrl: "https://example.com/small.jpg".repeat(1000) }]
+  },
+  introPrompt: "大きな投稿指示".repeat(1000),
+  priorityReasons: ["大きな選定理由".repeat(1000)],
+  snsPosts: scoring.createSnsPosts()
+};
+const legacyHistoryJson = JSON.stringify({ ...heavyHistoryCandidate, postedAt: "2026-09-22T10:00:00.000Z", roomUrl });
+const lightweightHistory = scoring.createHistoryRecord(heavyHistoryCandidate, { postedAt: "2026-09-22T10:00:00.000Z", roomUrl });
+const lightweightHistoryJson = JSON.stringify(lightweightHistory);
+assert(lightweightHistory.id === heavyHistoryCandidate.id && lightweightHistory.itemCode === heavyHistoryCandidate.itemCode && lightweightHistory.title === heavyHistoryCandidate.title && lightweightHistory.shopName === heavyHistoryCandidate.shopName, "History lightweight: identity fields are retained");
+assert(lightweightHistory.itemUrl === heavyHistoryCandidate.itemUrl && lightweightHistory.imageUrl === heavyHistoryCandidate.imageUrl && lightweightHistory.postedAt === "2026-09-22T10:00:00.000Z" && lightweightHistory.roomUrl === roomUrl, "History lightweight: URL, image, postedAt, and ROOM URL are retained");
+assert(lightweightHistory.introText === heavyHistoryCandidate.introText && lightweightHistory.hashTags === heavyHistoryCandidate.hashTags && lightweightHistory.affiliateUrl === heavyHistoryCandidate.affiliateUrl && lightweightHistory.snsPosts, "History lightweight: ROOM/SNS and affiliate fields are retained");
+assert(!Object.prototype.hasOwnProperty.call(lightweightHistory, "product") && !Object.prototype.hasOwnProperty.call(lightweightHistory, "introPrompt") && !Object.prototype.hasOwnProperty.call(lightweightHistory, "priorityReasons"), "History lightweight: large candidate-only fields are excluded");
+assert(lightweightHistoryJson.length < legacyHistoryJson.length && Math.round((1 - lightweightHistoryJson.length / legacyHistoryJson.length) * 100) >= 80, `History lightweight: JSON size is reduced (${legacyHistoryJson.length} -> ${lightweightHistoryJson.length})`);
 const originalPostedAt = firstHistory.postedAt;
 scoring.recordRoomPosting(roomPostingCandidate, { roomUrl });
 assert(scoring.data.history.length === 1 && scoring.data.history[0].postedAt === originalPostedAt, "ROOM URL registration: repeated completion does not duplicate history or reset postedAt");
