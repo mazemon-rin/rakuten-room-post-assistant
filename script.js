@@ -6,6 +6,7 @@ const RANKING_MAX_RETRIES = 1;
 const RANKING_REQUEST_TIMEOUT_MS = 15000;
 const SELECTION_SCORE_VERSION = "2.7.1";
 const APP_VERSION = "2.7.1.2";
+const ROOM_DIAGNOSTIC_BUILD = "20260926-candidate-runtime-1";
 const RECOMMENDATION_TITLE_MAX_LENGTH = 40;
 const TREND_KEYWORD_MAX = 5;
 const TREND_PRODUCTS_PER_KEYWORD = 5;
@@ -198,6 +199,53 @@ let salesDashboardView = "all";
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
+function recordRoomDiagnostic(event, details = {}) {
+  const entry = { event, at: new Date().toISOString(), buildId: ROOM_DIAGNOSTIC_BUILD, ...details };
+  window.__roomCandidateDiagnostics = window.__roomCandidateDiagnostics || [];
+  window.__roomCandidateDiagnostics.push(entry);
+  console.info("[ROOM_DIAGNOSTIC]", entry);
+  return entry;
+}
+
+function getRoomCandidateDiagnostics() {
+  const today = new Date().toISOString().slice(0, 10);
+  const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+  const history = Array.isArray(data?.history) ? data.history : [];
+  const items = candidates.map((item) => ({
+    id: item.id || "",
+    itemCode: item.itemCode || item.product?.itemCode || "",
+    destination: item.destination || "",
+    status: item.status || "",
+    postStatus: item.postStatus || "",
+    postedAt: item.postedAt || "",
+    isRoomCandidate: isRoomCandidate(item),
+    postedHistoryMatch: postedHistoryMatch(item),
+    isVisibleRoomCandidate: isVisibleRoomCandidate(item)
+  }));
+  const roomItems = candidates.filter(isRoomCandidate);
+  const visibleItems = candidates.filter(isVisibleRoomCandidate);
+  const todayItems = visibleItems.filter((item) => String(item.savedAt || "").slice(0, 10) === today);
+  const unpostedItems = visibleItems.filter((item) => item.status !== "投稿済み");
+  const result = {
+    buildId: ROOM_DIAGNOSTIC_BUILD,
+    appVersion: APP_VERSION,
+    href: window.location.href,
+    candidatesLength: candidates.length,
+    historyLength: history.length,
+    roomCandidateCount: roomItems.length,
+    visibleRoomCandidateCount: visibleItems.length,
+    todayCandidateCount: todayItems.length,
+    unpostedProductCount: unpostedItems.length,
+    roomCandidateCountDom: $("#roomCandidateCount")?.textContent || "",
+    candidateCardCount: $("#candidateList")?.querySelectorAll(".candidate-card").length || 0,
+    candidates: items
+  };
+  recordRoomDiagnostic("snapshot", result);
+  return result;
+}
+
+window.getRoomCandidateDiagnostics = getRoomCandidateDiagnostics;
+
 document.addEventListener("DOMContentLoaded", () => {
   bindTabs();
   bindForms();
@@ -207,12 +255,17 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function loadData() {
+  // `data` is initialized by this function, so the initial pre-load value is unavailable.
+  const before = null;
+  let loaded;
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return { ...defaultData, ...saved, candidates: normalizeSnsRecords(Array.isArray(saved?.candidates) ? saved.candidates : []), history: normalizeSnsRecords(Array.isArray(saved?.history) ? saved.history : []), sales: Array.isArray(saved?.sales) ? saved.sales : [], settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
+    loaded = { ...defaultData, ...saved, candidates: normalizeSnsRecords(Array.isArray(saved?.candidates) ? saved.candidates : []), history: normalizeSnsRecords(Array.isArray(saved?.history) ? saved.history : []), sales: Array.isArray(saved?.sales) ? saved.sales : [], settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
   } catch {
-    return structuredClone(defaultData);
+    loaded = structuredClone(defaultData);
   }
+  recordRoomDiagnostic("loadData", { before, after: { candidatesLength: loaded.candidates.length, historyLength: loaded.history.length } });
+  return loaded;
 }
 
 function saveData() {
@@ -1990,6 +2043,7 @@ function renderDashboard() {
     ["今月の投稿数", data.history.filter((item) => item.postedAt.slice(0, 7) === month).length],
     ["重複候補数", duplicateCount]
   ];
+  recordRoomDiagnostic("renderDashboard", { candidatesLength: data.candidates.length, todayCandidateCount: stats[0][1], unpostedProductCount: stats[1][1] });
   $("#statsGrid").innerHTML = stats.map(([label, value]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join("");
   $("#recentCandidates").innerHTML = compactItems(data.candidates.filter(isRoomCandidate).slice(0, 5));
   $("#recentHistory").innerHTML = compactItems(data.history.slice(0, 5));
@@ -2001,6 +2055,7 @@ function compactItems(items) {
 }
 
 function renderCandidates() {
+  recordRoomDiagnostic("renderCandidates:start", { candidatesLength: data.candidates.length, roomCandidateCount: data.candidates.filter(isRoomCandidate).length, visibleRoomCandidateCount: data.candidates.filter(isVisibleRoomCandidate).length });
   let trustUpdated = false;
   data.candidates.forEach((item) => {
     if (!item.trustStatus) {
@@ -2025,6 +2080,11 @@ function renderCandidates() {
   updateCandidateViewCounts();
   const keyword = $("#candidateFilter")?.value?.trim() || "";
   const status = $("#candidateStatusFilter")?.value || "";
+  const statusItems = data.candidates.filter((item) => isVisibleRoomCandidate(item) && (!status || (item.postStatus || item.status || "投稿待ち") === status || item.status === status));
+  const keywordItems = statusItems.filter((item) => {
+    const text = `${item.title} ${item.shopName} ${item.memo}`.toLowerCase();
+    return !keyword || text.includes(keyword.toLowerCase());
+  });
   const items = data.candidates.filter((item) => {
     if (!isVisibleRoomCandidate(item)) return false;
     const text = `${item.title} ${item.shopName} ${item.memo}`.toLowerCase();
@@ -2032,6 +2092,7 @@ function renderCandidates() {
     return (!keyword || text.includes(keyword.toLowerCase())) && (!status || postStatus === status || item.status === status);
   });
   $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
+  recordRoomDiagnostic("renderCandidates:complete", { candidatesLength: data.candidates.length, roomCandidateCount: data.candidates.filter(isRoomCandidate).length, visibleRoomCandidateCount: data.candidates.filter(isVisibleRoomCandidate).length, statusFilterCount: statusItems.length, keywordFilterCount: keywordItems.length, finalItemsLength: items.length, candidateCardCount: $("#candidateList")?.querySelectorAll(".candidate-card").length || 0 });
   renderThreadsOnlyCandidates();
   renderQueueProgress();
   renderCollectionSummary();
@@ -2042,6 +2103,7 @@ function updateCandidateViewCounts() {
   const threadsCount = data.candidates.filter(isThreadsOnlyItem).length;
   if ($("#roomCandidateCount")) $("#roomCandidateCount").textContent = roomCount;
   if ($("#threadsCandidateCount")) $("#threadsCandidateCount").textContent = threadsCount;
+  recordRoomDiagnostic("updateCandidateViewCounts", { candidatesLength: data.candidates.length, roomCount, domRoomCount: $("#roomCandidateCount")?.textContent || "" });
 }
 
 function renderThreadsOnlyCandidates() {
