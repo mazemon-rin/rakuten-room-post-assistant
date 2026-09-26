@@ -6,7 +6,6 @@ const RANKING_MAX_RETRIES = 1;
 const RANKING_REQUEST_TIMEOUT_MS = 15000;
 const SELECTION_SCORE_VERSION = "2.7.1";
 const APP_VERSION = "2.7.1.2";
-const ROOM_DIAGNOSTIC_BUILD = "20260926-candidate-runtime-1";
 const RECOMMENDATION_TITLE_MAX_LENGTH = 40;
 const TREND_KEYWORD_MAX = 5;
 const TREND_PRODUCTS_PER_KEYWORD = 5;
@@ -199,104 +198,21 @@ let salesDashboardView = "all";
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
-function recordRoomDiagnostic(event, details = {}) {
-  const entry = { event, at: new Date().toISOString(), buildId: ROOM_DIAGNOSTIC_BUILD, ...details };
-  window.__roomCandidateDiagnostics = window.__roomCandidateDiagnostics || [];
-  window.__roomCandidateDiagnostics.push(entry);
-  console.info("[ROOM_DIAGNOSTIC]", entry);
-  return entry;
-}
-
-function recordRoomRenderStep(step, status, error, candidate) {
-  const item = candidate || {};
-  const entry = {
-    step,
-    status,
-    candidateId: item.id || "",
-    itemCode: item.itemCode || item.product?.itemCode || ""
-  };
-  if (error) {
-    entry.error = { name: error.name || "Error", message: error.message || String(error) };
-  }
-  window.__roomRenderDiagnostics = window.__roomRenderDiagnostics || [];
-  window.__roomRenderDiagnostics.push(entry);
-  recordRoomDiagnostic("renderCandidates:step", entry);
-  return entry;
-}
-
-function getRoomCandidateDiagnostics() {
-  const today = new Date().toISOString().slice(0, 10);
-  const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
-  const history = Array.isArray(data?.history) ? data.history : [];
-  const items = candidates.map((item) => ({
-    id: item.id || "",
-    itemCode: item.itemCode || item.product?.itemCode || "",
-    destination: item.destination || "",
-    status: item.status || "",
-    postStatus: item.postStatus || "",
-    postedAt: item.postedAt || "",
-    isRoomCandidate: isRoomCandidate(item),
-    postedHistoryMatch: postedHistoryMatch(item),
-    isVisibleRoomCandidate: isVisibleRoomCandidate(item)
-  }));
-  const roomItems = candidates.filter(isRoomCandidate);
-  const visibleItems = candidates.filter(isVisibleRoomCandidate);
-  const todayItems = visibleItems.filter((item) => String(item.savedAt || "").slice(0, 10) === today);
-  const unpostedItems = visibleItems.filter((item) => item.status !== "投稿済み");
-  const result = {
-    buildId: ROOM_DIAGNOSTIC_BUILD,
-    appVersion: APP_VERSION,
-    href: window.location.href,
-    candidatesLength: candidates.length,
-    historyLength: history.length,
-    roomCandidateCount: roomItems.length,
-    visibleRoomCandidateCount: visibleItems.length,
-    todayCandidateCount: todayItems.length,
-    unpostedProductCount: unpostedItems.length,
-    roomCandidateCountDom: $("#roomCandidateCount")?.textContent || "",
-    candidateCardCount: $("#candidateList")?.querySelectorAll(".candidate-card").length || 0,
-    candidates: items
-  };
-  recordRoomDiagnostic("snapshot", result);
-  return result;
-}
-
-window.getRoomCandidateDiagnostics = getRoomCandidateDiagnostics;
-
 document.addEventListener("DOMContentLoaded", () => {
-  const diagnosticMode = new URLSearchParams(window.location.search).has("room-diagnostic");
-  window.__roomDiagnosticMode = diagnosticMode;
   bindTabs();
   bindForms();
   fillSettings();
   setProductSearchMode();
-  try {
-    renderAll();
-  } catch (error) {
-    recordRoomDiagnostic("renderAll:error", { error: { name: error.name || "Error", message: error.message || String(error) } });
-  } finally {
-    if (new URLSearchParams(window.location.search).has("room-diagnostic")) {
-      const panel = document.createElement("pre");
-      panel.id = "room-diagnostic-panel";
-      panel.style.cssText = "white-space:pre-wrap;max-height:70vh;overflow:auto;padding:16px;margin:16px;border:2px solid #c65b36;background:#fff;font:12px/1.5 monospace;";
-      panel.textContent = JSON.stringify({ latest: getRoomCandidateDiagnostics(), renderSteps: window.__roomRenderDiagnostics || [], events: window.__roomCandidateDiagnostics || [] }, null, 2);
-      document.body.prepend(panel);
-    }
-  }
+  renderAll();
 });
 
 function loadData() {
-  // `data` is initialized by this function, so the initial pre-load value is unavailable.
-  const before = null;
-  let loaded;
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    loaded = { ...defaultData, ...saved, candidates: normalizeSnsRecords(Array.isArray(saved?.candidates) ? saved.candidates : []), history: normalizeSnsRecords(Array.isArray(saved?.history) ? saved.history : []), sales: Array.isArray(saved?.sales) ? saved.sales : [], settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
+    return { ...defaultData, ...saved, candidates: normalizeSnsRecords(Array.isArray(saved?.candidates) ? saved.candidates : []), history: normalizeSnsRecords(Array.isArray(saved?.history) ? saved.history : []), sales: Array.isArray(saved?.sales) ? saved.sales : [], settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
   } catch {
-    loaded = structuredClone(defaultData);
+    return structuredClone(defaultData);
   }
-  recordRoomDiagnostic("loadData", { before, after: { candidatesLength: loaded.candidates.length, historyLength: loaded.history.length } });
-  return loaded;
 }
 
 function saveData() {
@@ -2074,7 +1990,6 @@ function renderDashboard() {
     ["今月の投稿数", data.history.filter((item) => item.postedAt.slice(0, 7) === month).length],
     ["重複候補数", duplicateCount]
   ];
-  recordRoomDiagnostic("renderDashboard", { candidatesLength: data.candidates.length, todayCandidateCount: stats[0][1], unpostedProductCount: stats[1][1] });
   $("#statsGrid").innerHTML = stats.map(([label, value]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join("");
   $("#recentCandidates").innerHTML = compactItems(data.candidates.filter(isRoomCandidate).slice(0, 5));
   $("#recentHistory").innerHTML = compactItems(data.history.slice(0, 5));
@@ -2086,9 +2001,6 @@ function compactItems(items) {
 }
 
 function renderCandidates() {
-  window.__roomRenderDiagnostics = [];
-  recordRoomRenderStep("start", "OK");
-  recordRoomDiagnostic("renderCandidates:start", { candidatesLength: data.candidates.length, roomCandidateCount: data.candidates.filter(isRoomCandidate).length, visibleRoomCandidateCount: data.candidates.filter(isVisibleRoomCandidate).length });
   let trustUpdated = false;
   data.candidates.forEach((item) => {
     if (!item.trustStatus) {
@@ -2109,62 +2021,20 @@ function renderCandidates() {
       if (beforeCollectionState !== `${item.postType}|${item.recommendedCollection}|${item.collectionStatus}`) trustUpdated = true;
     }
   });
-  if (trustUpdated && !window.__roomDiagnosticMode) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  try {
-    updateCandidateViewCounts();
-    recordRoomRenderStep("updateCandidateViewCounts", "OK");
-  } catch (error) {
-    recordRoomRenderStep("updateCandidateViewCounts", "ERROR", error);
-    throw error;
-  }
+  if (trustUpdated) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  updateCandidateViewCounts();
   const keyword = $("#candidateFilter")?.value?.trim() || "";
   const status = $("#candidateStatusFilter")?.value || "";
-  let statusItems;
-  try {
-    statusItems = data.candidates.filter((item) => isVisibleRoomCandidate(item) && (!status || (item.postStatus || item.status || "投稿待ち") === status || item.status === status));
-    recordRoomRenderStep("ROOM candidate filter", "OK");
-  } catch (error) {
-    recordRoomRenderStep("ROOM candidate filter", "ERROR", error);
-    throw error;
-  }
-  const keywordItems = statusItems.filter((item) => {
-    const text = `${item.title} ${item.shopName} ${item.memo}`.toLowerCase();
-    return !keyword || text.includes(keyword.toLowerCase());
-  });
   const items = data.candidates.filter((item) => {
     if (!isVisibleRoomCandidate(item)) return false;
     const text = `${item.title} ${item.shopName} ${item.memo}`.toLowerCase();
     const postStatus = item.postStatus || item.status || "投稿待ち";
     return (!keyword || text.includes(keyword.toLowerCase())) && (!status || postStatus === status || item.status === status);
   });
-  recordRoomRenderStep("keyword/status filter", "OK");
-  let cards = "";
-  for (const item of items) {
-    try {
-      cards += candidateCard(item);
-    } catch (error) {
-      recordRoomRenderStep("candidate card render", "ERROR", error, item);
-      throw error;
-    }
-  }
-  recordRoomRenderStep("candidate card render", "OK");
-  try {
-    $("#candidateList").innerHTML = items.length ? cards : `<p class="message">投稿候補はまだありません。</p>`;
-    recordRoomRenderStep("DOM render", "OK");
-  } catch (error) {
-    recordRoomRenderStep("DOM render", "ERROR", error);
-    throw error;
-  }
-  recordRoomDiagnostic("renderCandidates:complete", { candidatesLength: data.candidates.length, roomCandidateCount: data.candidates.filter(isRoomCandidate).length, visibleRoomCandidateCount: data.candidates.filter(isVisibleRoomCandidate).length, statusFilterCount: statusItems.length, keywordFilterCount: keywordItems.length, finalItemsLength: items.length, candidateCardCount: $("#candidateList")?.querySelectorAll(".candidate-card").length || 0 });
-  for (const [step, fn] of [["renderThreadsOnlyCandidates", renderThreadsOnlyCandidates], ["renderQueueProgress", renderQueueProgress], ["renderCollectionSummary", renderCollectionSummary]]) {
-    try {
-      fn();
-      recordRoomRenderStep(step, "OK");
-    } catch (error) {
-      recordRoomRenderStep(step, "ERROR", error);
-      throw error;
-    }
-  }
+  $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
+  renderThreadsOnlyCandidates();
+  renderQueueProgress();
+  renderCollectionSummary();
 }
 
 function updateCandidateViewCounts() {
@@ -2172,7 +2042,6 @@ function updateCandidateViewCounts() {
   const threadsCount = data.candidates.filter(isThreadsOnlyItem).length;
   if ($("#roomCandidateCount")) $("#roomCandidateCount").textContent = roomCount;
   if ($("#threadsCandidateCount")) $("#threadsCandidateCount").textContent = threadsCount;
-  recordRoomDiagnostic("updateCandidateViewCounts", { candidatesLength: data.candidates.length, roomCount, domRoomCount: $("#roomCandidateCount")?.textContent || "" });
 }
 
 function renderThreadsOnlyCandidates() {
