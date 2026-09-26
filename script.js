@@ -229,6 +229,7 @@ function bindTabs() {
 function showTab(tabId) {
   $$(".tab-button").forEach((button) => button.classList.toggle("active", button.dataset.tab === tabId));
   $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
+  if (tabId === "top") renderDashboard();
 }
 
 function bindForms() {
