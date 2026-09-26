@@ -1746,7 +1746,10 @@ function quickSave(product) {
   const introText = sameProduct ? $("#introText")?.value.trim() || "" : "";
   const hashTags = sameProduct ? $("#hashTags")?.value.trim() || "" : "";
   const introPrompt = sameProduct ? $("#promptOutput")?.value || "" : "";
-  const duplicate = findDuplicate(productWithUrl);
+  if (!canSaveRoomCandidate(productWithUrl)) {
+    toast("すでにROOM投稿候補または投稿履歴に登録されています。");
+    return;
+  }
   const candidate = {
     id: crypto.randomUUID(),
     destination: "room",
@@ -1872,8 +1875,8 @@ function renderDashboard() {
   const month = today.slice(0, 7);
   const duplicateCount = data.candidates.filter((candidate) => isRoomCandidate(candidate) && findDuplicate(candidate.product, candidate.id)).length;
   const stats = [
-    ["今日の投稿候補数", data.candidates.filter((item) => isRoomCandidate(item) && item.savedAt.slice(0, 10) === today).length],
-    ["未投稿の商品数", data.candidates.filter((item) => isRoomCandidate(item) && item.status !== "投稿済み").length],
+    ["今日の投稿候補数", data.candidates.filter((item) => isVisibleRoomCandidate(item) && item.savedAt.slice(0, 10) === today).length],
+    ["未投稿の商品数", data.candidates.filter((item) => isVisibleRoomCandidate(item) && item.status !== "投稿済み").length],
     ["今月の投稿数", data.history.filter((item) => item.postedAt.slice(0, 7) === month).length],
     ["重複候補数", duplicateCount]
   ];
@@ -1913,7 +1916,7 @@ function renderCandidates() {
   const keyword = $("#candidateFilter")?.value?.trim() || "";
   const status = $("#candidateStatusFilter")?.value || "";
   const items = data.candidates.filter((item) => {
-    if (!isRoomCandidate(item)) return false;
+    if (!isVisibleRoomCandidate(item)) return false;
     const text = `${item.title} ${item.shopName} ${item.memo}`.toLowerCase();
     const postStatus = item.postStatus || item.status || "投稿待ち";
     return (!keyword || text.includes(keyword.toLowerCase())) && (!status || postStatus === status || item.status === status);
@@ -1925,7 +1928,7 @@ function renderCandidates() {
 }
 
 function updateCandidateViewCounts() {
-  const roomCount = data.candidates.filter(isRoomCandidate).length;
+  const roomCount = data.candidates.filter(isVisibleRoomCandidate).length;
   const threadsCount = data.candidates.filter(isThreadsOnlyItem).length;
   if ($("#roomCandidateCount")) $("#roomCandidateCount").textContent = roomCount;
   if ($("#threadsCandidateCount")) $("#threadsCandidateCount").textContent = threadsCount;
@@ -3847,10 +3850,19 @@ function saveSettings(event) {
 
 function findDuplicate(product, ignoreId = "") {
   const allItems = [...data.candidates.filter(isRoomCandidate), ...data.history].filter((item) => item.id !== ignoreId);
+  const productCodes = getItemCodes(product);
   const identity = rankingIdentity(product);
-  const found = allItems.find((item) => rankingIdentity(item.product || item) === identity);
+  const found = allItems.find((item) => {
+    const itemCodes = getItemCodes(item);
+    if (productCodes.length && itemCodes.length) return itemCodes.some((code) => productCodes.includes(code));
+    return rankingIdentity(item.product || item) === identity;
+  });
   if (!found) return "";
   return `この商品は${formatDate(found.postedAt || found.savedAt)}に${found.postedAt ? "投稿済み" : "保存済み"}です。`;
+}
+
+function canSaveRoomCandidate(product) {
+  return !findDuplicate(product);
 }
 
 function normalizeItemUrl(url) {
@@ -3864,14 +3876,41 @@ function normalizeItemUrl(url) {
 }
 
 function rankingIdentity(product) {
-  if (product.itemCode) return `code:${product.itemCode}`;
+  const itemCode = getItemCode(product);
+  if (itemCode) return `code:${itemCode}`;
   const url = normalizeItemUrl(product.itemUrl || product.affiliateUrl);
   if (url) return `url:${url}`;
   return `shop:${product.shopName || ""}|name:${product.itemName || ""}`.toLowerCase();
 }
 
 function postedHistoryMatch(product) {
-  return data.history.some((entry) => rankingIdentity(entry.product || entry) === rankingIdentity(product));
+  return data.history.some((entry) => {
+    const historyCodes = getItemCodes(entry);
+    const productCodes = getItemCodes(product);
+    if (historyCodes.length && productCodes.length) {
+      return historyCodes.some((code) => productCodes.includes(code));
+    }
+    return rankingIdentity(entry.product || entry) === rankingIdentity(product);
+  });
+}
+
+function normalizeItemCode(itemCode) {
+  return itemCode == null ? "" : String(itemCode).trim();
+}
+
+function getItemCodes(record = {}) {
+  return [...new Set([
+    normalizeItemCode(record.itemCode),
+    normalizeItemCode(record.product?.itemCode)
+  ].filter(Boolean))];
+}
+
+function getItemCode(record = {}) {
+  return getItemCodes(record)[0] || "";
+}
+
+function isVisibleRoomCandidate(item) {
+  return isRoomCandidate(item) && !postedHistoryMatch(item);
 }
 
 function queuedCandidateMatch(product) {
