@@ -2021,7 +2021,13 @@ function renderCandidates() {
       if (beforeCollectionState !== `${item.postType}|${item.recommendedCollection}|${item.collectionStatus}`) trustUpdated = true;
     }
   });
-  if (trustUpdated) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  if (trustUpdated) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch (error) {
+      console.warn("ROOM候補の補完保存に失敗しました。表示処理は継続します。", error);
+    }
+  }
   updateCandidateViewCounts();
   const keyword = $("#candidateFilter")?.value?.trim() || "";
   const status = $("#candidateStatusFilter")?.value || "";
