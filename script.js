@@ -395,7 +395,7 @@ async function searchProducts(event) {
 }
 
 function addParam(params, key, value) {
-  if (value) params.set(key, value);
+  return window.RoomProductNormalization.addParam(params, key, value);
 }
 
 function hasRakutenCredentials() {
@@ -557,20 +557,13 @@ function hideCredentials(text) {
 }
 
 function normalizeRakutenItems(json) {
-  const items = json.items || json.Items || [];
-  return items.map((entry) => {
-    const nested = entry.item || entry.Item;
-    return nested ? { ...entry, ...nested } : entry;
-  });
+  return window.RoomProductNormalization.normalizeRakutenItems(json);
 }
 
 // 楽天APIの在庫・販売状態を確認し、販売終了商品をランキング候補から除外します。
 // APIによってフィールド名や値の型が異なるため、確認できる状態だけを対象にします。
 function isUnavailableProduct(product) {
-  const availability = product.availability ?? product.itemAvailability;
-  if (availability === 0 || availability === "0" || availability === false) return true;
-  const status = String(product.stockStatus ?? product.saleStatus ?? "").toLowerCase();
-  return /(販売終了|売り切れ|売切れ|sold\s*out|discontinued)/i.test(status);
+  return window.RoomProductNormalization.isUnavailableProduct(product);
 }
 
 function checkProductTrust(product = {}) {
@@ -3965,15 +3958,11 @@ function makeTags(product, count) {
 }
 
 function getImageCandidates(product = {}) {
-  return [...new Set([
-    ...(product.mediumImageUrls || []).map((item) => item?.imageUrl),
-    ...(product.smallImageUrls || []).map((item) => item?.imageUrl),
-    product.imageUrl
-  ].filter(Boolean).map((image) => String(image).replace("?_ex=128x128", "")))];
+  return window.RoomProductNormalization.getImageCandidates(product);
 }
 
 function getImage(product) {
-  return getImageCandidates(product)[0] || "";
+  return window.RoomProductNormalization.getImage(product);
 }
 
 function tryNextProductImage(image) {
