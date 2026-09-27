@@ -471,31 +471,23 @@ function sleep(milliseconds) {
 }
 
 function getRankingPageForRange(rankStart) {
-  return Number(rankStart) >= 31 ? 2 : 1;
+  return window.RoomRankingRules.getRankingPageForRange(rankStart);
 }
 
 function getRankingPagesForRange(rankStart, count) {
-  const start = Math.max(1, Number(rankStart) || 1);
-  const end = Math.min(50, start + Math.max(1, Number(count) || 10) - 1);
-  if (start <= 30 && end > 30) return [1, 2];
-  return [start >= 31 ? 2 : 1];
+  return window.RoomRankingRules.getRankingPagesForRange(rankStart, count);
 }
 
 function getRankingRange(rankStart, count) {
-  const start = Math.max(1, Number(rankStart) || 1);
-  return { start, end: Math.min(50, start + Math.max(1, Number(count) || 10) - 1) };
+  return window.RoomRankingRules.getRankingRange(rankStart, count);
 }
 
 function applyOfficialRankingRank(product = {}) {
-  const officialRank = Number(product.rank);
-  if (!Number.isFinite(officialRank) || officialRank <= 0) {
-    return { ...product, apiRank: null, sourceRank: null, rank: null };
-  }
-  return { ...product, apiRank: officialRank, sourceRank: officialRank, rank: officialRank };
+  return window.RoomRankingRules.applyOfficialRankingRank(product);
 }
 
 function getRankingRequestInterval(categoryCount) {
-  return categoryCount >= 4 ? RANKING_INTERVAL_LONG_MS : RANKING_INTERVAL_SHORT_MS;
+  return window.RoomRankingRules.getRankingRequestInterval(categoryCount);
 }
 
 function getRankingRetryWaitMs(response, rawBody, fallbackWaitMs) {
@@ -523,13 +515,7 @@ function createRankingApiError(status, rawBody, retryCount) {
 }
 
 function extractRakutenApiErrorDetail(rawBody) {
-  if (!rawBody) return "HTTPエラー";
-  try {
-    const errorBody = JSON.parse(rawBody);
-    return errorBody.error_description || errorBody.error || errorBody.message || rawBody.slice(0, 240);
-  } catch {
-    return rawBody.slice(0, 240);
-  }
+  return window.RoomRankingRules.extractRakutenApiErrorDetail(rawBody);
 }
 
 function showRankingProgress(message) {
@@ -1135,14 +1121,7 @@ function addSelectionReason(reasons, text) {
 }
 
 function calculateRankingScore(product = {}) {
-  const sourceRank = Number(product.sourceRank ?? product.rank);
-  if (!Number.isFinite(sourceRank) || sourceRank <= 0) return 0;
-  if (sourceRank === 1) return 30;
-  if (sourceRank === 2) return 27;
-  if (sourceRank === 3) return 24;
-  if (sourceRank <= 10) return 20;
-  if (sourceRank <= 20) return 15;
-  return 10;
+  return window.RoomRankingRules.calculateRankingScore(product);
 }
 
 function calculateReviewRatingScore(value) {
