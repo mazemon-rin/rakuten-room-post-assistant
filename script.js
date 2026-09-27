@@ -4067,20 +4067,11 @@ function saveSettings(event) {
 }
 
 function findDuplicate(product, ignoreId = "") {
-  const allItems = [...data.candidates.filter(isRoomCandidate), ...data.history].filter((item) => item.id !== ignoreId);
-  const productCodes = getItemCodes(product);
-  const identity = rankingIdentity(product);
-  const found = allItems.find((item) => {
-    const itemCodes = getItemCodes(item);
-    if (productCodes.length && itemCodes.length) return itemCodes.some((code) => productCodes.includes(code));
-    return rankingIdentity(item.product || item) === identity;
-  });
-  if (!found) return "";
-  return `この商品は${formatDate(found.postedAt || found.savedAt)}に${found.postedAt ? "投稿済み" : "保存済み"}です。`;
+  return window.DuplicateDetection.findDuplicate(product, data.candidates, data.history, ignoreId, formatDate);
 }
 
 function canSaveRoomCandidate(product) {
-  return !findDuplicate(product);
+  return window.DuplicateDetection.canSaveRoomCandidate(product, data.candidates, data.history, "", formatDate);
 }
 
 const productIdentity = window.ProductIdentity;
@@ -4088,14 +4079,7 @@ function normalizeItemUrl(url) { return productIdentity.normalizeItemUrl(url); }
 function rankingIdentity(product) { return productIdentity.rankingIdentity(product); }
 
 function postedHistoryMatch(product) {
-  return data.history.some((entry) => {
-    const historyCodes = getItemCodes(entry);
-    const productCodes = getItemCodes(product);
-    if (historyCodes.length && productCodes.length) {
-      return historyCodes.some((code) => productCodes.includes(code));
-    }
-    return rankingIdentity(entry.product || entry) === rankingIdentity(product);
-  });
+  return window.DuplicateDetection.postedHistoryMatch(product, data.history);
 }
 
 function normalizeItemCode(itemCode) { return productIdentity.normalizeItemCode(itemCode); }
@@ -4103,7 +4087,7 @@ function getItemCodes(record = {}) { return productIdentity.getItemCodes(record)
 function getItemCode(record = {}) { return productIdentity.getItemCode(record); }
 
 function isVisibleRoomCandidate(item) {
-  return isRoomCandidate(item) && !postedHistoryMatch(item);
+  return window.DuplicateDetection.isVisibleRoomCandidate(item, data.history);
 }
 
 function queuedCandidateMatch(product) {
