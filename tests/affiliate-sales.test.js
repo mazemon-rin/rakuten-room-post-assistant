@@ -4,6 +4,7 @@ const vm = require("vm");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "script.js"), "utf8");
 const discountRulesSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "discount-rules.js"), "utf8");
+const utilsSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "utils.js"), "utf8");
 const context = {
   console, URLSearchParams, Intl, Date, Math, Number, String, Boolean, Object, Array, Set, Map, RegExp, JSON, Promise,
   structuredClone: (value) => JSON.parse(JSON.stringify(value)),
@@ -14,6 +15,7 @@ const context = {
 context.window = context;
 vm.createContext(context);
 vm.runInContext(discountRulesSource, context);
+vm.runInContext(utilsSource, context);
 vm.runInContext(`${source}\nthis.__sales = { parseAffiliateCsv, getAffiliateImportKey, classifyAffiliateSale, buildAffiliateImportPreview };`, context);
 const sales = context.__sales;
 const csv = fs.readFileSync(path.join(__dirname, "fixtures", "affiliate-sales.csv"), "utf8");

@@ -467,7 +467,7 @@ async function fetchRankingCategory(category, page = 1, fallbackWaitMs = RANKING
 }
 
 function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  return window.RoomUtils.sleep(milliseconds);
 }
 
 function getRankingPageForRange(rankStart) {
@@ -2515,33 +2515,12 @@ function renderSalesDashboard() {
 }
 
 function parseCsvRows(text) {
-  const rows = [];
-  let row = [], cell = "", quoted = false;
-  const source = String(text || "").replace(/^\uFEFF/, "");
-  for (let i = 0; i < source.length; i += 1) {
-    const char = source[i];
-    if (char === '"') {
-      if (quoted && source[i + 1] === '"') { cell += '"'; i += 1; }
-      else quoted = !quoted;
-    } else if (char === "," && !quoted) { row.push(cell); cell = ""; }
-    else if ((char === "\n" || char === "\r") && !quoted) {
-      if (char === "\r" && source[i + 1] === "\n") i += 1;
-      row.push(cell); cell = "";
-      if (row.some((value) => value !== "")) rows.push(row);
-      row = [];
-    } else cell += char;
-  }
-  if (cell || row.length) { row.push(cell); if (row.some((value) => value !== "")) rows.push(row); }
-  return rows;
+  return window.RoomUtils.parseCsvRows(text);
 }
 
-function normalizeAffiliateHeader(value) { return String(value || "").trim().replace(/^\uFEFF/, "").toLowerCase(); }
+function normalizeAffiliateHeader(value) { return window.RoomUtils.normalizeAffiliateHeader(value); }
 function normalizeAffiliateStatus(value) {
-  const text = String(value || "").trim();
-  if (text === "0" || text.startsWith("0 -") || text.includes("未確定")) return "未確定";
-  if (text === "1" || text.startsWith("1 -") || text.includes("確定")) return "確定";
-  if (text === "2" || text.startsWith("2 -") || text.includes("破棄") || text.includes("キャンセル")) return "キャンセル";
-  return text;
+  return window.RoomUtils.normalizeAffiliateStatus(value);
 }
 
 function parseAffiliateCsv(text) {
@@ -2560,7 +2539,7 @@ function parseAffiliateCsv(text) {
   }));
 }
 
-function normalizeAffiliateText(value) { return String(value || "").toLowerCase().normalize("NFKC").replace(/[\s　\-ー―‐]/g, "").replace(/[「」『』【】［］\[\]()（）]/g, ""); }
+function normalizeAffiliateText(value) { return window.RoomUtils.normalizeAffiliateText(value); }
 
 function getAffiliateImportKey(row) {
   return [row.occurredAt, row.reward, row.amount, row.shopName, row.productName, row.affiliateStatus, row.measurementId].map((value) => String(value || "").trim()).join("|");
@@ -4065,21 +4044,19 @@ function tryNextProductImage(image) {
 }
 
 function formatYen(value) {
-  return `${Number(value || 0).toLocaleString("ja-JP")}円`;
+  return window.RoomUtils.formatYen(value);
 }
 
 function formatDate(value) {
-  if (!value) return "";
-  return new Date(value).toLocaleDateString("ja-JP");
+  return window.RoomUtils.formatDate(value);
 }
 
 function dateStamp() {
-  return new Date().toISOString().slice(0, 10);
+  return window.RoomUtils.dateStamp();
 }
 
 function shorten(text, length) {
-  const clean = stripHtml(text);
-  return clean.length > length ? `${clean.slice(0, length)}...` : clean;
+  return window.RoomUtils.shorten(stripHtml(text), length);
 }
 
 function stripHtml(text) {
@@ -4089,21 +4066,15 @@ function stripHtml(text) {
 }
 
 function sanitizeTag(text) {
-  return stripHtml(text).replace(/[^\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}a-zA-Z0-9_]/gu, "").slice(0, 24);
+  return window.RoomUtils.sanitizeTag(stripHtml(text));
 }
 
 function escapeHtml(text) {
-  return String(text || "").replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  }[char]));
+  return window.RoomUtils.escapeHtml(text);
 }
 
 function escapeAttr(text) {
-  return escapeHtml(text).replaceAll("`", "&#96;");
+  return window.RoomUtils.escapeAttr(text);
 }
 
 function toast(message) {
