@@ -989,42 +989,6 @@ function renderUnifiedProductCard(product, index, options = {}) {
 
 function renderCouponSearchCard(product) {
   return renderUnifiedProductCard(product, couponSearchResults.indexOf(product), { mode: "coupon" });
-  /* Legacy markup is retained below for data compatibility during migration. */
-  const evidence = getCouponEvidence(product);
-  const detected = extractCouponCandidates(product);
-  const safeId = `coupon-${btoa(unescape(encodeURIComponent(product.itemCode || product.itemName || "item"))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
-  const inputOverride = couponSearchInputOverrides.get(safeId) || {};
-  const rateInputValue = getCouponCandidateInputValue(product, "rate", inputOverride);
-  const deadlineInputValue = getCouponCandidateInputValue(product, "deadline", inputOverride);
-  const display = getCouponDisplayState(product);
-  const itemCode = product.itemCode || "";
-  const image = display.imageUrl;
-  const imageHtml = image
-    ? `<img src="${escapeAttr(image)}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="product-image-placeholder" hidden>画像なし</span>`
-    : `<span class="product-image-placeholder">画像なし</span>`;
-  const rateLabel = display.rateLabel;
-  const deadlineLabel = evidence.deadlineConfirmed
-    ? "期限"
-    : (detected.detectedDeadline || evidence.couponDeadline ? "期限候補" : "期限");
-  const roomDuplicate = findDuplicate(product);
-  return `<article class="product-card coupon-result-card" data-coupon-item-code="${escapeAttr(itemCode)}">
-    <div class="coupon-image-wrap">${imageHtml}</div>
-    <div class="product-body">
-      <h3 class="product-title">${escapeHtml(product.itemName || "商品名未設定")}</h3>
-      <p class="price">${formatYen(product.itemPrice)}</p>
-      <p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>
-      <p class="coupon-candidate-badge">検索条件：${escapeHtml((product.couponSearchFilters || []).map((key) => COUPON_SEARCH_OPTIONS[key]?.label || key).join("、") || "候補")}</p>
-      <p class="coupon-status">${escapeHtml(rateLabel)} <span class="coupon-confirmation ${evidence.rateConfirmed && evidence.discountRateType === "exact" ? "confirmed" : "needs-confirmation"}">${evidence.rateConfirmed && evidence.discountRateType === "exact" ? "🟢 確認済み" : "🟡 要確認"}</span></p>
-      <p class="coupon-status">${deadlineLabel}：${escapeHtml(evidence.couponDeadline || detected.detectedDeadline || "未確認")}（${evidence.deadlineConfirmed ? "🟢 確認済み" : "🟡 要確認"}）</p>
-      <p class="affiliate-url-status">${product.affiliateUrl ? "楽天アフィリエイトURL取得済み" : "楽天アフィリエイトURL未取得"}</p>
-      ${detected.detectedDiscountRate || detected.detectedDeadline ? `<p class="coupon-detected-note">🟡 商品名から検出した候補です。商品ページで現在有効か確認してください。</p>` : ""}
-      <label>確認した割引率（候補）<input id="${safeId}-rate" type="number" min="1" max="100" value="${escapeAttr(String(rateInputValue))}" oninput="saveCouponSearchInput('${safeId}', 'rate', this.value)" placeholder="例：50"></label>
-      <label>確認した期限（候補）<input id="${safeId}-deadline" type="text" value="${escapeAttr(String(deadlineInputValue))}" oninput="saveCouponSearchInput('${safeId}', 'deadline', this.value)" placeholder="例：2026/09/24 01:59まで"></label>
-      <label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label>
-      <label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label>
-      <div class="record-actions"><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">割引・期限を確認</a></div>
-      <div class="record-actions"><button class="primary-button" type="button" ${roomDuplicate ? "disabled" : `onclick="saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')"`}>${roomDuplicate ? "✓ ROOM投稿候補に保存済み" : "ROOM投稿候補に保存"}</button><button class="secondary-button" type="button" onclick="saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')">Threads投稿</button></div>
-    </div></article>`;
 }
 
 function renderCouponSearchResults(products = []) {
@@ -1666,30 +1630,6 @@ function renderResults(products) {
   searchResults.forEach((product) => { product.sourceTypes = [...new Set([...(product.sourceTypes || []), "product"])]; if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); applySelectionScore(product); });
   $("#results").innerHTML = searchResults.map((product, index) => renderUnifiedProductCard(product, index, { mode: "product" })).join("");
   return;
-  $("#results").innerHTML = searchResults.map((product) => {
-    const index = searchResults.indexOf(product);
-    const duplicate = findDuplicate(product);
-    return `
-      <article class="product-card">
-        <img src="${escapeAttr(getImage(product))}" alt="">
-        <div class="product-body">
-          <div class="product-title">${escapeHtml(product.itemName)}</div>
-          <p class="price">${formatYen(product.itemPrice)}</p>
-          <p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>
-          <p class="selection-score">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p>
-          <p>${escapeHtml(shorten(product.itemCaption || "", 90))}</p>
-          ${duplicate ? `<p class="warning">${escapeHtml(duplicate)}</p>` : ""}
-        </div>
-        <div class="button-row">
-          <button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>
-          <button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button>
-          <button class="secondary-button" type="button" onclick="threadsOnlySaveByIndex(${index})">Threads投稿</button>
-          <button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button>
-          <a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a>
-        </div>
-      </article>
-    `;
-  }).join("");
 }
 
 function openDetailByIndex(index) {
@@ -4727,12 +4667,6 @@ function renderRankingResults(products) {
     });
   };
   const productCard = (product, index, overallRank = null) => renderUnifiedProductCard(product, index, { rank: overallRank || product.rank });
-  /* Legacy ranking markup remains below until the next cleanup; the shared renderer above is authoritative. */
-  const legacyProductCard = (product, index, overallRank = null) => { const alreadyPosted = product.selectionStatus === "posted_duplicate" || postedHistoryMatch(product); return `<article id="ranking-item-${index}" class="product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}" data-post-status="${alreadyPosted ? "投稿済み" : "未投稿"}">
-          <img src="${escapeAttr(getImage(product))}" alt="">
-          <div class="product-body"><div class="product-title">${overallRank ? `${overallRank}位 ` : product.rank ? `${product.rank}位 ` : ""}${escapeHtml(product.itemName)}</div>${alreadyPosted ? `<p class="ranking-post-status" aria-label="投稿済み">投稿済み</p>` : ""}<p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="selection-score" aria-label="選定スコア">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-grade" aria-label="推薦ランク">${escapeHtml(product.selectionGrade || selectionGrade(getSelectionTotal(product)))}</p><p class="selection-score" aria-label="トレンド適合と投稿機会">${product.matchedTrendKeywords?.length ? "購買トレンド適合" : "トレンド適合"}：${product.trendScore?.total ?? 0} / ${product.matchedTrendKeywords?.length ? 30 : 20}　投稿機会：${product.opportunityScore?.total ?? 0} / 20</p><p class="selection-score" aria-label="今日の投稿優先度"><strong>今日の投稿優先度：${product.todayPriorityScore ?? getSelectionTotal(product)} / ${product.matchedTrendKeywords?.length ? 100 : 140}</strong></p><details class="selection-details"><summary>スコア内訳・選定理由を見る</summary>${scoreBreakdown(product)}${scoreReasons(product)}<p>${escapeHtml((product.opportunityScore?.reasons || []).join("、"))}</p></details><p class="trust-status">${product.trustStatus === "通常投稿候補" ? "🟢 通常投稿候補" : product.trustStatus === "要確認" ? "🟡 要確認" : product.trustStatus === "注意喚起候補" ? "🟠 注意喚起候補" : product.trustStatus === "投稿対象外" ? "🔴 投稿対象外" : "信頼性未確認"}</p>${product.selectionStatus ? `<p class="ranking-selection"><strong>${product.selectionStatus === "selected" ? "今回の採用商品" : product.selectionStatus === "posted_duplicate" ? "投稿済みのため除外" : product.selectionStatus === "session_duplicate" ? "今回重複のため除外" : product.selectionStatus === "existing_duplicate" ? "投稿キュー登録済みのため除外" : product.trustStatus || "採用候補なし"}</strong><br>${escapeHtml(typeof product.selectionReason === "string" ? product.selectionReason : (product.selectionReason || []).join("、"))}</p>` : ""}</div>
-          <div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button><button class="primary-button" type="button" onclick="quickSaveByIndex(${index})">投稿候補に保存</button><button class="secondary-button" type="button" onclick="threadsOnlySaveByIndex(${index})">Threads投稿</button>${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div>
-        </article>`; };
   const sortOrder = $("#rankingSortOrder")?.value;
   if (["priority", "score"].includes(sortOrder)) {
     container.innerHTML = `<section class="ranking-scoreboard"><h3>選定スコアランキング</h3><div class="product-grid">${displayProducts.map((product, position) => productCard(product, searchResults.indexOf(product), position + 1)).join("")}</div></section>`;
