@@ -5,6 +5,7 @@ const vm = require("vm");
 const source = fs.readFileSync(path.join(__dirname, "..", "script.js"), "utf8");
 const identitySource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "product-identity.js"), "utf8");
 const duplicateSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "duplicate-detection.js"), "utf8");
+const discountRulesSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "discount-rules.js"), "utf8");
 const context = {
   console,
   URLSearchParams,
@@ -27,9 +28,11 @@ const context = {
   document: { addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, createElement() { return { innerHTML: "", textContent: "" }; } },
   localStorage: { getItem() { return null; }, setItem() {} },
   fetch: async () => { throw new Error("fetch is not used in scoring tests"); },
-  window: {}
+  window: null
 };
+context.window = context;
 vm.createContext(context);
+vm.runInContext(discountRulesSource, context);
 vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, data };`, context);
 
 const scoring = context.__scoring;
