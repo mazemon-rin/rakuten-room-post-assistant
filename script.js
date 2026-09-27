@@ -4083,23 +4083,9 @@ function canSaveRoomCandidate(product) {
   return !findDuplicate(product);
 }
 
-function normalizeItemUrl(url) {
-  if (!url) return "";
-  try {
-    const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}`.replace(/\/$/, "").toLowerCase();
-  } catch {
-    return String(url).split("?")[0].replace(/\/$/, "").toLowerCase();
-  }
-}
-
-function rankingIdentity(product) {
-  const itemCode = getItemCode(product);
-  if (itemCode) return `code:${itemCode}`;
-  const url = normalizeItemUrl(product.itemUrl || product.affiliateUrl);
-  if (url) return `url:${url}`;
-  return `shop:${product.shopName || ""}|name:${product.itemName || ""}`.toLowerCase();
-}
+const productIdentity = window.ProductIdentity;
+function normalizeItemUrl(url) { return productIdentity.normalizeItemUrl(url); }
+function rankingIdentity(product) { return productIdentity.rankingIdentity(product); }
 
 function postedHistoryMatch(product) {
   return data.history.some((entry) => {
@@ -4112,20 +4098,9 @@ function postedHistoryMatch(product) {
   });
 }
 
-function normalizeItemCode(itemCode) {
-  return itemCode == null ? "" : String(itemCode).trim();
-}
-
-function getItemCodes(record = {}) {
-  return [...new Set([
-    normalizeItemCode(record.itemCode),
-    normalizeItemCode(record.product?.itemCode)
-  ].filter(Boolean))];
-}
-
-function getItemCode(record = {}) {
-  return getItemCodes(record)[0] || "";
-}
+function normalizeItemCode(itemCode) { return productIdentity.normalizeItemCode(itemCode); }
+function getItemCodes(record = {}) { return productIdentity.getItemCodes(record); }
+function getItemCode(record = {}) { return productIdentity.getItemCode(record); }
 
 function isVisibleRoomCandidate(item) {
   return isRoomCandidate(item) && !postedHistoryMatch(item);
