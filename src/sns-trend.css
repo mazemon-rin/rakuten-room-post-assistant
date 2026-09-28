@@ -5,5 +5,7 @@
 .sns-trend-card h3 { margin: 0 0 6px; }
 .sns-trend-meta { color: var(--muted, #666); }
 .sns-trend-match { padding: 10px; border-left: 4px solid #e05a3f; }
+.sns-trend-discovery-card { display: flex; justify-content: space-between; gap: 20px; padding: 16px; margin: 12px 0; border: 1px solid var(--line, #ddd); border-radius: 12px; background: var(--panel, #fff); }
+.sns-trend-discovery-card h3 { margin: 0 0 6px; }
 .sns-match-button { margin-top: 6px; }
 @media (max-width: 680px) { .sns-trend-card { display: grid; } }
