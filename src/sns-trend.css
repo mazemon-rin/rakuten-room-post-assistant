@@ -1,0 +1,8 @@
+.sns-trend-form { display: grid; gap: 12px; }
+.sns-trend-form label { display: grid; gap: 5px; font-weight: 700; }
+.sns-trend-form input, .sns-trend-form textarea { width: 100%; box-sizing: border-box; }
+.sns-trend-card { display: flex; justify-content: space-between; gap: 20px; padding: 16px; margin: 12px 0; border: 1px solid var(--line, #ddd); border-radius: 12px; background: var(--panel, #fff); }
+.sns-trend-card h3 { margin: 0 0 6px; }
+.sns-trend-meta { color: var(--muted, #666); }
+.sns-trend-match { padding: 10px; border-left: 4px solid #e05a3f; }
+@media (max-width: 680px) { .sns-trend-card { display: grid; } }
