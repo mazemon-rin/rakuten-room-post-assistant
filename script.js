@@ -3579,6 +3579,7 @@ async function startCodexPost(id) {
     itemCode,
     title: candidate.title || candidate.product?.itemName || "",
     introText,
+    originalPhoto: normalizeOriginalPhoto(candidate.originalPhoto),
     startedAt: new Date().toISOString()
   };
   candidate.introPrompt = instructions;
@@ -3655,6 +3656,7 @@ function prepareCandidatePost(id) {
     itemCode: candidate.itemCode || candidate.product?.itemCode || "",
     title: candidate.title || candidate.product?.itemName || "",
     introText: candidate.introText.trim(),
+    originalPhoto: normalizeOriginalPhoto(candidate.originalPhoto),
     startedAt: new Date().toISOString()
   };
   candidate.postStatus = "確認待ち";

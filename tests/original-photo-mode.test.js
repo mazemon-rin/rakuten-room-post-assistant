@@ -12,7 +12,12 @@ assert.match(source, /📷 オリジナル写真予定/);
 assert.match(source, /写真を確認後、ROOMの「完了」を手動で押してください/);
 assert.match(source, /isOriginalPhotoCandidate\(candidate\)/);
 assert.match(source, /オリジナル写真追加・編集.*操作せず/);
+assert.match(source, /利用者が先に完了した場合は追加クリックせず/);
+assert.match(source, /実在する完了ボタンを通常操作で1回クリックする/);
+assert.match(source, /再確認で異常がある場合はクリックせず停止/);
+assert.match(source, /ROOM投稿完了をアプリへ記録しました/);
 assert.match(source, /originalPhoto: normalizeOriginalPhoto\(candidate\.originalPhoto\)/);
+assert.match(source, /data\.pendingRoomPost = \{[\s\S]*?originalPhoto: normalizeOriginalPhoto\(candidate\.originalPhoto\)/);
 assert.ok(!source.includes("originalPhoto.enabled === true) {\n    document"));
 
 console.log("original photo mode regression cases: passed");
