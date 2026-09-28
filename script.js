@@ -3364,8 +3364,17 @@ function findAnyHistoryRecord(item) {
 function restoreHistoryToRoomCandidate(id) {
   const historyItem = data.history.find((item) => item.id === id);
   if (!historyItem) return;
-  if (data.candidates.some((item) => isRoomCandidate(item) && (item.itemCode || item.product?.itemCode || "") === historyItem.itemCode)) {
-    toast("この商品はすでに投稿候補にあります。");
+  const existingCandidate = data.candidates.find((item) => isRoomCandidate(item) && (item.itemCode || item.product?.itemCode || "") === historyItem.itemCode);
+  if (existingCandidate) {
+    historyItem.repostRequested = true;
+    existingCandidate.status = "文章作成済み";
+    existingCandidate.postStatus = "投稿待ち";
+    existingCandidate.postedAt = "";
+    existingCandidate.roomUrl = "";
+    existingCandidate.repostOfHistoryId = historyItem.id;
+    saveData();
+    renderAll();
+    toast("既存の対象候補を再投稿待ちに戻しました。履歴と売上情報は保持しています。");
     return;
   }
   const itemCode = historyItem.itemCode || historyItem.product?.itemCode || "";
