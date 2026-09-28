@@ -821,6 +821,21 @@ function getSourceTypeLabel(type) {
   return ({ ranking: "ランキング", product: "商品検索", category: "カテゴリー検索", trend: "トレンド検索", deal: "お買い得候補" }[type] || type);
 }
 
+function normalizeOriginalPhoto(value = false) {
+  if (value && typeof value === "object") {
+    return { enabled: value.enabled === true, status: value.status || "planned" };
+  }
+  return { enabled: value === true, status: "planned" };
+}
+
+function isOriginalPhotoCandidate(item) {
+  return normalizeOriginalPhoto(item?.originalPhoto).enabled === true;
+}
+
+function getOriginalPhotoSelection(inputId) {
+  return Boolean(inputId && document.getElementById(inputId)?.checked);
+}
+
 function renderUnifiedProductCard(product, index, options = {}) {
   const isCoupon = options.mode === "coupon";
   const rankText = options.rank != null ? `${options.rank}位 ` : product.rank ? `${product.rank}位 ` : "";
@@ -830,6 +845,7 @@ function renderUnifiedProductCard(product, index, options = {}) {
   const alreadyPosted = postedHistoryMatch(product);
   const safeId = `coupon-${btoa(unescape(encodeURIComponent(product.itemCode || product.itemName || "item"))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
   const detected = extractCouponCandidates(product);
+  const photoInputId = `original-photo-${options.rank != null ? "ranking" : options.mode || "product"}-${index}-${safeId}`;
   const evidence = getCouponEvidence(product);
   const controls = isCoupon && dealStatus.status === "candidate" ? `<details class="deal-confirmation"><summary>割引・期限を確認</summary><label>確認した割引率<input id="${safeId}-rate" type="number" value="${escapeAttr(String(getCouponCandidateInputValue(product, "rate", couponSearchInputOverrides.get(safeId) || {})))}" oninput="saveCouponSearchInput('${safeId}', 'rate', this.value)"></label><label>確認した期限<input id="${safeId}-deadline" type="text" value="${escapeAttr(String(getCouponCandidateInputValue(product, "deadline", couponSearchInputOverrides.get(safeId) || {})))}" oninput="saveCouponSearchInput('${safeId}', 'deadline', this.value)"></label><label><input id="${safeId}-rate-ok" type="checkbox"> 割引率を確認済み</label><label><input id="${safeId}-deadline-ok" type="checkbox"> 期限を確認済み</label></details>` : "";
   const roomDuplicate = isCoupon && findDuplicate(product);
@@ -838,11 +854,11 @@ function renderUnifiedProductCard(product, index, options = {}) {
     ? `<button class="primary-button" type="button" onclick="restoreRoomCandidateFromSearch(${JSON.stringify(product).replaceAll('"', '&quot;')})">✓ ROOM投稿候補に保存済み（再表示）</button>`
     : roomDuplicate
     ? `<button class="primary-button" type="button" disabled>✓ ROOM投稿候補に保存済み</button>`
-    : `<button class="primary-button" type="button" onclick="${isCoupon ? `saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `quickSaveByIndex(${index})`}">投稿候補に保存</button>`;
+    : `<button class="primary-button" type="button" onclick="${isCoupon ? `saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}', '${photoInputId}')` : `quickSaveByIndex(${index}, '${photoInputId}')`}">投稿候補に保存</button>`;
   const saveButtons = `${roomSaveButton}<button class="secondary-button" type="button" onclick="${isCoupon ? `saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `threadsOnlySaveByIndex(${index})`}">Threads投稿</button>`;
   const imageCandidates = escapeAttr(JSON.stringify(getImageCandidates(product)));
   const evaluationWarnings = product.warnings?.length ? `<p class="evaluation-warning">${escapeHtml(product.warnings.join(" / "))}</p>` : "";
-  return `<article class="product-card unified-product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}"><div class="coupon-image-wrap"><img src="${escapeAttr(getImage(product))}" data-image-candidates="${imageCandidates}" data-image-index="0" alt="" onerror="tryNextProductImage(this)"><span class="product-image-placeholder" hidden>画像なし</span></div><div class="product-body"><div class="product-title">${rankText}${escapeHtml(product.itemName || "商品名未設定")}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="meta">取得元：${escapeHtml(sourceText)}</p><p class="coupon-status">${escapeHtml(dealStatus.label)}</p><p class="selection-score">選定スコア：${getEvaluationScoreLabel(product)}</p><p class="selection-score">今日の投稿優先度：${getPriorityScoreLabel(product)}</p>${evaluationWarnings}${alreadyPosted ? `<p class="ranking-post-status">投稿済み</p>` : ""}${controls}<div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>${saveButtons}${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div></div></article>`;
+  return `<article class="product-card unified-product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}"><div class="coupon-image-wrap"><img src="${escapeAttr(getImage(product))}" data-image-candidates="${imageCandidates}" data-image-index="0" alt="" onerror="tryNextProductImage(this)"><span class="product-image-placeholder" hidden>画像なし</span></div><div class="product-body"><div class="product-title">${rankText}${escapeHtml(product.itemName || "商品名未設定")}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="meta">取得元：${escapeHtml(sourceText)}</p><p class="coupon-status">${escapeHtml(dealStatus.label)}</p><p class="selection-score">選定スコア：${getEvaluationScoreLabel(product)}</p><p class="selection-score">今日の投稿優先度：${getPriorityScoreLabel(product)}</p>${evaluationWarnings}${alreadyPosted ? `<p class="ranking-post-status">投稿済み</p>` : ""}${controls}<div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>${saveButtons}${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div><label class="original-photo-option"><input type="checkbox" id="${escapeAttr(photoInputId)}"> 📷 オリジナル写真で投稿</label></div></div></article>`;
 }
 
 function renderCouponSearchCard(product) {
@@ -954,7 +970,7 @@ function saveCouponSearchCandidate(rawProduct, elementPrefix) {
   toast(candidateProduct.rateConfirmed ? "確認済み情報を付けて保存し、Threads文章の自動下書きを作成しました。" : "要確認の検索候補を保存し、Threads文章の自動下書きを作成しました。割引を断定せず確認してください。");
 }
 
-function saveCouponSearchRoomCandidate(rawProduct, elementPrefix) {
+function saveCouponSearchRoomCandidate(rawProduct, elementPrefix, photoInputId = "") {
   const candidateProduct = getCouponSearchProductWithEvidence(rawProduct, elementPrefix);
   if (!candidateProduct) return;
   const duplicate = findDuplicate(candidateProduct);
@@ -963,6 +979,7 @@ function saveCouponSearchRoomCandidate(rawProduct, elementPrefix) {
     return;
   }
   const candidate = buildQueueCandidate(candidateProduct);
+  candidate.originalPhoto = normalizeOriginalPhoto(getOriginalPhotoSelection(photoInputId));
   candidate.couponCandidate = true;
   data.candidates.unshift(candidate);
   saveData();
@@ -1369,9 +1386,9 @@ function openDetailByCandidate(id) {
   if (candidate?.product) openDetail(candidate.product, candidate);
 }
 
-function quickSaveByIndex(index) {
+function quickSaveByIndex(index, photoInputId = "") {
   const product = searchResults[index];
-  if (product) quickSave(product);
+  if (product) quickSave(product, { originalPhotoEnabled: getOriginalPhotoSelection(photoInputId) });
 }
 
 function threadsOnlySaveByIndex(index) {
@@ -1425,7 +1442,7 @@ function openDetail(product, draft = {}) {
         </div>
         <div class="button-row">
           <button class="primary-button" type="button" onclick="generatePrompt()">紹介文プロンプトを作る</button>
-          <button class="secondary-button" type="button" onclick="quickSave(currentProduct)">投稿候補に保存</button>
+          <button class="secondary-button" type="button" onclick="quickSave(currentProduct, { originalPhotoEnabled: document.getElementById('detail-original-photo')?.checked === true })">投稿候補に保存</button>
           <button class="secondary-button" type="button" onclick="quickSaveThreadsOnly(currentProduct)">Threads投稿</button>
           <button class="secondary-button" type="button" onclick="addFavorite(currentProduct)">お気に入り</button>
           <button class="secondary-button" type="button" onclick="openChatGPT()">ChatGPTで開く</button>
@@ -1433,6 +1450,7 @@ function openDetail(product, draft = {}) {
         <label>ChatGPTへ渡すプロンプト<textarea id="promptOutput"></textarea></label>
         <label>紹介文<textarea id="introText" placeholder="ChatGPTで作った文章、または自分で書いた紹介文を貼り付けます。">${escapeHtml(savedIntroText)}</textarea></label>
         <label>ハッシュタグ<textarea id="hashTags" placeholder="#楽天ROOM #買ってよかった など">${escapeHtml(savedHashTags)}</textarea></label>
+        <label class="original-photo-option"><input type="checkbox" id="detail-original-photo"> 📷 オリジナル写真で投稿</label>
         <div class="button-row">
           <button class="secondary-button" type="button" onclick="copyValue('promptOutput')">プロンプトをコピー</button>
           <button class="secondary-button" type="button" onclick="copyValue('introText')">紹介文をコピー</button>
@@ -1517,7 +1535,7 @@ ${getRoomIntroDeadlineRule(currentProduct)}
   toast("プロンプトを作成しました。");
 }
 
-function quickSave(product) {
+function quickSave(product, options = {}) {
   const itemUrl = product.itemUrl || product.affiliateUrl || "";
   const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
   const sameProduct = currentProduct && (
@@ -1563,6 +1581,7 @@ function quickSave(product) {
     performance: productWithUrl.performance || { clicks: null, orders: null, reward: null },
     snsPosts: createSnsPosts()
   };
+  candidate.originalPhoto = normalizeOriginalPhoto(options.originalPhotoEnabled === true);
   Object.assign(candidate, checkProductTrust(productWithUrl));
   applyRoomProductEvaluation(candidate);
   applyCollectionMetadata(candidate);
@@ -1894,7 +1913,8 @@ function buildQueueCandidate(product) {
     trendSearchPosition: productWithUrl.trendSearchPosition || null,
     performance: productWithUrl.performance || { clicks: null, orders: null, reward: null },
     couponCandidate: Boolean(productWithUrl.couponCandidate),
-    couponSearchFilters: productWithUrl.couponSearchFilters || []
+    couponSearchFilters: productWithUrl.couponSearchFilters || [],
+    originalPhoto: normalizeOriginalPhoto(productWithUrl.originalPhoto)
   };
   applyCouponEvidenceToCandidate(candidate, productWithUrl);
   Object.assign(candidate, checkProductTrust(productWithUrl));
@@ -2251,6 +2271,7 @@ function candidateCard(item) {
         <h3>${escapeHtml(item.title)}</h3>
         <div class="record-actions candidate-product-actions">${productLink}</div>
         <p><span class="badge">${escapeHtml(item.status)}</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
+        ${isOriginalPhotoCandidate(item) ? `<p class="original-photo-badge">📷 オリジナル写真予定</p><p class="meta">投稿時はROOMの完了前で停止します</p>` : ""}
         <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
         <p class="trust-status" aria-label="商品信頼性判定">${trustLabels[trust.trustStatus] || "🟡 要確認"}（${trust.trustScore ?? "-"}点・検証中）</p>
         <p class="collection-status"><strong>投稿タイプ：</strong>${escapeHtml({ normal: "通常商品", sale: "セール商品", used: "使用済み商品", warning: "注意喚起商品" }[item.postType] || "通常商品")}</p>
@@ -3337,7 +3358,7 @@ function createHistoryRecord(candidate, { roomUrl = candidate.roomUrl || "", pos
     selectionScoreTotal: candidate.selectionScoreTotal ?? getSelectionTotal(candidate),
     selectionVersion: candidate.selectionVersion || "",
     snsPosts: createSnsPosts(candidate.snsPosts),
-    originalPhoto: candidate.originalPhoto ?? false,
+    originalPhoto: normalizeOriginalPhoto(candidate.originalPhoto),
     rank: candidate.rank ?? product.rank ?? "",
     apiRank: candidate.apiRank ?? product.apiRank ?? "",
     sourceRank: candidate.sourceRank ?? product.sourceRank ?? "",
@@ -3615,9 +3636,17 @@ function prepareCandidatePost(id) {
     "4. ハッシュタグを紹介文末尾へ追加する",
     candidate.hashTags || "",
     "5. 内容、対象商品、500文字以内、操作可能な「完了」ボタン、エラーなしを確認する",
-    "6. 『投稿準備が完了しました。60秒後にROOMの「完了」ボタンを押します。』と表示して60秒待機する",
-    "7. 利用者が先に完了した場合は追加クリックせず、先に完了していない場合だけ60秒後に再確認して正常なら実在する完了ボタンを通常操作で1回クリックする",
-    "8. 再確認で異常がある場合はクリックせず停止し、投稿完了確認前に投稿済み記録を行わない"
+    ...(isOriginalPhotoCandidate(candidate)
+      ? [
+        "6. 「オリジナル写真追加・編集」は操作せず、ROOM画面をオリジナル写真追加前の状態で利用者へ引き渡す",
+        "7. 『📷 オリジナル写真を追加してください。写真を確認後、ROOMの「完了」を手動で押してください。』と表示して停止する",
+        "8. これは正常な人間操作待ちであり、Codexは「完了」も写真追加・編集もクリックしない"
+      ]
+      : [
+        "6. 『投稿準備が完了しました。60秒後にROOMの「完了」ボタンを押します。』と表示して60秒待機する",
+        "7. 利用者が先に完了した場合は追加クリックせず、先に完了していない場合だけ60秒後に再確認して正常なら実在する完了ボタンを通常操作で1回クリックする",
+        "8. 再確認で異常がある場合はクリックせず停止し、投稿完了確認前に投稿済み記録を行わない"
+      ])
   ].join("\n");
   candidate.introText = candidate.introText.trim();
   saveData();
