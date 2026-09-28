@@ -650,6 +650,24 @@ function getSaleInfo(product = {}) {
   return entries.filter(([, value]) => value !== "").map(([label, value]) => `${label}：${value}`).join("\n");
 }
 
+function getRoomDiscountPromptContext(item = {}) {
+  const product = item.product || item;
+  const status = item.discountStatus || product.discountStatus || item.dealEvaluation?.status || product.dealEvaluation?.status || "unknown";
+  const discountText = item.discountText || product.discountText || item.dealEvaluation?.label || product.dealEvaluation?.label || "";
+  const warnings = [...new Set([...(Array.isArray(item.warnings) ? item.warnings : []), ...(Array.isArray(product.warnings) ? product.warnings : [])])];
+  const priorityReasons = [...new Set([...(Array.isArray(item.priorityReasons) ? item.priorityReasons : []), ...(Array.isArray(product.priorityReasons) ? product.priorityReasons : [])])];
+  const confirmedHeader = buildDealHeader(item) || buildDealHeader(product) || "";
+  const confirmed = status === "confirmed" && Boolean(confirmedHeader);
+  return {
+    status,
+    discountText,
+    warnings,
+    priorityReasons,
+    confirmedHeader,
+    confirmed
+  };
+}
+
 function getRoomIntroDeadlineRule(product = {}) {
   const detected = extractCouponCandidates(product).detectedDeadline || product.detectedDeadline || "";
   const evidence = getCouponEvidence(product);
@@ -1372,7 +1390,8 @@ function validateGeneratedCopy(introText, product = {}) {
   const text = String(introText || "");
   const forbidden = /(絶対お得|最安値|必ず効果|買わないと損|売り切れる前に|残りわずか)/;
   if (forbidden.test(text)) return "確認できない煽り表現が含まれています。";
-  if (/(使ってみて|愛用しています|買ってよかった|悩みが解決)/.test(text) && !product.usageStatus?.includes("used")) {
+  const experienceForbidden = /(買ってみた|買ってよかった|届いた|届きました|使った|使いました|使っています|使ってみた|使ってよかった|愛用中|愛用しています|リピート|リピ買い|我が家では|食べた|食べました|飲んだ|飲みました|実際に使うと|使いやすかった|おいしかった|飲みやすかった|満足した|悩みが解決)/;
+  if (experienceForbidden.test(text) && product.usageStatus !== "used") {
     return "使用状況が未確認のため、使用体験の表現は保存できません。";
   }
   return "";
@@ -1489,6 +1508,7 @@ function generatePrompt() {
   if (!currentProduct) return;
   const tagCount = Number(data.settings.defaultTagCount) || 8;
   const context = buildGenerationContext(currentProduct, $("#postType").value);
+  const discountContext = getRoomDiscountPromptContext(currentProduct);
   const prompt = `楽天ROOM投稿用の紹介文を作ってください。
 
 【商品情報】
@@ -1507,6 +1527,12 @@ ${getSaleInfo(currentProduct) || "記載なし"}
 
 確認済みのお得情報ヘッダー（確認済みの場合だけ紹介文の冒頭へ使用）：
 ${buildDealHeader(currentProduct) || "なし。未確認の割引率・クーポン・期限は書かない。"}
+
+割引確認状態：${discountContext.status}
+割引情報（確認状態を含む内部情報）：${discountContext.discountText || "なし"}
+警告（警告対象は確定情報として紹介文へ使用しない）：${discountContext.warnings.join(" / ") || "なし"}
+選定理由（商品事実ではなく選定用の内部情報）：${discountContext.priorityReasons.join(" / ") || "なし"}
+紹介文で使用してよい確認済み割引情報：${discountContext.confirmed ? discountContext.confirmedHeader : "なし"}
 
 クーポン最終有効日の扱い：
 ${getRoomIntroDeadlineRule(currentProduct)}
@@ -1542,7 +1568,8 @@ ${getRoomIntroDeadlineRule(currentProduct)}
 商品ページにない内容を勝手に追加しないでください。
 実際に使っていない場合は「使いました」と書かないでください。
 効果、最安値、在庫、セール期限を断定しないでください。
-セール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、数量限定などは、上記のセール情報に明記されている場合だけ自然に紹介文へ反映してください。`;
+セール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、数量限定などは、上記のセール情報に明記されている場合だけ自然に紹介文へ反映してください。
+割引確認状態がconfirmedで確認済みヘッダーがある場合だけ、50%OFFや半額などの確認済み表現を目立つ位置へ使用してよい。candidateやunknownは割引候補として扱い、50%OFFや半額と断定しない。警告対象と選定理由は内部情報であり、未確認情報を商品事実として文章化しない。`;
   $("#promptOutput").value = prompt;
   $("#hashTags").value = makeTags(currentProduct, tagCount).join(" ");
   toast("プロンプトを作成しました。");
@@ -3550,6 +3577,11 @@ function buildCodexPostInstructions(candidate) {
     `ショップ名：${candidate.shopName || product.shopName || ""}`,
     `商品説明：${stripHtml(product.itemCaption || "" )}`,
     `セール情報（明記された項目のみ）：${getSaleInfo(product) || "記載なし"}`,
+    `割引確認状態：${getRoomDiscountPromptContext(candidate).status}`,
+    `割引情報（内部情報）：${getRoomDiscountPromptContext(candidate).discountText || "なし"}`,
+    `警告（警告対象は紹介文へ確定情報として使用しない）：${getRoomDiscountPromptContext(candidate).warnings.join(" / ") || "なし"}`,
+    `選定理由（商品事実ではなく選定用の内部情報）：${getRoomDiscountPromptContext(candidate).priorityReasons.join(" / ") || "なし"}`,
+    `紹介文で使用してよい確認済み割引情報：${getRoomDiscountPromptContext(candidate).confirmed ? getRoomDiscountPromptContext(candidate).confirmedHeader : "なし"}`,
     `クーポン最終有効日の扱い：${getRoomIntroDeadlineRule(product)}`,
     `文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}`,
     `商品選定情報：スコア=${getSelectionTotal(candidate)} / ${candidate.selectionGrade || "評価中"} / 選定理由=${(candidate.selectionReason || candidate.selectionReasons || []).join("、") || "未評価"} / 信頼性=${candidate.trustStatus || "未確認"}`,
@@ -3602,6 +3634,7 @@ function buildCodexPostInstructions(candidate) {
     "",
     "【紹介文条件】",
     "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項がある場合は紹介文へ反映する。確認済みのクーポン最終有効日は、紹介文の冒頭付近へ優先して自然に入力する。商品タイトルからの検出だけでは確認済みにせず、確認前は断定しない。",
+    "割引確認状態がconfirmedで確認済みヘッダーがある場合だけ、50%OFFや半額などの確認済み表現を目立つ位置へ使用してよい。candidateやunknownは割引候補として扱い、50%OFFや半額と断定しない。警告対象と選定理由は内部情報であり、未確認情報を商品事実として文章化しない。",
     "未使用または状態不明の商品は、使用体験を書かず『便利そう』『候補に入れてもよさそう』などの表現にする。レビューは取得できた情報だけを使う。",
     "生成後に、冒頭の具体性、商品固有性、使用状況、効果・レビュー・価格・クーポン・期限の事実性、煽り表現を自己点検し、条件を満たさなければ書き直す。",
     "出力は『紹介文:』『短い紹介文:』『ハッシュタグ:』『セール情報:（ある場合のみ）』『状態:確認待ち』の見出しを使う。",

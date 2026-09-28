@@ -6,7 +6,7 @@
 
 ## Current Status
 
-Maintenance。HTML/CSS/JavaScript、楽天API、localStorage、JSONバックアップ・復元。自動投稿は行わない。
+Maintenance。HTML/CSS/JavaScript、楽天API、localStorage、JSONバックアップ・復元。通常ROOM投稿は確認後にCodexが完了操作まで行い、オリジナル写真投稿は完了前で利用者へ引き渡す。
 
 ## Current Version
 
@@ -18,7 +18,8 @@ README記載のVersionを作業開始時に確認する。
 
 ## Important Constraints
 
-- 楽天ROOMへの自動投稿・自動いいね・自動フォローを追加しない。
+- ROOM投稿は通常投稿とオリジナル写真投稿で最終操作を分ける。通常投稿は安全確認と60秒待機後に完了を1回押し、オリジナル写真投稿は写真追加・完了を行わず人間操作待ちにする。
+- 自動いいね・自動フォロー・自動コメントは行わない。
 - API認証情報を公開コードへ直書きしない。
 - 楽天公式クレジット表示を削除・改変しない。
 

@@ -43,13 +43,34 @@ vm.runInContext(affiliateSalesSource, context);
 vm.runInContext(productNormalizationSource, context);
 vm.runInContext(rankingRulesSource, context);
 vm.runInContext(trendRulesSource, context);
-vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, data };`, context);
+vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, validateGeneratedCopy, data };`, context);
 
 const scoring = context.__scoring;
 scoring.evaluateRoomProduct = context.evaluateRoomProduct;
 scoring.applyRoomProductEvaluation = context.applyRoomProductEvaluation;
 scoring.scoreProductSelection = context.scoreProductSelection;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const dealBase = { regularPrice: 11990, salePrice: 5995, discountRate: 50, rateConfirmed: true, discountRateType: "exact", confirmedDiscountLabel: "50%OFF" };
+const confirmedDealPrompt = scoring.getRoomDiscountPromptContext({ ...dealBase, discountStatus: "confirmed", discountText: "50%OFF確認済み" });
+assert(confirmedDealPrompt.confirmed && confirmedDealPrompt.confirmedHeader.includes("50%OFF"), "confirmed 50%OFF is available to ROOM intro generation");
+const candidateDealPrompt = scoring.getRoomDiscountPromptContext({ ...dealBase, rateConfirmed: false, discountRateType: "candidate", discountStatus: "candidate", discountText: "50%OFF候補" });
+assert(!candidateDealPrompt.confirmed && candidateDealPrompt.status === "candidate", "candidate 50%OFF is not treated as confirmed");
+const unknownDealPrompt = scoring.getRoomDiscountPromptContext({ discountStatus: "unknown", discountText: "" });
+assert(!unknownDealPrompt.confirmed && unknownDealPrompt.confirmedHeader === "", "unknown discount is not generated");
+const warnedDealPrompt = scoring.getRoomDiscountPromptContext({ ...dealBase, discountStatus: "confirmed", warnings: ["価格表示を要確認"] });
+assert(warnedDealPrompt.warnings.includes("価格表示を要確認"), "discount warnings are passed to intro generation");
+const forbiddenExperiencePhrases = [
+  "買ってみた", "買ってよかった", "届きました", "使いました", "使っています",
+  "使ってみた", "使ってよかった", "愛用中", "愛用しています", "リピート",
+  "リピ買い", "我が家では", "食べました", "飲みました", "実際に使うと",
+  "使いやすかった", "おいしかった", "飲みやすかった", "満足した"
+];
+forbiddenExperiencePhrases.forEach((phrase) => {
+  assert(scoring.validateGeneratedCopy(`商品情報。${phrase}です。`, { usageStatus: "unknown" }), `unused copy must reject: ${phrase}`);
+  assert(!scoring.validateGeneratedCopy(`商品情報。${phrase}です。`, { usageStatus: "used" }), `used copy may use saved experience: ${phrase}`);
+  assert(scoring.validateGeneratedCopy(`商品情報。${phrase}です。`, { usageStatus: "unknown", originalPhoto: { enabled: true } }), `original photo alone must not allow experience: ${phrase}`);
+});
+assert(!scoring.validateGeneratedCopy("商品ページに明記された特徴で、取り入れやすそうです。", { usageStatus: "unknown" }), "unused speculative wording remains allowed");
 scoring.data.eventSettings = {};
 const rankedEvaluation = scoring.evaluateRoomProduct({ itemCode: "ranked", itemName: "ランキング商品", itemPrice: 1980, categoryName: "家電", reviewAverage: 4.5, reviewCount: 1200, rank: 4, sourceRank: 4 }, { postedIdentities: new Set(), queuedIdentities: new Set(), eventSettings: {} });
 assert(rankedEvaluation.selectionScoreTotal > 0 && rankedEvaluation.priorityReasons.length > 0, "Unified evaluation A: ranked products use the common evaluator");
