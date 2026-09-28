@@ -853,7 +853,11 @@ function renderCouponSearchResults(products = []) {
   const container = $("#couponSearchResults");
   const filters = getCouponSearchKeywords();
   couponSearchResults = products.filter((product) => !postedHistoryMatch(product) && (!filters.length || matchesCouponDiscountFilter(product, filters) || evaluateDealStatus(product, filters[0]).status === "candidate"));
-  couponSearchResults.forEach((product) => { product.sourceTypes = [...new Set([...(product.sourceTypes || []), "deal"])]; });
+  couponSearchResults.forEach((product) => {
+    product.sourceTypes = [...new Set([...(product.sourceTypes || []), "deal"])];
+    if (!product.trustStatus) Object.assign(product, checkProductTrust(product));
+    applyRoomProductEvaluation(product);
+  });
   couponVisibleCount = Math.min(30, couponSearchResults.length);
   renderVisibleCouponSearchResults();
 }
