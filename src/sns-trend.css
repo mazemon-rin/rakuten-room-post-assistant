@@ -5,4 +5,5 @@
 .sns-trend-card h3 { margin: 0 0 6px; }
 .sns-trend-meta { color: var(--muted, #666); }
 .sns-trend-match { padding: 10px; border-left: 4px solid #e05a3f; }
+.sns-match-button { margin-top: 6px; }
 @media (max-width: 680px) { .sns-trend-card { display: grid; } }

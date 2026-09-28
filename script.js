@@ -203,6 +203,17 @@ function isRoomCandidate(item = {}) {
 let data = loadData();
 let currentProduct = null;
 let searchResults = [];
+
+// SNSトレンド連携用の読み取り専用商品識別API。検索結果本体は公開しない。
+window.getSearchResultIdentityByIndex = function (index) {
+  const item = searchResults[index];
+  if (!item) return null;
+  return {
+    itemCode: String(item.itemCode || ""),
+    title: String(item.itemName || item.title || ""),
+    itemUrl: String(item.itemUrl || "")
+  };
+};
 let couponSearchResults = [];
 let couponVisibleCount = 30;
 const couponSearchInputOverrides = new Map();
