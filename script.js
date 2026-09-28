@@ -2365,7 +2365,7 @@ function renderHistory() {
         <p class="collection-status">投稿タイプ：${escapeHtml({ normal: "通常商品", sale: "セール商品", used: "使用済み商品", warning: "注意喚起商品" }[item.postType] || "通常商品")} / 信頼性：${escapeHtml(item.trustStatus || "未確認")}</p>
         ${item.selectedCollection || item.recommendedCollection ? `<p class="collection-status">コレクション：${escapeHtml(getCollectionById(item.selectedCollection || item.recommendedCollection)?.name || item.selectedCollection || item.recommendedCollection)}</p>` : ""}
         <p>${escapeHtml(shorten(item.introText || "", 140))}</p>
-        ${item.repostRequested ? `<p class="message">再投稿候補へ戻し済み</p>` : `<div class="record-actions"><button class="secondary-button" type="button" onclick="restoreHistoryToRoomCandidate('${escapeAttr(item.id)}')">投稿候補へ戻す</button></div>`}
+        ${item.repostRequested && hasRoomCandidateForHistory(item) ? `<p class="message">再投稿候補へ戻し済み</p>` : `<div class="record-actions"><button class="secondary-button" type="button" onclick="restoreHistoryToRoomCandidate('${escapeAttr(item.id)}')">投稿候補へ戻す</button></div>`}
         ${renderSalesSummary(item)}
         ${getSalesForHistory(item.id).length ? `<div class="record-actions"><button class="secondary-button" type="button" onclick="toggleSaleHistory('${escapeAttr(item.id)}')">売上履歴を見る</button></div>` : ""}
         <div id="sale-history-${escapeAttr(item.id)}" class="sale-history" hidden>${renderSaleHistory(item.id)}</div>
@@ -3401,6 +3401,11 @@ function restoreHistoryToRoomCandidate(id) {
   saveData();
   renderAll();
   toast("対象商品を投稿候補へ戻しました。履歴と売上情報は保持しています。");
+}
+
+function hasRoomCandidateForHistory(historyItem) {
+  const itemCode = historyItem?.itemCode || historyItem?.product?.itemCode || "";
+  return Boolean(itemCode && data.candidates.some((item) => isRoomCandidate(item) && (item.itemCode || item.product?.itemCode || "") === itemCode));
 }
 
 function createHistoryRecord(candidate, { roomUrl = candidate.roomUrl || "", postedAt = "", introText = candidate.introText || "" } = {}) {
