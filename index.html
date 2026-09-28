@@ -197,7 +197,7 @@
     </section>
 
     <section id="sns-trend-discovery" class="tab-panel">
-      <div class="section-heading"><h2>トレンド発見</h2><p>話題になったキーワードを人間が確認し、採用した候補だけVer.1へ渡します。外部API通信はまだ行いません。</p></div>
+      <div class="section-heading"><h2>トレンド発見</h2><p>話題になったキーワードを人間が確認し、採用した候補だけVer.1へ渡します。Google Trendsはボタン操作時にプレビュー取得できます。</p></div>
       <form id="snsTrendDiscoveryForm" class="panel sns-trend-form">
         <input id="discoveryId" name="id" type="hidden">
         <label>発見元<select id="discoverySource" name="source"><option value="google_trends">Google Trends</option><option value="youtube">YouTube</option><option value="threads">Threads</option><option value="x">X</option><option value="manual">手動</option></select></label>
@@ -218,6 +218,13 @@
         <label>確認日時<input id="googleTrendsObservedAt" name="observedAt" type="datetime-local"></label>
         <div class="button-row"><button class="primary-button" type="submit">Google Trends候補を登録</button><button id="googleTrendsClear" class="secondary-button" type="button">入力をクリア</button></div>
       </form>
+      <section class="panel sns-trend-worker-panel">
+        <h3>Google Trends Trending Now</h3>
+        <p>「今日のトレンドを取得」を押したときだけ公開Workerへ接続し、登録前にプレビューします。自動取得・全件追加は行いません。</p>
+        <div class="button-row"><button id="googleTrendsFetch" class="primary-button" type="button">今日のトレンドを取得</button></div>
+        <p id="googleTrendsWorkerMessage" class="message" role="status" aria-live="polite"></p>
+        <div id="googleTrendsWorkerPreview" class="sns-trend-worker-preview" aria-live="polite"></div>
+      </section>
       <section class="panel"><h3>発見候補一覧</h3><div id="snsTrendDiscoveryList"></div></section>
     </section>
 

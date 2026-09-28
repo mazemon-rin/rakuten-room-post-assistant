@@ -84,3 +84,45 @@ const rejectedState = api.rejectCandidate("stage2-manual-1", stage2Accepted.stat
 if (rejectedState.candidates.find((item) => item.id === "stage2-manual-1").status !== "rejected") throw new Error("google trends reject failed");
 if (JSON.parse(stage2V1Storage.values.roomSnsTrendDataV1).products.length !== 1) throw new Error("reject changed v1");
 console.log("sns trend discovery v2 stage 2 cases: passed");
+
+(async () => {
+  const workerPayload = {
+    source: "google_trends",
+    region: "JP",
+    fetchedAt: "2026-09-29T00:00:00.000Z",
+    count: 2,
+    items: [
+      { keyword: "PS5 Pro", traffic: "1000+", publishedAt: "2026-09-28T23:00:00Z", pictureUrl: null, pictureSource: null, news: [{ title: "ゲームニュース", url: "https://example.com/news", source: "Example" }] },
+      { keyword: "収納ボックス", traffic: null, publishedAt: null, pictureUrl: null, pictureSource: null, news: [] }
+    ]
+  };
+  if (!api.validateWorkerPayload(workerPayload).valid) throw new Error("worker response validation failed");
+  if (api.GOOGLE_TRENDS_WORKER_URL !== "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/google-trends") throw new Error("worker URL failed");
+  const workerInput = api.buildGoogleTrendsCandidateInput(workerPayload.items[0], workerPayload, "2026-09-29T01:00:00.000Z");
+  if (workerInput.source !== "google_trends" || workerInput.keyword !== "PS5 Pro" || workerInput.metrics.searchVolumeLabel !== "1000+" || workerInput.detectedAt !== workerPayload.items[0].publishedAt || workerInput.observedAt !== workerPayload.fetchedAt) throw new Error("worker mapping failed");
+  let workerState = api.readState({ values: {}, getItem() { return null; }, setItem() {} });
+  const beforeWorkerStorage = JSON.stringify(workerState);
+  const fetchCalls = [];
+  const workerResponse = await api.fetchGoogleTrends(async (url, options) => { fetchCalls.push({ url, options }); return { ok: true, status: 200, async json() { return workerPayload; } }; });
+  if (workerResponse.items.length !== 2 || fetchCalls.length !== 1 || fetchCalls[0].url !== api.GOOGLE_TRENDS_WORKER_URL || fetchCalls[0].options.method !== "GET") throw new Error("worker fetch failed");
+  if (JSON.stringify(workerState) !== beforeWorkerStorage) throw new Error("fetch changed localStorage state");
+  const addedWorker = api.addGoogleTrendsCandidate(workerPayload.items[0], workerPayload, workerState, "2026-09-29T01:00:00.000Z");
+  workerState = addedWorker.state;
+  if (workerState.candidates.length !== 1 || workerState.candidates[0].keyword !== "PS5 Pro" || workerState.candidates[0].metrics.searchVolumeLabel !== "1000+") throw new Error("worker candidate add failed");
+  let workerDuplicateBlocked = false;
+  try { api.addGoogleTrendsCandidate(workerPayload.items[0], workerPayload, workerState); } catch (error) { workerDuplicateBlocked = true; }
+  if (!workerDuplicateBlocked) throw new Error("worker duplicate prevention failed");
+  if (api.validateWorkerPayload({ ...workerPayload, source: "wrong" }).valid !== false) throw new Error("invalid source validation failed");
+  if (api.validateWorkerPayload({ ...workerPayload, items: [] }).valid !== true) throw new Error("empty item response validation failed");
+  if (api.validateWorkerPayload({ ...workerPayload, items: null }).valid !== false) throw new Error("missing items validation failed");
+  let invalidJsonRejected = false;
+  try { await api.fetchGoogleTrends(async () => ({ ok: true, status: 200, async json() { throw new Error("invalid json"); } })); } catch (error) { invalidJsonRejected = error.code === "invalid_json"; }
+  if (!invalidJsonRejected) throw new Error("invalid JSON handling failed");
+  let httpRejected = false;
+  try { await api.fetchGoogleTrends(async () => ({ ok: false, status: 502, async json() { return {}; } })); } catch (error) { httpRejected = error.code === "http_error"; }
+  if (!httpRejected) throw new Error("HTTP error handling failed");
+  let networkRejected = false;
+  try { await api.fetchGoogleTrends(async () => { throw new Error("offline"); }); } catch (error) { networkRejected = error.code === "network_error"; }
+  if (!networkRejected) throw new Error("network error handling failed");
+  console.log("sns trend discovery v2 stage 3-3 cases: passed");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
