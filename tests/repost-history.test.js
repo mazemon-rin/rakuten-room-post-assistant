@@ -11,5 +11,6 @@ assert.match(source, /function findAnyHistoryRecord\(item\)/);
 assert.match(source, /recordRoomPosting\(item, \{ roomUrl/);
 assert.match(source, /existingHistory\.repostRequested = false/);
 assert.match(source, /data\.candidates\.unshift\(candidate\)/);
+assert.match(fs.readFileSync(path.join(__dirname, "..", "src/core/duplicate-detection.js"), "utf8"), /if \(entry\.repostRequested === true\) return false/);
 
 console.log("history repost candidate regression cases: passed");

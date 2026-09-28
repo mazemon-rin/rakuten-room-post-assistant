@@ -7,6 +7,7 @@
 
   function postedHistoryMatch(product, history = []) {
     return history.some((entry) => {
+      if (entry.repostRequested === true) return false;
       const historyCodes = identity.getItemCodes(entry);
       const productCodes = identity.getItemCodes(product);
       if (historyCodes.length && productCodes.length) {
