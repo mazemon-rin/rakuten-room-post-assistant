@@ -207,6 +207,17 @@
         <div class="button-row"><button class="primary-button" type="submit">候補を登録</button><button id="discoveryClear" class="secondary-button" type="button">入力をクリア</button></div>
         <p id="snsTrendDiscoveryMessage" class="message" role="status" aria-live="polite"></p>
       </form>
+      <form id="googleTrendsDiscoveryForm" class="panel sns-trend-form">
+        <h3>Google Trendsから追加</h3>
+        <p>Google Trendsで確認した情報を手動で登録します。外部API・RSS・スクレイピングは行いません。</p>
+        <p class="sns-trend-meta">発見元：Google Trends（google_trends）</p>
+        <label>キーワード<input id="googleTrendsKeyword" name="keyword" type="search" required placeholder="例：収納ボックス"></label>
+        <label>関連キーワード（任意）<input id="googleTrendsRelatedKeywords" name="relatedKeywords" type="text" placeholder="収納, 整理, 衣替え"></label>
+        <label>検索ボリューム表示（任意）<input id="googleTrendsSearchVolumeLabel" name="searchVolumeLabel" type="text" placeholder="例：急上昇"></label>
+        <label>Google Trends URL（任意）<input id="googleTrendsSourceUrl" name="sourceUrl" type="url" placeholder="https://trends.google.co.jp/"></label>
+        <label>確認日時<input id="googleTrendsObservedAt" name="observedAt" type="datetime-local"></label>
+        <div class="button-row"><button class="primary-button" type="submit">Google Trends候補を登録</button><button id="googleTrendsClear" class="secondary-button" type="button">入力をクリア</button></div>
+      </form>
       <section class="panel"><h3>発見候補一覧</h3><div id="snsTrendDiscoveryList"></div></section>
     </section>
 
