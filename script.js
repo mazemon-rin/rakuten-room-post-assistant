@@ -140,6 +140,19 @@ const evaluateDealStatus = (...args) => discountRules.evaluateDealStatus(...args
 const summarizeDealStatuses = (...args) => discountRules.summarizeDealStatuses(...args);
 const prepareCouponSearchProduct = (product, searchFilters = []) => discountRules.prepareCouponSearchProduct(product, searchFilters, data.eventSettings || {});
 const buildDealHeader = (product = {}) => discountRules.buildDealHeader(product, formatYen);
+
+function mergeConfirmedDealHeader(introText = "", product = {}) {
+  const current = String(introText || "").trim();
+  const header = buildDealHeader(product);
+  if (!header) return current;
+
+  const lines = current.split("\n");
+  const isDealHeaderLine = (line) => /^(?:[\d,]+円→[\d,]+円)?🉐\s*(?:最大)?\d{1,3}\s*%\s*(?:OFF|オフ)(?:クーポン)?(?:\s.*)?$/i.test(line.trim());
+  while (lines.length && isDealHeaderLine(lines[0])) lines.shift();
+  if (lines.length && /^\s*\d{1,4}(?:[./]\d{1,2})?.*まで\s*$/.test(lines[0])) lines.shift();
+  const body = lines.join("\n").trim();
+  return body ? `${header}\n${body}` : header;
+}
 const COUPON_SEARCH_OPTIONS = Object.freeze(Object.fromEntries([
   ["10", { label: "10%以上", queries: ["10%OFF", "10％OFF", "10%OFFクーポン", "10％OFFクーポン", ...buildDiscountSearchTermsForMinimum(20)] }],
   ...DISCOUNT_RATES.map((rate) => [String(rate), { label: `${rate}%以上`, queries: buildDiscountSearchTermsForMinimum(rate) }]),
@@ -775,6 +788,8 @@ function applyCouponEvidenceToCandidate(candidate, source = {}) {
       ...(source.couponConfirmed === true ? { coupon: candidate.coupon, couponInfo: candidate.couponInfo } : {})
     });
   }
+  const mergedIntroText = mergeConfirmedDealHeader(candidate.introText, candidate);
+  if (mergedIntroText !== String(candidate.introText || "").trim()) candidate.introText = mergedIntroText;
   return candidate;
 }
 
@@ -3474,11 +3489,12 @@ function buildCodexPostInstructions(candidate) {
     "17. ROOM投稿画面で対象商品、#collect-content、「完了」ボタンを確認する。違う商品なら入力せず停止する",
     "18. 保存済みの紹介文とハッシュタグを#collect-contentへ入力する",
     "19. 商品、文章、ハッシュタグ、500文字以内を確認する",
-    "20. ROOMの「完了」は絶対にクリックしない",
-    "21. 入力内容と対象商品を最終確認したら、ROOM固定タブを最前面にしたまま60秒間、人間の完了操作を待つ",
-    "22. 待機開始時に『投稿準備が完了しました。60秒以内にROOMの「完了」ボタンを押してください。』と表示する",
-    "23. 60秒以内に人間がROOMの「完了」を押したことを利用者から確認できた場合だけ、投稿済み記録へ進む。Codex自身は完了を押さない",
-    "24. 60秒経過後も完了操作が確認できない場合は『60秒以内に完了操作が確認できなかったため停止しました。』と表示して停止する。自動投稿へ切り替えない",
+    "20. 対象商品、#collect-content、保存済み紹介文、保存済みハッシュタグ、500文字以内、操作可能な「完了」ボタン、エラーなしを最終確認する",
+    "21. 『投稿準備が完了しました。60秒後にROOMの「完了」ボタンを押します。』と表示し、その確認完了時点から60秒待機する",
+    "22. 待機中に利用者がROOMの「完了」を押して投稿完了したことを確認できた場合は、Codexは完了を追加クリックせず、投稿完了確認へ進む",
+    "23. 利用者が先に完了していない場合、60秒後にROOM投稿画面、対象商品、#collect-content、紹介文・ハッシュタグ、500文字以内、操作可能な完了ボタン、エラーなしを再確認する",
+    "24. 再確認がすべて正常な場合だけ、実在するROOMの「完了」ボタンを通常のGoogle Chrome操作で1回クリックする。JavaScript疑似クリック、URL推測、投稿URL生成は使用しない",
+    "25. 60秒後の再確認で異常がある場合は完了をクリックせず停止し、ROOM投稿完了確認前に投稿済み記録へ進まない",
     "",
     "【紹介文条件】",
     "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項がある場合は紹介文へ反映する。確認済みのクーポン最終有効日は、紹介文の冒頭付近へ優先して自然に入力する。商品タイトルからの検出だけでは確認済みにせず、確認前は断定しない。",
@@ -3486,7 +3502,7 @@ function buildCodexPostInstructions(candidate) {
     "生成後に、冒頭の具体性、商品固有性、使用状況、効果・レビュー・価格・クーポン・期限の事実性、煽り表現を自己点検し、条件を満たさなければ書き直す。",
     "出力は『紹介文:』『短い紹介文:』『ハッシュタグ:』『セール情報:（ある場合のみ）』『状態:確認待ち』の見出しを使う。",
     "「絶対」「必ず」「最安」「No.1」など根拠のない断定や効果保証は禁止。",
-    "Safari、Codex内蔵ブラウザ、agent-browser、Playwrightは使用しない。Google Chromeだけを使用する。ROOMの完了、自動いいね、フォロー、コメントは実行しない。",
+    "Safari、Codex内蔵ブラウザ、agent-browser、Playwrightは使用しない。Google Chromeだけを使用する。ROOMの自動いいね、フォロー、コメントは実行しない。",
     "",
     "【必ず受け取り欄へ入力する形式】",
     `ITEM_CODE:\n${candidate.itemCode || product.itemCode || ""}`,
@@ -3596,9 +3612,10 @@ function prepareCandidatePost(id) {
     candidate.introText.trim(),
     "4. ハッシュタグを紹介文末尾へ追加する",
     candidate.hashTags || "",
-    "5. 内容を確認し、「完了」はクリックせず、60秒間人間の操作を待つ",
-    "6. 待機開始時に『投稿準備が完了しました。60秒以内にROOMの「完了」ボタンを押してください。』と表示する",
-    "7. 60秒経過後も完了操作が確認できなければ『60秒以内に完了操作が確認できなかったため停止しました。』と表示して停止する"
+    "5. 内容、対象商品、500文字以内、操作可能な「完了」ボタン、エラーなしを確認する",
+    "6. 『投稿準備が完了しました。60秒後にROOMの「完了」ボタンを押します。』と表示して60秒待機する",
+    "7. 利用者が先に完了した場合は追加クリックせず、先に完了していない場合だけ60秒後に再確認して正常なら実在する完了ボタンを通常操作で1回クリックする",
+    "8. 再確認で異常がある場合はクリックせず停止し、投稿完了確認前に投稿済み記録を行わない"
   ].join("\n");
   candidate.introText = candidate.introText.trim();
   saveData();
