@@ -841,7 +841,8 @@ function renderUnifiedProductCard(product, index, options = {}) {
     : `<button class="primary-button" type="button" onclick="${isCoupon ? `saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `quickSaveByIndex(${index})`}">投稿候補に保存</button>`;
   const saveButtons = `${roomSaveButton}<button class="secondary-button" type="button" onclick="${isCoupon ? `saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `threadsOnlySaveByIndex(${index})`}">Threads投稿</button>`;
   const imageCandidates = escapeAttr(JSON.stringify(getImageCandidates(product)));
-  return `<article class="product-card unified-product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}"><div class="coupon-image-wrap"><img src="${escapeAttr(getImage(product))}" data-image-candidates="${imageCandidates}" data-image-index="0" alt="" onerror="tryNextProductImage(this)"><span class="product-image-placeholder" hidden>画像なし</span></div><div class="product-body"><div class="product-title">${rankText}${escapeHtml(product.itemName || "商品名未設定")}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="meta">取得元：${escapeHtml(sourceText)}</p><p class="coupon-status">${escapeHtml(dealStatus.label)}</p><p class="selection-score">選定スコア：${getSelectionTotal(product)} / 100</p><p class="selection-score">今日の投稿優先度：${product.todayPriorityScore ?? getSelectionTotal(product)}</p>${alreadyPosted ? `<p class="ranking-post-status">投稿済み</p>` : ""}${controls}<div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>${saveButtons}${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div></div></article>`;
+  const evaluationWarnings = product.warnings?.length ? `<p class="evaluation-warning">${escapeHtml(product.warnings.join(" / "))}</p>` : "";
+  return `<article class="product-card unified-product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}"><div class="coupon-image-wrap"><img src="${escapeAttr(getImage(product))}" data-image-candidates="${imageCandidates}" data-image-index="0" alt="" onerror="tryNextProductImage(this)"><span class="product-image-placeholder" hidden>画像なし</span></div><div class="product-body"><div class="product-title">${rankText}${escapeHtml(product.itemName || "商品名未設定")}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="meta">取得元：${escapeHtml(sourceText)}</p><p class="coupon-status">${escapeHtml(dealStatus.label)}</p><p class="selection-score">選定スコア：${getEvaluationScoreLabel(product)}</p><p class="selection-score">今日の投稿優先度：${getPriorityScoreLabel(product)}</p>${evaluationWarnings}${alreadyPosted ? `<p class="ranking-post-status">投稿済み</p>` : ""}${controls}<div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>${saveButtons}${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div></div></article>`;
 }
 
 function renderCouponSearchCard(product) {
@@ -1349,7 +1350,7 @@ function filterAvailableProducts(products) {
 
 function renderResults(products) {
   searchResults = products.filter((product) => !isUnavailableProduct(product) && !postedHistoryMatch(product));
-  searchResults.forEach((product) => { product.sourceTypes = [...new Set([...(product.sourceTypes || []), "product"])]; if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); applySelectionScore(product); });
+  searchResults.forEach((product) => { product.sourceTypes = [...new Set([...(product.sourceTypes || []), "product"])]; if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); applyRoomProductEvaluation(product); });
   $("#results").innerHTML = searchResults.map((product, index) => renderUnifiedProductCard(product, index, { mode: "product" })).join("");
   return;
 }
@@ -1559,8 +1560,7 @@ function quickSave(product) {
     snsPosts: createSnsPosts()
   };
   Object.assign(candidate, checkProductTrust(productWithUrl));
-  applySelectionScore(candidate);
-  applyStrategyScores(candidate);
+  applyRoomProductEvaluation(candidate);
   applyCollectionMetadata(candidate);
   data.candidates.unshift(candidate);
   saveData();
@@ -1630,8 +1630,7 @@ function quickSaveThreadsOnly(product) {
   candidate.snsPosts.threads.generatedAt = new Date().toISOString();
   ensureThreadsOnlyDraft(candidate);
   Object.assign(candidate, checkProductTrust(productWithUrl));
-  applySelectionScore(candidate);
-  applyStrategyScores(candidate);
+  applyRoomProductEvaluation(candidate);
   data.candidates.unshift(candidate);
   saveData();
   renderCandidates();
@@ -1895,8 +1894,7 @@ function buildQueueCandidate(product) {
   };
   applyCouponEvidenceToCandidate(candidate, productWithUrl);
   Object.assign(candidate, checkProductTrust(productWithUrl));
-  applySelectionScore(candidate);
-  applyStrategyScores(candidate);
+  applyRoomProductEvaluation(candidate);
   applyCollectionMetadata(candidate);
   return candidate;
 }
@@ -2255,7 +2253,7 @@ function candidateCard(item) {
         ${coupon ? `<p class="coupon-status">割引率：${coupon.discountRate ? `${coupon.discountRate}%OFF` : "未確認"}（${coupon.rateConfirmed && coupon.discountRateType === "exact" ? "確認済み" : "要確認"}） / 期限：${escapeHtml(coupon.couponDeadline || "未確認")}（${coupon.deadlineConfirmed ? "確認済み" : "要確認"}）</p>` : ""}
         ${item.recommendedCollection ? `<p class="collection-status"><strong>推奨コレクション：</strong>${escapeHtml(getCollectionById(item.recommendedCollection)?.name || item.recommendedCollection)}</p><details class="collection-details"><summary>推奨理由を見る</summary><p>${escapeHtml(item.collectionReason || "既存の信頼性チェック結果に基づく推奨です。")}</p></details>` : ""}
         <label class="collection-select"><strong>選択コレクション</strong><select onchange="updateCandidate('${item.id}', 'selectedCollection', this.value)">${collectionOptions(item.selectedCollection)}</select></label>
-        <p class="selection-score">選定スコア：${getSelectionTotal(item)} / 100</p><p class="selection-score">${item.matchedTrendKeywords?.length ? "購買トレンド適合" : "トレンド適合"}：${item.trendScore?.total ?? 0} / ${item.matchedTrendKeywords?.length ? 30 : 20}　投稿機会：${item.opportunityScore?.total ?? 0} / 20</p><p class="selection-score"><strong>今日の投稿優先度：${item.todayPriorityScore ?? getSelectionTotal(item)} / ${item.matchedTrendKeywords?.length ? 100 : 140}</strong></p><p class="selection-grade">${escapeHtml(item.selectionGrade || selectionGrade(getSelectionTotal(item)))}</p><details class="selection-details"><summary>選定理由・訴求材料を見る</summary><p>${escapeHtml((item.priorityReasons || item.selectionReason || item.selectionReasons || []).join("\n")).replaceAll("\n", "<br>")}</p><p>${item.buyAroundCandidate ? "買い回り候補" : ""}</p></details>
+        <p class="selection-score">選定スコア：${getEvaluationScoreLabel(item)}</p><p class="selection-score">${item.matchedTrendKeywords?.length ? "購買トレンド適合" : "トレンド適合"}：${item.trendScore?.total ?? 0} / ${item.matchedTrendKeywords?.length ? 30 : 20}　投稿機会：${item.opportunityScore?.total ?? 0} / 20</p><p class="selection-score"><strong>今日の投稿優先度：${getPriorityScoreLabel(item)} / ${item.matchedTrendKeywords?.length ? 100 : 140}</strong></p>${item.warnings?.length ? `<p class="evaluation-warning">${escapeHtml(item.warnings.join(" / "))}</p>` : ""}<p class="selection-grade">${escapeHtml(item.selectionGrade || selectionGrade(getSelectionTotal(item)))}</p><details class="selection-details"><summary>選定理由・訴求材料を見る</summary><p>${escapeHtml((item.priorityReasons || item.selectionReason || item.selectionReasons || []).join("\n")).replaceAll("\n", "<br>")}</p><p>${item.buyAroundCandidate ? "買い回り候補" : ""}</p></details>
         ${trustReasonText ? `<details class="trust-details"><summary>判定理由を見る</summary><p>${escapeHtml(trustReasonText).replaceAll("\n", "<br>")}</p></details>` : ""}
         <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
@@ -3691,7 +3689,7 @@ function queuedCandidateMatch(product) {
 function selectRankingCandidate(categoryItems, context) {
   const ordered = [...categoryItems].map((product) => {
     Object.assign(product, checkProductTrust(product));
-    return applySelectionScore(product);
+    return applyRoomProductEvaluation(product);
   }).sort((a, b) => {
     const aScore = getSelectionTotal(a);
     const bScore = getSelectionTotal(b);
@@ -4221,6 +4219,71 @@ function applyStrategyScores(product = {}) {
   return product;
 }
 
+function evaluateRoomProduct(product = {}, context = {}) {
+  const source = product.product || product;
+  const postedIdentities = context.postedIdentities || new Set(data.history.map((item) => rankingIdentity(item.product || item)));
+  const queuedIdentities = context.queuedIdentities || new Set(data.candidates.filter(isRoomCandidate).map((item) => rankingIdentity(item.product || item)));
+  const matched = [...new Set(source.matchedTrendKeywords || [])];
+  const selection = matched.length
+    ? calculateTrendSelectionScore(source, { postedIdentities, queuedIdentities, matchedTrendKeywords: matched })
+    : calculateSelectionScore(source, { postedIdentities, queuedIdentities });
+  const trendScore = calculateTrendScore(source, matched);
+  const opportunityScore = calculateOpportunityScore(source, matched, context.eventSettings || data.eventSettings);
+  const dealEvidence = getCouponEvidence(source);
+  const detectedDeal = extractCouponCandidates(source);
+  const confirmedDeal = dealEvidence.rateConfirmed === true && dealEvidence.discountRateType === "exact" && Number.isFinite(Number(dealEvidence.discountRate));
+  const candidateDeal = !confirmedDeal && Boolean(dealEvidence.discountRate || detectedDeal.detectedDiscountRate || detectedDeal.detectedDeadline || source.couponCandidate || /(?:%\s*OFF|%\s*オフ|クーポン|半額)/i.test(`${source.itemName || ""} ${source.itemCaption || ""}`));
+  const dealEvaluation = {
+    status: confirmedDeal ? "confirmed" : candidateDeal ? "candidate" : "unknown",
+    rate: confirmedDeal ? Number(dealEvidence.discountRate) : (dealEvidence.discountRate ?? detectedDeal.detectedDiscountRate ?? null),
+    rateConfirmed: confirmedDeal,
+    deadline: dealEvidence.deadlineConfirmed ? dealEvidence.couponDeadline || "" : "",
+    deadlineConfirmed: dealEvidence.deadlineConfirmed === true,
+    couponConfirmed: source.couponConfirmed === true,
+    label: confirmedDeal ? (dealEvidence.confirmedDiscountLabel || `${dealEvidence.discountRate}%OFF確認済み`) : candidateDeal ? "お買い得候補・要確認" : "お買い得情報なし"
+  };
+  const warnings = [];
+  if (source.rank == null && source.sourceRank == null && source.apiRank == null) warnings.push("ランキング順位未取得（ランキング加点なし）");
+  if (candidateDeal && !confirmedDeal) warnings.push("割引・クーポン情報は候補のため商品ページ確認が必要です");
+  if (dealEvidence.couponDeadline && !dealEvidence.deadlineConfirmed) warnings.push("クーポン期限は未確認です");
+  const todayPriorityScore = matched.length
+    ? getSelectionTotal(selection)
+    : Math.min(140, selection.selectionScoreTotal + trendScore.total + opportunityScore.total);
+  const priorityReasons = [...selection.selectionReasons];
+  if (trendScore.total) priorityReasons.push(`トレンド一致：${matched.join("、")}`);
+  priorityReasons.push(...opportunityScore.reasons);
+  if (confirmedDeal) priorityReasons.push(`確認済み割引：${dealEvaluation.label}`);
+  warnings.forEach((warning) => priorityReasons.push(`注意：${warning}`));
+  const hasEvidence = Boolean(String(source.itemCode || source.itemName || source.itemUrl || source.categoryName || "").trim() || Number(source.itemPrice) > 0 || Number(source.reviewAverage) > 0 || Number(source.reviewCount) > 0 || source.rank != null || source.sourceRank != null || source.apiRank != null || matched.length || confirmedDeal || candidateDeal);
+  return {
+    ...selection,
+    trendScore,
+    opportunityScore,
+    todayPriorityScore,
+    priorityReasons: [...new Set(priorityReasons)],
+    salesPoints: opportunityScore.reasons,
+    dealEvaluation,
+    warnings,
+    evaluationStatus: hasEvidence ? "evaluated" : "uncomputed",
+    evaluationVersion: "unified-v1"
+  };
+}
+
+function applyRoomProductEvaluation(product = {}, context = {}) {
+  Object.assign(product, evaluateRoomProduct(product, context));
+  product.postPerspective = product.postPerspective || (product.usageStatus === "used" ? "owned" : product.trustStatus === "注意喚起候補" ? "warning" : "wanted");
+  product.buyAroundCandidate = Number(product.itemPrice) >= 900 && Number(product.itemPrice) <= 1100;
+  return product;
+}
+
+function getEvaluationScoreLabel(product = {}) {
+  return product.evaluationStatus === "uncomputed" ? "未計算" : `${getSelectionTotal(product)} / 100`;
+}
+
+function getPriorityScoreLabel(product = {}) {
+  return product.evaluationStatus === "uncomputed" ? "未計算" : `${product.todayPriorityScore ?? getSelectionTotal(product)}`;
+}
+
 async function searchTrendProducts() {
   const keywords = $(`#trendKeywords`)?.value.split(/[,、\n]/).map((word) => word.trim()).filter(Boolean).slice(0, TREND_KEYWORD_MAX) || [];
   data.trendSettings = { keywords, updatedAt: new Date().toISOString() }; localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -4264,7 +4327,7 @@ async function searchTrendProducts() {
 function renderRankingResults(products) {
   searchResults = filterAvailableProducts(products);
   const dealCondition = getSelectedDealCondition();
-  searchResults.forEach((product) => { if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); product.dealStatus = evaluateDealStatus(product, dealCondition); applySelectionScore(product); applyStrategyScores(product); });
+  searchResults.forEach((product) => { if (!product.trustStatus) Object.assign(product, checkProductTrust(product)); product.dealStatus = evaluateDealStatus(product, dealCondition); applyRoomProductEvaluation(product); });
   const displayProducts = [...searchResults].sort((a, b) => {
     if ($("#rankingSortOrder")?.value === "priority") return (b.todayPriorityScore ?? getSelectionTotal(b)) - (a.todayPriorityScore ?? getSelectionTotal(a)) || (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0);
     if ($("#rankingSortOrder")?.value === "score") return getSelectionTotal(b) - getSelectionTotal(a) || (a.sourceRank ?? a.rank ?? 0) - (b.sourceRank ?? b.rank ?? 0);
