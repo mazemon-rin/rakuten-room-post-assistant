@@ -12,6 +12,9 @@
     x: "X",
     manual: "手動"
   };
+  const ROOM_PRODUCT_TERMS = ["ps5", "iphone", "ipad", "android", "nintendo", "switch", "ゲーム機", "家電", "スマホ", "パソコン", "pc", "周辺機器", "食品", "飲料", "日用品", "コスメ", "化粧品", "ファッション", "ブランド", "無印良品", "玩具", "おもちゃ", "書籍", "季節用品", "ミスタードーナツ"];
+  const ROOM_CONTEXT_TERMS = ["収納", "防災", "花粉", "暑さ対策", "旅行", "新生活", "ハロウィン", "クリスマス", "節電", "防寒"];
+  const EXCLUDED_TREND_TERMS = ["事故", "事件", "犯罪", "死亡", "死去", "訃報", "病気", "インフルエンザ", "入院", "逮捕", "選挙", "政治", "議員", "大臣", "災害", "速報", "炎上", "人物ニュース", "教授", "俳優", "タレント", "選手", "駅"];
   const EMPTY_STATE = { candidates: [] };
 
   function readState(storage = window.localStorage) {
@@ -137,6 +140,62 @@
     };
   }
 
+  function includesTerm(text, terms) {
+    const normalized = String(text || "").toLowerCase();
+    return terms.find((term) => normalized.includes(String(term).toLowerCase())) || "";
+  }
+
+  function trendEvidenceText(item = {}) {
+    const news = Array.isArray(item.news) ? item.news : [];
+    return [item.keyword, ...news.flatMap((entry) => [entry?.title, entry?.source])].filter(Boolean).join(" ");
+  }
+
+  function classifyTrend(item = {}) {
+    const keyword = String(item.keyword || "").trim();
+    const keywordExcluded = includesTerm(keyword, EXCLUDED_TREND_TERMS);
+    if (keywordExcluded) return { grade: "C", reasons: [`除外対象のキーワード（${keywordExcluded}）`] };
+    const keywordProduct = includesTerm(keyword, ROOM_PRODUCT_TERMS);
+    if (keywordProduct) return { grade: "A", reasons: [`商品・ブランド関連キーワード（${keywordProduct}）`] };
+    const evidence = trendEvidenceText(item);
+    const evidenceExcluded = includesTerm(evidence, EXCLUDED_TREND_TERMS);
+    if (evidenceExcluded) return { grade: "C", reasons: [`ニュースに除外対象の情報（${evidenceExcluded}）`] };
+    const contextTerm = includesTerm(evidence, ROOM_CONTEXT_TERMS);
+    if (contextTerm) return { grade: "B", reasons: [`商品展開できるテーマ（${contextTerm}）`] };
+    const evidenceProduct = includesTerm(evidence, ROOM_PRODUCT_TERMS);
+    if (evidenceProduct) return { grade: "A", reasons: [`ニュースに商品関連語（${evidenceProduct}）`] };
+    return { grade: "B", reasons: ["商品展開の可能性を人間が確認"] };
+  }
+
+  function classifyTrendItems(items = []) {
+    return items.map((item, index) => ({ item, index, classification: classifyTrend(item) }))
+      .sort((left, right) => ({ A: 0, B: 1, C: 2 }[left.classification.grade] - { A: 0, B: 1, C: 2 }[right.classification.grade]));
+  }
+
+  function findGoogleTrendsCandidate(keyword, candidates = []) {
+    const normalized = String(keyword || "").trim();
+    return candidates.find((candidate) => candidate.source === "google_trends" && candidate.keyword === normalized && candidate.status !== "rejected") || null;
+  }
+
+  function acceptAndSearchCandidate(item, payload, state = readState(), options = {}) {
+    const storage = options.storage || window.localStorage;
+    const snsApi = options.snsApi || window.snsTrend;
+    const classification = options.classification || classifyTrend(item);
+    const candidateInput = buildGoogleTrendsCandidateInput(item, payload, options.now);
+    let nextState = state;
+    let candidate = findGoogleTrendsCandidate(candidateInput.keyword, nextState.candidates);
+    if (!candidate) {
+      const added = addGoogleTrendsCandidate(item, payload, nextState, options.now);
+      nextState = added.state;
+      candidate = added.candidate;
+    }
+    const accepted = acceptCandidate(candidate.id, nextState, snsApi, storage);
+    nextState = accepted.state;
+    writeState(nextState, storage);
+    if (typeof snsApi?.searchByTrendId !== "function") throw new Error("既存の楽天検索導線を利用できません。");
+    snsApi.searchByTrendId(accepted.roomTrendId, { grade: classification.grade, reasons: classification.reasons, keyword: candidate.keyword });
+    return { ...accepted, state: nextState, candidate: nextState.candidates.find((entry) => entry.id === candidate.id), classification };
+  }
+
   function addGoogleTrendsCandidate(item, payload, state = readState(), now = new Date().toISOString()) {
     if (!item || !String(item.keyword || "").trim()) throw workerError("invalid_item", "キーワードがないため登録できません。");
     return upsertCandidate(buildGoogleTrendsCandidateInput(item, payload, now), state);
@@ -211,12 +270,15 @@
       preview.innerHTML = "<p class=\"message\">取得できるトレンドはありません。</p>";
       return;
     }
-    preview.innerHTML = items.map((item, index) => {
+    preview.innerHTML = classifyTrendItems(items).map(({ item, index, classification }) => {
       const candidateInput = buildGoogleTrendsCandidateInput(item, payload);
       const duplicate = findUnprocessedDuplicate(normalizeCandidate({ ...candidateInput, id: `preview-${index}` }), state.candidates);
+      const existing = findGoogleTrendsCandidate(candidateInput.keyword, state.candidates);
       const news = Array.isArray(item.news) ? item.news.slice(0, 3) : [];
       const newsHtml = news.length ? `<ul>${news.map((entry) => `<li>${escapeText(entry.title || "ニュースタイトル未取得")}</li>`).join("")}</ul>` : "<p class=\"sns-trend-meta\">関連ニュース：0件</p>";
-      return `<article class="sns-trend-worker-card"><h4>${escapeText(item.keyword)}</h4><p class="sns-trend-meta">検索ボリューム：${escapeText(item.traffic || "未取得")}<br>公開日時：${escapeText(item.publishedAt || "未取得")}<br>関連ニュース：${news.length}件</p>${newsHtml}<button type="button" class="secondary-button" data-google-trends-add-index="${index}" ${duplicate ? "disabled" : ""}>${duplicate ? "登録済み" : "Discoveryへ追加"}</button></article>`;
+      const gradeLabel = classification.grade === "A" ? "ROOM向き A" : classification.grade === "B" ? "ROOM向き B" : "対象外 C";
+      const quickAction = classification.grade === "C" ? "" : `<button type="button" class="primary-button" data-google-trends-quick-search-index="${index}" ${existing?.roomTrendId ? "disabled" : ""}>${existing?.roomTrendId ? "楽天検索へ移動済み" : "採用して楽天で探す"}</button>`;
+      return `<article class="sns-trend-worker-card sns-trend-grade-${classification.grade.toLowerCase()}"><h4>${escapeText(item.keyword)}</h4><p class="sns-trend-grade-label">${gradeLabel}</p><p class="sns-trend-reason">理由：${classification.reasons.map((reason) => escapeText(reason)).join(" ／ ")}</p><p class="sns-trend-meta">検索ボリューム：${escapeText(item.traffic || "未取得")}<br>公開日時：${escapeText(item.publishedAt || "未取得")}<br>関連ニュース：${news.length}件</p>${newsHtml}<div class="button-row"><button type="button" class="secondary-button" data-google-trends-add-index="${index}" ${duplicate || existing ? "disabled" : ""}>${duplicate || existing ? "登録済み" : "Discoveryへ追加"}</button>${quickAction}</div></article>`;
     }).join("");
   }
 
@@ -313,6 +375,21 @@
     });
     document.querySelector("#googleTrendsWorkerPreview")?.addEventListener("click", (event) => {
       const index = event.target.dataset.googleTrendsAddIndex;
+      const quickIndex = event.target.dataset.googleTrendsQuickSearchIndex;
+      if (quickIndex !== undefined) {
+        if (!workerPayload || workerLoading) return;
+        try {
+          const item = workerPayload.items[Number(quickIndex)];
+          const result = acceptAndSearchCandidate(item, workerPayload, state, { storage, classification: classifyTrend(item), snsApi: window.snsTrend });
+          state = result.state;
+          renderWorkerPreview(workerPayload, state);
+          render(state);
+          if (workerMessage) workerMessage.textContent = "採用して楽天検索へ移動しました。商品選択は人間が行ってください。";
+        } catch (error) {
+          if (workerMessage) workerMessage.textContent = error.message;
+        }
+        return;
+      }
       if (index === undefined || !workerPayload || workerLoading) return;
       try {
         const result = addGoogleTrendsCandidate(workerPayload.items[Number(index)], workerPayload, state);
@@ -338,6 +415,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, rejectCandidate, validateWorkerPayload, fetchGoogleTrends, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, renderWorkerPreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, findGoogleTrendsCandidate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, renderWorkerPreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());
