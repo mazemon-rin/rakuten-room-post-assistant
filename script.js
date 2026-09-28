@@ -832,6 +832,19 @@ function isOriginalPhotoCandidate(item) {
   return normalizeOriginalPhoto(item?.originalPhoto).enabled === true;
 }
 
+function ensureOriginalPhotoContent(candidate) {
+  if (!isOriginalPhotoCandidate(candidate)) return candidate;
+  const requiredTag = "#オリジナル写真";
+  const tags = String(candidate.hashTags || "").trim().split(/\s+/).filter(Boolean);
+  if (!tags.includes(requiredTag)) tags.push(requiredTag);
+  const normalizedTags = [...new Set(tags)].join(" ");
+  const intro = String(candidate.introText || "").trim();
+  const availableIntroLength = Math.max(0, 500 - (normalizedTags ? normalizedTags.length + 1 : 0));
+  candidate.introText = intro.slice(0, availableIntroLength).trim();
+  candidate.hashTags = normalizedTags;
+  return candidate;
+}
+
 function getOriginalPhotoSelection(inputId) {
   return Boolean(inputId && document.getElementById(inputId)?.checked);
 }
@@ -1582,6 +1595,7 @@ function quickSave(product, options = {}) {
     snsPosts: createSnsPosts()
   };
   candidate.originalPhoto = normalizeOriginalPhoto(options.originalPhotoEnabled === true);
+  ensureOriginalPhotoContent(candidate);
   Object.assign(candidate, checkProductTrust(productWithUrl));
   applyRoomProductEvaluation(candidate);
   applyCollectionMetadata(candidate);
@@ -2351,6 +2365,7 @@ function renderHistory() {
         <p class="collection-status">投稿タイプ：${escapeHtml({ normal: "通常商品", sale: "セール商品", used: "使用済み商品", warning: "注意喚起商品" }[item.postType] || "通常商品")} / 信頼性：${escapeHtml(item.trustStatus || "未確認")}</p>
         ${item.selectedCollection || item.recommendedCollection ? `<p class="collection-status">コレクション：${escapeHtml(getCollectionById(item.selectedCollection || item.recommendedCollection)?.name || item.selectedCollection || item.recommendedCollection)}</p>` : ""}
         <p>${escapeHtml(shorten(item.introText || "", 140))}</p>
+        ${item.repostRequested ? `<p class="message">再投稿候補へ戻し済み</p>` : `<div class="record-actions"><button class="secondary-button" type="button" onclick="restoreHistoryToRoomCandidate('${escapeAttr(item.id)}')">投稿候補へ戻す</button></div>`}
         ${renderSalesSummary(item)}
         ${getSalesForHistory(item.id).length ? `<div class="record-actions"><button class="secondary-button" type="button" onclick="toggleSaleHistory('${escapeAttr(item.id)}')">売上履歴を見る</button></div>` : ""}
         <div id="sale-history-${escapeAttr(item.id)}" class="sale-history" hidden>${renderSaleHistory(item.id)}</div>
@@ -2584,6 +2599,7 @@ function updateCandidate(id, field, value) {
   if (field === "introText" && value && item.status === "未作成") item.status = "文章作成済み";
   if (field === "introText") item.postStatus = value ? "紹介文作成済み" : "紹介文未作成";
   if (field === "selectedCollection") item.collectionStatus = value ? "selected" : (item.recommendedCollection ? "recommended" : "none");
+  ensureOriginalPhotoContent(item);
   saveData();
   renderCandidates();
 }
@@ -3332,10 +3348,50 @@ function startNextCandidate(id) {
 
 function findPostedHistoryRecord(item) {
   const byId = data.history.find((historyItem) => historyItem.id === item.id);
-  if (byId) return byId;
+  if (byId && !byId.repostRequested) return byId;
   const itemCode = item.itemCode || item.product?.itemCode || "";
   if (!itemCode) return null;
-  return data.history.find((historyItem) => (historyItem.itemCode || historyItem.product?.itemCode || "") === itemCode) || null;
+  return data.history.find((historyItem) => !historyItem.repostRequested && (historyItem.itemCode || historyItem.product?.itemCode || "") === itemCode) || null;
+}
+
+function findAnyHistoryRecord(item) {
+  const byId = data.history.find((historyItem) => historyItem.id === item.id);
+  if (byId) return byId;
+  const itemCode = item.itemCode || item.product?.itemCode || "";
+  return itemCode ? data.history.find((historyItem) => (historyItem.itemCode || historyItem.product?.itemCode || "") === itemCode) || null : null;
+}
+
+function restoreHistoryToRoomCandidate(id) {
+  const historyItem = data.history.find((item) => item.id === id);
+  if (!historyItem) return;
+  if (data.candidates.some((item) => isRoomCandidate(item) && (item.itemCode || item.product?.itemCode || "") === historyItem.itemCode)) {
+    toast("この商品はすでに投稿候補にあります。");
+    return;
+  }
+  const itemCode = historyItem.itemCode || historyItem.product?.itemCode || "";
+  if (!itemCode) {
+    toast("itemCodeがない履歴は再投稿候補へ戻せません。");
+    return;
+  }
+  historyItem.repostRequested = true;
+  const candidate = {
+    ...historyItem,
+    id: historyItem.id,
+    destination: "room",
+    product: historyItem.product || { itemCode, itemName: historyItem.title, shopName: historyItem.shopName, itemUrl: historyItem.itemUrl, imageUrl: historyItem.imageUrl },
+    status: "文章作成済み",
+    postStatus: "投稿待ち",
+    savedAt: new Date().toISOString(),
+    postedAt: "",
+    roomUrl: "",
+    repostOfHistoryId: historyItem.id,
+    repostRequested: false,
+    originalPhoto: normalizeOriginalPhoto(historyItem.originalPhoto)
+  };
+  data.candidates.unshift(candidate);
+  saveData();
+  renderAll();
+  toast("対象商品を投稿候補へ戻しました。履歴と売上情報は保持しています。");
 }
 
 function createHistoryRecord(candidate, { roomUrl = candidate.roomUrl || "", postedAt = "", introText = candidate.introText || "" } = {}) {
@@ -3373,7 +3429,7 @@ function createHistoryRecord(candidate, { roomUrl = candidate.roomUrl || "", pos
 }
 
 function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "", introText = item.introText || "" } = {}) {
-  const existingHistory = findPostedHistoryRecord(item);
+  const existingHistory = findAnyHistoryRecord(item);
   const resolvedPostedAt = existingHistory?.postedAt || item.postedAt || postedAt || new Date().toISOString();
   const resolvedRoomUrl = roomUrl || item.roomUrl || existingHistory?.roomUrl || "";
   const historyId = existingHistory?.id || item.id;
@@ -3386,6 +3442,7 @@ function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "", 
   historySnapshot.id = historyId;
   historySnapshot.originalPhoto = existingHistory?.originalPhoto ?? historySnapshot.originalPhoto;
   if (existingHistory) Object.assign(existingHistory, historySnapshot);
+  if (existingHistory) existingHistory.repostRequested = false;
   else data.history.unshift(historySnapshot);
   return existingHistory || historySnapshot;
 }
@@ -3466,6 +3523,7 @@ function generateCandidatePrompt(id) {
 }
 
 function buildCodexPostInstructions(candidate) {
+  ensureOriginalPhotoContent(candidate);
   const product = candidate.product || candidate;
   const itemUrl = candidate.itemUrl || product.itemUrl || product.affiliateUrl || "";
   const context = buildGenerationContext(product, "不明");
@@ -3512,12 +3570,20 @@ function buildCodexPostInstructions(candidate) {
     "17. ROOM投稿画面で対象商品、#collect-content、「完了」ボタンを確認する。違う商品なら入力せず停止する",
     "18. 保存済みの紹介文とハッシュタグを#collect-contentへ入力する",
     "19. 商品、文章、ハッシュタグ、500文字以内を確認する",
-    "20. 対象商品、#collect-content、保存済み紹介文、保存済みハッシュタグ、500文字以内、操作可能な「完了」ボタン、エラーなしを最終確認する",
-    "21. 『投稿準備が完了しました。60秒後にROOMの「完了」ボタンを押します。』と表示し、その確認完了時点から60秒待機する",
-    "22. 待機中に利用者がROOMの「完了」を押して投稿完了したことを確認できた場合は、Codexは完了を追加クリックせず、投稿完了確認へ進む",
-    "23. 利用者が先に完了していない場合、60秒後にROOM投稿画面、対象商品、#collect-content、紹介文・ハッシュタグ、500文字以内、操作可能な完了ボタン、エラーなしを再確認する",
-    "24. 再確認がすべて正常な場合だけ、実在するROOMの「完了」ボタンを通常のGoogle Chrome操作で1回クリックする。JavaScript疑似クリック、URL推測、投稿URL生成は使用しない",
-    "25. 60秒後の再確認で異常がある場合は完了をクリックせず停止し、ROOM投稿完了確認前に投稿済み記録へ進まない",
+    "20. 対象商品、#collect-content、保存済み紹介文、保存済みハッシュタグ、500文字以内、エラーなしを最終確認する",
+    ...(isOriginalPhotoCandidate(candidate)
+      ? [
+        "21. ROOM投稿編集画面を開いた状態のまま維持し、前のページへ戻らず、別ページへ移動せず、タブや画面を閉じない",
+        "22. 「オリジナル写真追加・編集」は操作せず、「完了」も押さず、写真追加前の画面を利用者へ引き渡す",
+        "23. 『📷 オリジナル写真を追加してください。写真を確認後、ROOMの「完了」を手動で押してください。』と表示して停止する"
+      ]
+      : [
+        "21. 操作可能な「完了」ボタンを確認し、『投稿準備が完了しました。60秒後にROOMの「完了」ボタンを押します。』と表示し、その確認完了時点から60秒待機する",
+        "22. 待機中に利用者がROOMの「完了」を押して投稿完了したことを確認できた場合は、Codexは完了を追加クリックせず、投稿完了確認へ進む",
+        "23. 利用者が先に完了していない場合、60秒後にROOM投稿画面、対象商品、#collect-content、紹介文・ハッシュタグ、500文字以内、操作可能な完了ボタン、エラーなしを再確認する",
+        "24. 再確認がすべて正常な場合だけ、実在するROOMの「完了」ボタンを通常のGoogle Chrome操作で1回クリックする。JavaScript疑似クリック、URL推測、投稿URL生成は使用しない",
+        "25. 60秒後の再確認で異常がある場合は完了をクリックせず停止し、ROOM投稿完了確認前に投稿済み記録へ進まない"
+      ]),
     "",
     "【紹介文条件】",
     "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項がある場合は紹介文へ反映する。確認済みのクーポン最終有効日は、紹介文の冒頭付近へ優先して自然に入力する。商品タイトルからの検出だけでは確認済みにせず、確認前は断定しない。",
@@ -3572,6 +3638,11 @@ async function startCodexPost(id) {
     return;
   }
   candidate.introText = introText;
+  ensureOriginalPhotoContent(candidate);
+  if (!candidate.introText || `${candidate.introText}\n${candidate.hashTags || ""}`.length > 500) {
+    toast("オリジナル写真投稿の紹介文・ハッシュタグを500文字以内に調整できません。投稿準備を停止しました。");
+    return;
+  }
   saveData();
   const instructions = buildCodexPostInstructions(candidate);
   data.pendingRoomPost = {
@@ -3619,6 +3690,7 @@ function prepareCandidatePost(id) {
     openDetailByCandidate(id);
     return;
   }
+  ensureOriginalPhotoContent(candidate);
   const postText = `${candidate.introText.trim()}\n${candidate.hashTags || ""}`.trim();
   if (postText.length > 500) {
     toast("紹介文とハッシュタグを合わせて500文字以内にしてください。");
