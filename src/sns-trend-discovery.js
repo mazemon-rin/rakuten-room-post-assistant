@@ -227,10 +227,15 @@
     const query = String(keyword || "").trim();
     const requests = [
       fetchYouTubeSearch(query, fetchImpl).then((payload) => ({ payload })).catch((error) => ({ error })),
-      fetchWebSearch(query, fetchImpl).then((payload) => ({ payload })).catch((error) => ({ error }))
+      fetchWebSearch(buildYahooReasonSearchQuery(query), fetchImpl).then((payload) => ({ payload })).catch((error) => ({ error }))
     ];
     const [youtube, web] = await Promise.all(requests);
     return { keyword: query, youtube: youtube.payload || null, web: web.payload || null, youtubeError: youtube.error || null, webError: web.error || null, videos: youtube.payload?.items || [], webResults: web.payload?.results || [] };
+  }
+
+  function buildYahooReasonSearchQuery(keyword) {
+    const query = String(keyword || "").trim();
+    return query ? `${query} 日本 急上昇 話題 発売 再販 セール ニュース` : "";
   }
 
   function validateWebSearchPayload(payload) {
@@ -761,6 +766,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, buildYahooReasonSearchQuery, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());

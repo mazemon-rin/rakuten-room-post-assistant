@@ -22,11 +22,12 @@ api.fetchYahooRanking(async (url, options) => { calls += 1; if (options.method !
   let webReasonCalls = 0;
   const reason = await api.investigateYahooReason("Yahoo候補1", async (url, options) => {
     if (url.includes("youtube-search")) { youtubeReasonCalls += 1; return { ok: true, status: 200, async json() { return { source: "youtube", keyword: "Yahoo候補1", count: 1, items: [{ videoId: "v1", title: "Yahoo候補1 新商品レビュー", url: null, channelTitle: "確認チャンネル", publishedAt: "2026-09-29T00:00:00Z", viewCount: 12, likeCount: 1, commentCount: 0, duration: "PT1M" }] }; } }; }
-    if (url.includes("web-search?q=")) { webReasonCalls += 1; return { ok: true, status: 200, async json() { return { source: "tavily", query: "Yahoo候補1", count: 1, results: [{ title: "Yahoo候補1 新商品 発売情報", url: "https://example.com/news", content: "新商品として発売されました。", score: 0.9 }] }; } }; }
+    if (url.includes("web-search?q=")) { webReasonCalls += 1; if (!decodeURIComponent(url).includes("Yahoo候補1 日本 急上昇 話題 発売 再販 セール ニュース")) throw new Error("Yahoo web query was not Japan-focused"); return { ok: true, status: 200, async json() { return { source: "tavily", query: "Yahoo候補1 日本 急上昇 話題 発売 再販 セール ニュース", count: 1, results: [{ title: "Yahoo候補1 新商品 発売情報", url: "https://example.com/news", content: "新商品として発売されました。", score: 0.9 }] }; } }; }
     throw new Error("reason query mismatch");
   });
   if (youtubeReasonCalls !== 1 || webReasonCalls !== 1 || reason.videos.length !== 1 || reason.webResults.length !== 1) throw new Error("Yahoo reason evidence failed");
   if (api.classifyYahooReason("Yahoo候補1", reason.webResults, reason.videos).includes("断定")) throw new Error("Yahoo reason must not be definitive");
+  if (api.buildYahooReasonSearchQuery("除湿器") !== "除湿器 日本 急上昇 話題 発売 再販 セール ニュース") throw new Error("Yahoo reason query enrichment failed");
   if (!api.renderYahooReasonOutput) throw new Error("Yahoo reason renderer is missing");
   console.log("Yahoo discovery cases: passed");
 }).catch((error) => { console.error(error); process.exitCode = 1; });
