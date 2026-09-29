@@ -450,6 +450,10 @@
     const googleForm = document.querySelector("#googleTrendsDiscoveryForm");
     const list = document.querySelector("#snsTrendDiscoveryList");
     if (!form || !list) return;
+    document.querySelectorAll(".discovery-accordion").forEach((section) => section.addEventListener("toggle", () => {
+      if (!section.open) return;
+      document.querySelectorAll(".discovery-accordion").forEach((other) => { if (other !== section) other.open = false; });
+    }));
     const storage = window.localStorage;
     let state = readState(storage);
     let workerPayload = null;
@@ -585,7 +589,7 @@
       try {
         if (event.target.dataset.discoveryAccept) { const result = acceptCandidate(id, state, window.snsTrend, storage); state = result.state; writeState(state, storage); setMessage(result.created ? "Ver.1のSNSトレンドへ採用しました。" : "既存のVer.1トレンドへ紐付けました。"); }
         if (event.target.dataset.discoveryReject) { state = rejectCandidate(id, state); writeState(state, storage); setMessage("候補を却下しました。"); }
-        if (event.target.dataset.discoveryDelete && window.confirm("このトレンド発見候補を削除しますか？")) { state = removeCandidate(id, state); writeState(state, storage); }
+        if (event.target.dataset.discoveryDelete) { state = removeCandidate(id, state); writeState(state, storage); }
         render(state);
       } catch (error) { setMessage(error.message); }
     });

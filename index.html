@@ -199,7 +199,7 @@
 
     <section id="sns-trend-discovery" class="tab-panel">
       <div class="section-heading"><h2>トレンド発見</h2><p>話題になったキーワードを人間が確認し、採用した候補だけVer.1へ渡します。Google Trendsはボタン操作時にプレビュー取得できます。</p></div>
-      <form id="snsTrendDiscoveryForm" class="panel sns-trend-form">
+      <details class="discovery-accordion"><summary>トレンド候補を手動登録</summary><form id="snsTrendDiscoveryForm" class="panel sns-trend-form">
         <input id="discoveryId" name="id" type="hidden">
         <label>発見元<select id="discoverySource" name="source"><option value="google_trends">Google Trends</option><option value="youtube">YouTube</option><option value="threads">Threads</option><option value="x">X</option><option value="manual">手動</option></select></label>
         <label>キーワード<input id="discoveryKeyword" name="keyword" type="search" placeholder="例：収納ボックス"></label>
@@ -207,9 +207,8 @@
         <label>出典URL<input id="discoverySourceUrl" name="sourceUrl" type="url" placeholder="https://..."></label>
         <div class="button-row"><button class="primary-button" type="submit">候補を登録</button><button id="discoveryClear" class="secondary-button" type="button">入力をクリア</button></div>
         <p id="snsTrendDiscoveryMessage" class="message" role="status" aria-live="polite"></p>
-      </form>
-      <form id="googleTrendsDiscoveryForm" class="panel sns-trend-form">
-        <h3>Google Trendsから追加</h3>
+      </form></details>
+      <details class="discovery-accordion"><summary>Google Trendsから追加</summary><form id="googleTrendsDiscoveryForm" class="panel sns-trend-form">
         <p>Google Trendsで確認した情報を手動で登録します。外部API・RSS・スクレイピングは行いません。</p>
         <p class="sns-trend-meta">発見元：Google Trends（google_trends）</p>
         <label>キーワード<input id="googleTrendsKeyword" name="keyword" type="search" required placeholder="例：収納ボックス"></label>
@@ -218,21 +217,19 @@
         <label>Google Trends URL（任意）<input id="googleTrendsSourceUrl" name="sourceUrl" type="url" placeholder="https://trends.google.co.jp/"></label>
         <label>確認日時<input id="googleTrendsObservedAt" name="observedAt" type="datetime-local"></label>
         <div class="button-row"><button class="primary-button" type="submit">Google Trends候補を登録</button><button id="googleTrendsClear" class="secondary-button" type="button">入力をクリア</button></div>
-      </form>
-      <section class="panel sns-trend-worker-panel">
-        <h3>Google Trends Trending Now</h3>
+      </form></details>
+      <details class="discovery-accordion"><summary>Google Trends Trending Now</summary><section class="panel sns-trend-worker-panel">
         <p>「今日のトレンドを取得」を押したときだけ公開Workerへ接続し、登録前にプレビューします。自動取得・全件追加は行いません。</p>
         <div class="button-row"><button id="googleTrendsFetch" class="primary-button" type="button">今日のトレンドを取得</button></div>
         <p id="googleTrendsWorkerMessage" class="message" role="status" aria-live="polite"></p>
         <div id="googleTrendsWorkerPreview" class="sns-trend-worker-preview" aria-live="polite"></div>
-      </section>
-      <section class="panel sns-trend-worker-panel">
-        <h3>YouTubeから商品候補を探す</h3>
+      </section></details>
+      <details class="discovery-accordion"><summary>YouTubeから追加</summary><section class="panel sns-trend-worker-panel">
         <p>YouTube検索はこのボタンを押したときだけ実行します。取得結果は補助根拠として扱い、A/B/C判定を自動変更しません。</p>
         <div class="button-row"><input id="youtubeSearchQuery" type="search" placeholder="例：買ってよかった 収納用品"><button id="youtubeSearchButton" class="primary-button" type="button">YouTubeで検索</button></div>
         <p id="youtubeSearchMessage" class="message" role="status" aria-live="polite"></p>
         <div id="youtubeSearchPreview" class="sns-trend-worker-preview" aria-live="polite"></div>
-      </section>
+      </section></details>
       <section id="trendAnalytics" class="panel"><h3>トレンド成果</h3><p>DiscoveryからROOM・売上までの到達状況を、既存データを読み取り専用で照合して表示します。</p><div id="trendAnalyticsSummary"></div><div id="trendAnalyticsSources"></div><label>表示フィルター <select id="trendAnalyticsFilter"><option value="all">全件</option><option value="google_trends">Google Trends</option><option value="youtube">YouTube</option><option value="rakuten_matched">楽天商品化済み</option><option value="room_candidate">ROOM候補化済み</option><option value="not_reached">楽天商品未到達</option></select></label><div id="trendAnalyticsRecords"></div><div id="trendAnalyticsSuccess"></div><div id="trendAnalyticsUnreached"></div></section>
       <section class="panel"><h3>発見候補一覧</h3><div id="snsTrendDiscoveryList"></div></section>
     </section>
@@ -317,7 +314,7 @@
           </fieldset>
           <label>最低割引率<select id="unifiedDiscountFilter" name="unifiedDiscountFilter"><option value="">指定なし</option><option value="10">10%以上</option><option value="20">20%以上</option><option value="30">30%以上</option><option value="40">40%以上</option><option value="50">50%以上</option><option value="60">60%以上</option><option value="70">70%以上</option><option value="80">80%以上</option><option value="90">90%以上</option></select></label>
           <p class="small-note search-filter-note">割引商品を探すための検索条件です。表示商品の割引率を保証するものではありません。</p>
-          <div class="button-row"><button class="primary-button" type="submit">商品を検索</button><button id="clearSearchConditions" class="secondary-button" type="button">検索条件をクリア</button><button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button></div>
+          <div class="button-row"><button class="primary-button" type="submit">商品を検索</button><button id="clearSearchConditions" class="secondary-button" type="button">クリア</button><button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button></div>
         </form>
         <p id="couponSearchMessage" class="message" role="status" aria-live="polite" style="white-space: pre-line"></p>
         <div id="couponSearchResults" class="coupon-results-grid"></div>
