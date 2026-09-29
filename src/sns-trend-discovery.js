@@ -731,7 +731,7 @@
         if (output) output.textContent = "調査中...";
         try {
           const evidence = await investigateYahooReason(yahooPayload.items[Number(reasonIndex)]?.keyword, window.fetch.bind(window));
-          renderYahooReasonOutput(output, evidence.keyword, evidence.payload);
+          renderYahooReasonOutput(output, evidence.keyword, evidence);
         } catch (error) {
           if (output) output.textContent = "急上昇理由を確認できませんでした。";
         }
