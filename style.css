@@ -554,6 +554,7 @@ textarea {
 }
 
 .ranking-group .product-grid {
+  display: grid;
   margin-bottom: 22px;
 }
 
