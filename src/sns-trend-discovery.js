@@ -4,11 +4,13 @@
   const STORAGE_KEY = "roomSnsTrendDiscoveryV2";
   const GOOGLE_TRENDS_WORKER_URL = "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/google-trends";
   const YOUTUBE_SEARCH_WORKER_URL = "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/youtube-search";
+  const YAHOO_SHOPPING_RANKING_WORKER_URL = "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/yahoo-shopping-ranking?type=up";
   const GOOGLE_TRENDS_SOURCE_URL = "https://trends.google.com/trending?geo=JP";
-  const SOURCES = ["google_trends", "youtube", "threads", "x", "manual"];
+  const SOURCES = ["google_trends", "youtube", "yahoo_shopping_keyword", "threads", "x", "manual"];
   const SOURCE_LABELS = {
     google_trends: "Google Trends",
     youtube: "YouTube",
+    yahoo_shopping_keyword: "Yahoo!ショッピング急上昇",
     threads: "Threads",
     x: "X",
     manual: "手動"
@@ -73,7 +75,7 @@
   }
 
   function findUnprocessedDuplicate(candidate, candidates = []) {
-    if (!["google_trends", "youtube"].includes(candidate.source) || !candidate.keyword) return null;
+    if (!["google_trends", "youtube", "yahoo_shopping_keyword"].includes(candidate.source) || !candidate.keyword) return null;
     return candidates.find((item) =>
       item.id !== candidate.id &&
       item.source === candidate.source &&
@@ -145,6 +147,52 @@
     const validation = validateYouTubePayload(payload);
     if (!validation.valid) throw workerError(validation.code, validation.message);
     return payload;
+  }
+
+  function validateYahooRankingPayload(payload) {
+    const valid = payload && payload.source === "yahoo_shopping_keyword" && payload.rankingType === "up" && Array.isArray(payload.items) &&
+      payload.items.every((item) => item && typeof item.keyword === "string" && item.keyword.trim() && Number.isFinite(item.rank) &&
+        (item.preRank === null || Number.isFinite(item.preRank)) && (item.vector === null || typeof item.vector === "string") &&
+        (item.score === null || typeof item.score === "number") && (item.url === null || typeof item.url === "string"));
+    return valid ? { valid: true, payload } : { valid: false, code: "invalid_response", message: "Yahoo!ショッピングのレスポンス形式が不正です。" };
+  }
+
+  async function fetchYahooRanking(fetchImpl) {
+    if (typeof fetchImpl !== "function") throw workerError("network_error", "Workerへ接続できません。");
+    let response;
+    try { response = await fetchImpl(YAHOO_SHOPPING_RANKING_WORKER_URL, { method: "GET", headers: { Accept: "application/json" } }); }
+    catch (error) { throw workerError("network_error", "Yahoo!ショッピングWorkerへの通信に失敗しました。"); }
+    if (!response || !response.ok) throw workerError("http_error", `Yahoo!ショッピングWorkerがHTTPエラーを返しました（${response ? response.status : "不明"}）。`);
+    let payload;
+    try { payload = await response.json(); } catch (error) { throw workerError("invalid_json", "Yahoo!ショッピングWorkerのJSONを読み取れませんでした。"); }
+    const validation = validateYahooRankingPayload(payload);
+    if (!validation.valid) throw workerError(validation.code, validation.message);
+    return payload;
+  }
+
+  function buildYahooCandidateInput(item, payload, now = new Date().toISOString()) {
+    const keyword = String(item?.keyword || "").trim();
+    return {
+      source: "yahoo_shopping_keyword", keyword, title: keyword, sourceUrl: String(item?.url || "").trim(),
+      detectedAt: String(payload?.fetchedAt || now), observedAt: String(payload?.fetchedAt || now), status: "unreviewed", humanReviewed: false, roomTrendId: null,
+      metrics: { rank: item?.rank ?? null, preRank: item?.preRank ?? null, vector: item?.vector ?? null, score: item?.score ?? null, rankingType: "up" }
+    };
+  }
+
+  function addYahooCandidate(item, payload, state = readState(), now = new Date().toISOString()) {
+    if (!item || !String(item.keyword || "").trim()) throw workerError("invalid_item", "Yahoo!ショッピング候補のキーワードがありません。");
+    return upsertCandidate(buildYahooCandidateInput(item, payload, now), state);
+  }
+
+  function renderYahooPreview(payload, state = readState()) {
+    const preview = document.querySelector("#yahooShoppingRankingPreview");
+    if (!preview) return;
+    const items = Array.isArray(payload?.items) ? payload.items.slice(0, 20) : [];
+    preview.innerHTML = items.length ? items.map((item, index) => {
+      const duplicate = Boolean(findUnprocessedDuplicate({ source: "yahoo_shopping_keyword", keyword: item.keyword }, state.candidates));
+      const previous = item.preRank === 9999 ? "新規" : `${item.preRank ?? "不明"}位`;
+      return `<article class="sns-trend-worker-card"><h4>${escapeText(item.keyword)}</h4><p class="sns-trend-meta">現在順位：${escapeText(item.rank)}位 ／ 前回順位：${escapeText(previous)} ／ 変動：${escapeText(item.vector || "不明")}</p><div class="button-row"><button type="button" class="primary-button" data-yahoo-add-index="${index}" ${duplicate ? "disabled" : ""}>${duplicate ? "登録済み" : "Discoveryに追加"}</button></div></article>`;
+    }).join("") : "<p class=\"message\">急上昇ワードはありません。</p>";
   }
 
   function summarizeYouTubeVideos(items = [], now = new Date()) {
@@ -512,6 +560,26 @@
         workerFetchButton.disabled = false;
       }
     });
+    let yahooPayload = null;
+    let yahooLoading = false;
+    const yahooFetchButton = document.querySelector("#yahooShoppingRankingFetch");
+    const yahooMessage = document.querySelector("#yahooShoppingRankingMessage");
+    yahooFetchButton?.addEventListener("click", async () => {
+      if (yahooLoading) return;
+      yahooLoading = true;
+      yahooFetchButton.disabled = true;
+      if (yahooMessage) yahooMessage.textContent = "取得中...";
+      try {
+        yahooPayload = await fetchYahooRanking(window.fetch.bind(window));
+        renderYahooPreview(yahooPayload, state);
+        if (yahooMessage) yahooMessage.textContent = `${yahooPayload.items.length}件取得。登録する候補を選択してください。`;
+      } catch (error) {
+        yahooPayload = null;
+        if (yahooMessage) yahooMessage.textContent = error.message || "Yahoo!ショッピングの取得に失敗しました。";
+        const preview = document.querySelector("#yahooShoppingRankingPreview");
+        if (preview) preview.innerHTML = "";
+      } finally { yahooLoading = false; yahooFetchButton.disabled = false; }
+    });
     let youtubePayload = null;
     let youtubeLoading = false;
     const youtubeSearchButton = document.querySelector("#youtubeSearchButton");
@@ -582,6 +650,18 @@
         if (youtubeMessage) youtubeMessage.textContent = "YouTube候補をDiscoveryへ追加しました。採用後にVer.1へ渡せます。";
       } catch (error) { if (youtubeMessage) youtubeMessage.textContent = error.message; }
     });
+    document.querySelector("#yahooShoppingRankingPreview")?.addEventListener("click", (event) => {
+      const index = event.target.dataset.yahooAddIndex;
+      if (index === undefined || !yahooPayload || yahooLoading) return;
+      try {
+        const result = addYahooCandidate(yahooPayload.items[Number(index)], yahooPayload, state);
+        state = result.state;
+        writeState(state, storage);
+        renderYahooPreview(yahooPayload, state);
+        render(state);
+        if (yahooMessage) yahooMessage.textContent = "Yahoo!候補をDiscoveryへ追加しました。";
+      } catch (error) { if (yahooMessage) yahooMessage.textContent = error.message; }
+    });
     list.addEventListener("click", (event) => {
       const id = event.target.dataset.discoveryEdit || event.target.dataset.discoveryAccept || event.target.dataset.discoveryReject || event.target.dataset.discoveryDelete;
       if (!id) return;
@@ -595,6 +675,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, findGoogleTrendsCandidate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, renderWorkerPreview, renderYouTubePreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());
