@@ -4,6 +4,7 @@
   const STORAGE_KEY = "roomSnsTrendDiscoveryV2";
   const GOOGLE_TRENDS_WORKER_URL = "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/google-trends";
   const YOUTUBE_SEARCH_WORKER_URL = "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/youtube-search";
+  const WEB_SEARCH_WORKER_URL = "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/web-search";
   const YAHOO_SHOPPING_RANKING_WORKER_URL = "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/yahoo-shopping-ranking?type=up";
   const GOOGLE_TRENDS_SOURCE_URL = "https://trends.google.com/trending?geo=JP";
   const SOURCES = ["google_trends", "youtube", "yahoo_shopping_keyword", "threads", "x", "manual"];
@@ -210,21 +211,62 @@
   }
 
   function renderYahooReasonOutput(output, keyword, payload) {
-    const videos = Array.isArray(payload?.items) ? payload.items : [];
+    const videos = Array.isArray(payload?.youtube?.items) ? payload.youtube.items : (Array.isArray(payload?.items) ? payload.items : []);
+    const webResults = Array.isArray(payload?.web?.results) ? payload.web.results : [];
     const matching = videos.filter((video) => `${video.title || ""} ${video.description || ""}`.toLowerCase().includes(String(keyword || "").toLowerCase()));
     const recent = videos.filter((video) => video.publishedAt);
     const evidence = matching.length ? matching : recent;
     if (!output) return;
-    if (!evidence.length) {
-      output.innerHTML = "<p>急上昇理由を特定できる十分な情報がありません。</p>";
-      return;
-    }
-    output.innerHTML = `<p><strong>急上昇理由の手がかり</strong></p><p>関連動画：${evidence.length}件（YouTube補助情報）</p>${evidence.slice(0, 3).map((video) => `<p>${escapeText(video.title || "タイトル未取得")} ／ ${escapeText(video.publishedAt || "公開日時未取得")} ／ 再生数：${escapeText(video.viewCount ?? "未取得")}</p>`).join("")}<p>理由候補：関連動画から話題の背景が示される可能性があります。断定できる十分な根拠はありません。</p>`;
+    const reason = classifyYahooReason(keyword, webResults, evidence);
+    const webHtml = webResults.length ? `<p><strong>Web情報</strong></p>${webResults.map((item) => { let domain = ""; try { domain = new URL(item.url).hostname; } catch { domain = "URL不明"; } return `<p><a href="${escapeText(item.url)}" target="_blank" rel="noopener noreferrer">${escapeText(item.title || "タイトル未取得")}</a> ／ ${escapeText(domain)}<br>${escapeText(item.content.slice(0, 180))}${item.title.includes("公式") || item.content.includes("公式") ? "（公式情報候補）" : ""}</p>`; }).join("")}` : "<p><strong>Web情報</strong><br>取得できませんでした。</p>";
+    const youtubeHtml = evidence.length ? `<p><strong>YouTube情報</strong></p>${evidence.slice(0, 3).map((video) => `<p>${escapeText(video.title || "タイトル未取得")} ／ ${escapeText(video.publishedAt || "公開日時未取得")} ／ 再生数：${escapeText(video.viewCount ?? "未取得")}</p>`).join("")}` : "<p><strong>YouTube情報</strong><br>取得できませんでした。</p>";
+    output.innerHTML = `<p><strong>■ 急上昇理由</strong></p><p>判定：${escapeText(reason)}</p><p>※検索急上昇との直接的な因果関係を証明するものではありません。</p>${webHtml}${youtubeHtml}`;
   }
 
   async function investigateYahooReason(keyword, fetchImpl) {
-    const payload = await fetchYouTubeSearch(keyword, fetchImpl);
-    return { keyword, payload, videos: payload.items };
+    const query = String(keyword || "").trim();
+    const requests = [
+      fetchYouTubeSearch(query, fetchImpl).then((payload) => ({ payload })).catch((error) => ({ error })),
+      fetchWebSearch(query, fetchImpl).then((payload) => ({ payload })).catch((error) => ({ error }))
+    ];
+    const [youtube, web] = await Promise.all(requests);
+    return { keyword: query, youtube: youtube.payload || null, web: web.payload || null, youtubeError: youtube.error || null, webError: web.error || null, videos: youtube.payload?.items || [], webResults: web.payload?.results || [] };
+  }
+
+  function validateWebSearchPayload(payload) {
+    const valid = payload && payload.source === "tavily" && typeof payload.query === "string" && Array.isArray(payload.results) && payload.results.length <= 5 && payload.results.every((item) => item && typeof item.title === "string" && typeof item.url === "string" && typeof item.content === "string" && (item.score === null || typeof item.score === "number"));
+    return valid ? { valid: true, payload } : { valid: false, code: "invalid_response", message: "Web検索のレスポンス形式が不正です。" };
+  }
+
+  async function fetchWebSearch(keyword, fetchImpl) {
+    if (typeof fetchImpl !== "function") throw workerError("network_error", "Web検索Workerへ接続できません。");
+    const query = String(keyword || "").trim();
+    if (!query) throw workerError("invalid_query", "Web検索語がありません。");
+    let response;
+    try { response = await fetchImpl(`${WEB_SEARCH_WORKER_URL}?q=${encodeURIComponent(query)}`, { method: "GET", headers: { Accept: "application/json" } }); }
+    catch { throw workerError("network_error", "Web検索Workerへの通信に失敗しました。"); }
+    if (!response || !response.ok) throw workerError("http_error", `Web検索WorkerがHTTPエラーを返しました（${response ? response.status : "不明"}）。`);
+    let payload;
+    try { payload = await response.json(); } catch { throw workerError("invalid_json", "Web検索WorkerのJSONを読み取れませんでした。"); }
+    const validation = validateWebSearchPayload(payload);
+    if (!validation.valid) throw workerError(validation.code, validation.message);
+    return payload;
+  }
+
+  function classifyYahooReason(keyword, webResults = [], videos = []) {
+    const text = [keyword, ...webResults.flatMap((item) => [item.title, item.content]), ...videos.map((item) => `${item.title || ""} ${item.description || ""}`)].join(" ");
+    const rules = [
+      { label: "新商品・発売関連の可能性", terms: ["新商品", "新発売", "発売日", "発売"] },
+      { label: "予約・抽選販売関連の可能性", terms: ["予約", "抽選", "抽選販売"] },
+      { label: "再販関連の可能性", terms: ["再販", "再入荷"] },
+      { label: "ニュース・話題関連の可能性", terms: ["ニュース", "話題", "発表", "テレビ"] },
+      { label: "動画・SNS話題関連の可能性", terms: ["レビュー", "関連動画", "YouTube", "SNS"] },
+      { label: "セール・キャンペーン関連の可能性", terms: ["セール", "キャンペーン", "限定"] }
+    ];
+    const matched = rules.find((rule) => rule.terms.some((term) => text.includes(term)));
+    if (!matched) return "理由を特定できる十分な情報なし";
+    const sourceCount = (webResults.length ? 1 : 0) + (videos.length ? 1 : 0);
+    return `${matched.label}${sourceCount >= 2 ? "（複数情報源で関連語を確認）" : ""}`;
   }
 
   function summarizeYouTubeVideos(items = [], now = new Date()) {
@@ -719,6 +761,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, investigateYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());

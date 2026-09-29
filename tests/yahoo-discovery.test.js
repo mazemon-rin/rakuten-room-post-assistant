@@ -18,13 +18,15 @@ api.fetchYahooRanking(async (url, options) => { calls += 1; if (options.method !
   let duplicateBlocked = false;
   try { api.addYahooCandidate(fetched.items[0], fetched, added.state); } catch (error) { duplicateBlocked = true; }
   if (!duplicateBlocked) throw new Error("Yahoo duplicate prevention failed");
-  let reasonCalls = 0;
+  let youtubeReasonCalls = 0;
+  let webReasonCalls = 0;
   const reason = await api.investigateYahooReason("Yahoo候補1", async (url, options) => {
-    reasonCalls += 1;
-    if (!url.includes(`youtube-search?q=${encodeURIComponent("Yahoo候補1")}`)) throw new Error("Yahoo reason query mismatch");
-    return { ok: true, status: 200, async json() { return { source: "youtube", keyword: "Yahoo候補1", count: 1, items: [{ videoId: "v1", title: "Yahoo候補1 新商品レビュー", url: null, channelTitle: "確認チャンネル", publishedAt: "2026-09-29T00:00:00Z", viewCount: 12, likeCount: 1, commentCount: 0, duration: "PT1M" }] }; } };
+    if (url.includes("youtube-search")) { youtubeReasonCalls += 1; return { ok: true, status: 200, async json() { return { source: "youtube", keyword: "Yahoo候補1", count: 1, items: [{ videoId: "v1", title: "Yahoo候補1 新商品レビュー", url: null, channelTitle: "確認チャンネル", publishedAt: "2026-09-29T00:00:00Z", viewCount: 12, likeCount: 1, commentCount: 0, duration: "PT1M" }] }; } }; }
+    if (url.includes("web-search?q=")) { webReasonCalls += 1; return { ok: true, status: 200, async json() { return { source: "tavily", query: "Yahoo候補1", count: 1, results: [{ title: "Yahoo候補1 新商品 発売情報", url: "https://example.com/news", content: "新商品として発売されました。", score: 0.9 }] }; } }; }
+    throw new Error("reason query mismatch");
   });
-  if (reasonCalls !== 1 || reason.videos.length !== 1) throw new Error("Yahoo reason evidence failed");
+  if (youtubeReasonCalls !== 1 || webReasonCalls !== 1 || reason.videos.length !== 1 || reason.webResults.length !== 1) throw new Error("Yahoo reason evidence failed");
+  if (api.classifyYahooReason("Yahoo候補1", reason.webResults, reason.videos).includes("断定")) throw new Error("Yahoo reason must not be definitive");
   if (!api.renderYahooReasonOutput) throw new Error("Yahoo reason renderer is missing");
   console.log("Yahoo discovery cases: passed");
 }).catch((error) => { console.error(error); process.exitCode = 1; });
