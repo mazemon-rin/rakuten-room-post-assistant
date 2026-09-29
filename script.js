@@ -4524,7 +4524,8 @@ function renderRankingResults(products) {
   const productCard = (product, index, overallRank = null) => renderUnifiedProductCard(product, index, { rank: overallRank || product.rank });
   const sortOrder = $("#rankingSortOrder")?.value;
   if (["priority", "score"].includes(sortOrder)) {
-    container.innerHTML = `<section class="ranking-scoreboard"><h3>選定スコアランキング</h3><div class="product-grid">${displayProducts.map((product, position) => productCard(product, searchResults.indexOf(product), position + 1)).join("")}</div></section>`;
+    container.innerHTML = `<section class="ranking-scoreboard"><h3>選定スコアランキング</h3><div class="product-grid" data-ranking-card-grid></div></section>`;
+    container.querySelector("[data-ranking-card-grid]").innerHTML = displayProducts.map((product, position) => productCard(product, searchResults.indexOf(product), position + 1)).join("");
     renderDealStatusOnCards();
     return;
   }
@@ -4533,10 +4534,14 @@ function renderRankingResults(products) {
     (result[key] ||= { name: product.categoryName || "総合ランキング", products: [] }).products.push(product);
     return result;
   }, {});
-  container.innerHTML = Object.values(groups).map((group) => `
+  const groupedProducts = Object.values(groups);
+  container.innerHTML = groupedProducts.map((group, groupIndex) => `
     <section class="ranking-group">
       <h3>${escapeHtml(group.name)}</h3>
-      <div class="product-grid">${group.products.map((product) => productCard(product, searchResults.indexOf(product))).join("")}</div>
+      <div class="product-grid" data-ranking-card-grid="${groupIndex}"></div>
     </section>`).join("");
+  groupedProducts.forEach((group, groupIndex) => {
+    container.querySelector(`[data-ranking-card-grid="${groupIndex}"]`).innerHTML = group.products.map((product) => productCard(product, searchResults.indexOf(product))).join("");
+  });
   renderDealStatusOnCards();
 }
