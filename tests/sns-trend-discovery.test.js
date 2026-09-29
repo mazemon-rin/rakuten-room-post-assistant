@@ -4,6 +4,8 @@ const source = fs.readFileSync("src/sns-trend-discovery.js", "utf8");
 const context = { window: {}, document: { addEventListener() {}, querySelector() { return null; } }, Date, Math, JSON, Error };
 vm.runInNewContext(source, context);
 const api = context.window.snsTrendDiscovery;
+if (!api.isAcceptedCandidate({ status: "accepted", roomTrendId: "room-1" }) || api.isAcceptedCandidate({ status: "unreviewed", roomTrendId: null })) throw new Error("accepted candidate UI state failed");
+if (!source.includes("採用中…") || !source.includes("✓ 採用済み") || !source.includes("採用に失敗しました")) throw new Error("adoption feedback UI missing");
 const storage = { values: {}, getItem(key) { return this.values[key] || null; }, setItem(key, value) { this.values[key] = value; } };
 let state = api.readState(storage);
 let result = api.upsertCandidate({ id: "discovery-1", source: "google_trends", keyword: "収納ボックス", title: "収納ボックス", metrics: { trend: "rising" } }, state);

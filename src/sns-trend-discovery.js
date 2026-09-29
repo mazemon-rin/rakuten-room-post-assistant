@@ -75,6 +75,10 @@
     return !candidate.roomTrendId && candidate.status !== "accepted" && candidate.status !== "rejected";
   }
 
+  function isAcceptedCandidate(candidate) {
+    return Boolean(candidate?.roomTrendId) || candidate?.status === "accepted";
+  }
+
   function findUnprocessedDuplicate(candidate, candidates = []) {
     if (!["google_trends", "youtube", "yahoo_shopping_keyword"].includes(candidate.source) || !candidate.keyword) return null;
     return candidates.find((item) =>
@@ -547,7 +551,7 @@
     renderAnalytics();
     const list = document.querySelector("#snsTrendDiscoveryList");
     if (!list) return;
-    list.innerHTML = state.candidates.length ? state.candidates.map((candidate) => `<article class="sns-trend-discovery-card"><div><h3>${escapeText(candidate.title || "タイトル未入力")}</h3><p class="sns-trend-meta">${escapeText(SOURCE_LABELS[candidate.source] || candidate.source)} ／ ${escapeText(candidate.keyword)}</p>${renderMetrics(candidate)}<p>状態：${escapeText(candidate.status)}${candidate.roomTrendId ? `<br>Ver.1 trend ID：${escapeText(candidate.roomTrendId)}` : ""}</p></div><div class="button-row"><button type="button" class="secondary-button" data-discovery-edit="${escapeText(candidate.id)}">編集</button><button type="button" class="primary-button" data-discovery-accept="${escapeText(candidate.id)}" ${candidate.roomTrendId || candidate.status === "rejected" ? "disabled" : ""}>採用</button><button type="button" class="secondary-button" data-discovery-reject="${escapeText(candidate.id)}" ${candidate.roomTrendId || candidate.status === "rejected" ? "disabled" : ""}>却下</button><button type="button" class="danger-button" data-discovery-delete="${escapeText(candidate.id)}">削除</button></div></article>`).join("") : "<p class=\"message\">登録したトレンド発見候補はありません。</p>";
+    list.innerHTML = state.candidates.length ? state.candidates.map((candidate) => { const accepted = isAcceptedCandidate(candidate); return `<article class="sns-trend-discovery-card"><div><h3>${escapeText(candidate.title || "タイトル未入力")}</h3><p class="sns-trend-meta">${escapeText(SOURCE_LABELS[candidate.source] || candidate.source)} ／ ${escapeText(candidate.keyword)}</p>${renderMetrics(candidate)}<p>状態：${escapeText(candidate.status)}${candidate.roomTrendId ? `<br>Ver.1 trend ID：${escapeText(candidate.roomTrendId)}` : ""}</p></div><div class="button-row"><button type="button" class="secondary-button" data-discovery-edit="${escapeText(candidate.id)}">編集</button><button type="button" class="primary-button" data-discovery-accept="${escapeText(candidate.id)}" ${accepted || candidate.status === "rejected" ? "disabled" : ""}>${accepted ? "✓ 採用済み" : "採用"}</button><button type="button" class="secondary-button" data-discovery-reject="${escapeText(candidate.id)}" ${accepted || candidate.status === "rejected" ? "disabled" : ""}>却下</button><button type="button" class="danger-button" data-discovery-delete="${escapeText(candidate.id)}">削除</button></div></article>`; }).join("") : "<p class=\"message\">登録したトレンド発見候補はありません。</p>";
   }
 
   function setField(id, value) {
@@ -757,15 +761,23 @@
       const id = event.target.dataset.discoveryEdit || event.target.dataset.discoveryAccept || event.target.dataset.discoveryReject || event.target.dataset.discoveryDelete;
       if (!id) return;
       if (event.target.dataset.discoveryEdit) { setForm(state.candidates.find((item) => item.id === id) || {}); return; }
+      const adopting = Boolean(event.target.dataset.discoveryAccept);
       try {
-        if (event.target.dataset.discoveryAccept) { const result = acceptCandidate(id, state, window.snsTrend, storage); state = result.state; writeState(state, storage); setMessage(result.created ? "Ver.1のSNSトレンドへ採用しました。" : "既存のVer.1トレンドへ紐付けました。"); }
+        if (event.target.dataset.discoveryAccept) {
+          event.target.disabled = true;
+          event.target.textContent = "採用中…";
+          const result = acceptCandidate(id, state, window.snsTrend, storage);
+          state = result.state;
+          writeState(state, storage);
+          setMessage(result.created ? "Ver.1へ採用しました。" : "既存のVer.1トレンドへ紐付けました。");
+        }
         if (event.target.dataset.discoveryReject) { state = rejectCandidate(id, state); writeState(state, storage); setMessage("候補を却下しました。"); }
         if (event.target.dataset.discoveryDelete) { state = removeCandidate(id, state); writeState(state, storage); }
         render(state);
-      } catch (error) { setMessage(error.message); }
+      } catch (error) { render(state); setMessage(adopting ? "採用に失敗しました" : error.message); }
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, buildYahooReasonSearchQuery, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, isAcceptedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, buildYahooReasonSearchQuery, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());
