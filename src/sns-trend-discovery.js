@@ -193,6 +193,38 @@
       const previous = item.preRank === 9999 ? "新規" : `${item.preRank ?? "不明"}位`;
       return `<article class="sns-trend-worker-card"><h4>${escapeText(item.keyword)}</h4><p class="sns-trend-meta">現在順位：${escapeText(item.rank)}位 ／ 前回順位：${escapeText(previous)} ／ 変動：${escapeText(item.vector || "不明")}</p><div class="button-row"><button type="button" class="primary-button" data-yahoo-add-index="${index}" ${duplicate ? "disabled" : ""}>${duplicate ? "登録済み" : "Discoveryに追加"}</button></div></article>`;
     }).join("") : "<p class=\"message\">急上昇ワードはありません。</p>";
+    preview.querySelectorAll(".sns-trend-worker-card").forEach((card, index) => {
+      const row = card.querySelector(".button-row");
+      if (!row || row.querySelector("[data-yahoo-reason-index]")) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button";
+      button.dataset.yahooReasonIndex = String(index);
+      button.textContent = "急上昇理由を調べる";
+      row.insertBefore(button, row.firstChild);
+      const output = document.createElement("div");
+      output.className = "sns-trend-reason";
+      output.dataset.yahooReasonOutput = String(index);
+      card.appendChild(output);
+    });
+  }
+
+  function renderYahooReasonOutput(output, keyword, payload) {
+    const videos = Array.isArray(payload?.items) ? payload.items : [];
+    const matching = videos.filter((video) => `${video.title || ""} ${video.description || ""}`.toLowerCase().includes(String(keyword || "").toLowerCase()));
+    const recent = videos.filter((video) => video.publishedAt);
+    const evidence = matching.length ? matching : recent;
+    if (!output) return;
+    if (!evidence.length) {
+      output.innerHTML = "<p>急上昇理由を特定できる十分な情報がありません。</p>";
+      return;
+    }
+    output.innerHTML = `<p><strong>急上昇理由の手がかり</strong></p><p>関連動画：${evidence.length}件（YouTube補助情報）</p>${evidence.slice(0, 3).map((video) => `<p>${escapeText(video.title || "タイトル未取得")} ／ ${escapeText(video.publishedAt || "公開日時未取得")} ／ 再生数：${escapeText(video.viewCount ?? "未取得")}</p>`).join("")}<p>理由候補：関連動画から話題の背景が示される可能性があります。断定できる十分な根拠はありません。</p>`;
+  }
+
+  async function investigateYahooReason(keyword, fetchImpl) {
+    const payload = await fetchYouTubeSearch(keyword, fetchImpl);
+    return { keyword, payload, videos: payload.items };
   }
 
   function summarizeYouTubeVideos(items = [], now = new Date()) {
@@ -650,7 +682,19 @@
         if (youtubeMessage) youtubeMessage.textContent = "YouTube候補をDiscoveryへ追加しました。採用後にVer.1へ渡せます。";
       } catch (error) { if (youtubeMessage) youtubeMessage.textContent = error.message; }
     });
-    document.querySelector("#yahooShoppingRankingPreview")?.addEventListener("click", (event) => {
+    document.querySelector("#yahooShoppingRankingPreview")?.addEventListener("click", async (event) => {
+      const reasonIndex = event.target.dataset.yahooReasonIndex;
+      if (reasonIndex !== undefined && yahooPayload && !yahooLoading) {
+        const output = document.querySelector(`[data-yahoo-reason-output="${reasonIndex}"]`);
+        if (output) output.textContent = "調査中...";
+        try {
+          const evidence = await investigateYahooReason(yahooPayload.items[Number(reasonIndex)]?.keyword, window.fetch.bind(window));
+          renderYahooReasonOutput(output, evidence.keyword, evidence.payload);
+        } catch (error) {
+          if (output) output.textContent = "急上昇理由を確認できませんでした。";
+        }
+        return;
+      }
       const index = event.target.dataset.yahooAddIndex;
       if (index === undefined || !yahooPayload || yahooLoading) return;
       try {
@@ -675,6 +719,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, investigateYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());

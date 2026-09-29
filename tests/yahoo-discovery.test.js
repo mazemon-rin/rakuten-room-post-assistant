@@ -10,7 +10,7 @@ const payload = {
 };
 if (!api.validateYahooRankingPayload(payload).valid) throw new Error("Yahoo payload validation failed");
 let calls = 0;
-api.fetchYahooRanking(async (url, options) => { calls += 1; if (options.method !== "GET" || !url.includes("yahoo-shopping-ranking?type=up")) throw new Error("Yahoo request mismatch"); return { ok: true, status: 200, async json() { return payload; } }; }).then((fetched) => {
+api.fetchYahooRanking(async (url, options) => { calls += 1; if (options.method !== "GET" || !url.includes("yahoo-shopping-ranking?type=up")) throw new Error("Yahoo request mismatch"); return { ok: true, status: 200, async json() { return payload; } }; }).then(async (fetched) => {
   if (calls !== 1 || fetched.items.length !== 20) throw new Error("Yahoo fetch failed");
   const before = { candidates: [] };
   const added = api.addYahooCandidate(fetched.items[0], fetched, before, "2026-09-29T00:00:00.000Z");
@@ -18,5 +18,13 @@ api.fetchYahooRanking(async (url, options) => { calls += 1; if (options.method !
   let duplicateBlocked = false;
   try { api.addYahooCandidate(fetched.items[0], fetched, added.state); } catch (error) { duplicateBlocked = true; }
   if (!duplicateBlocked) throw new Error("Yahoo duplicate prevention failed");
+  let reasonCalls = 0;
+  const reason = await api.investigateYahooReason("Yahoo候補1", async (url, options) => {
+    reasonCalls += 1;
+    if (!url.includes(`youtube-search?q=${encodeURIComponent("Yahoo候補1")}`)) throw new Error("Yahoo reason query mismatch");
+    return { ok: true, status: 200, async json() { return { source: "youtube", keyword: "Yahoo候補1", count: 1, items: [{ videoId: "v1", title: "Yahoo候補1 新商品レビュー", url: null, channelTitle: "確認チャンネル", publishedAt: "2026-09-29T00:00:00Z", viewCount: 12, likeCount: 1, commentCount: 0, duration: "PT1M" }] }; } };
+  });
+  if (reasonCalls !== 1 || reason.videos.length !== 1) throw new Error("Yahoo reason evidence failed");
+  if (!api.renderYahooReasonOutput) throw new Error("Yahoo reason renderer is missing");
   console.log("Yahoo discovery cases: passed");
 }).catch((error) => { console.error(error); process.exitCode = 1; });
