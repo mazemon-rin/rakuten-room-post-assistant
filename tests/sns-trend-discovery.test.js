@@ -85,6 +85,54 @@ if (rejectedState.candidates.find((item) => item.id === "stage2-manual-1").statu
 if (JSON.parse(stage2V1Storage.values.roomSnsTrendDataV1).products.length !== 1) throw new Error("reject changed v1");
 console.log("sns trend discovery v2 stage 2 cases: passed");
 
+const bridgeStorage = { values: { roomSnsTrendDataV1: JSON.stringify({ products: [] }) }, getItem(key) { return this.values[key] || null; }, setItem(key, value) { this.values[key] = value; } };
+let renderCalls = 0;
+const bridgeSnsApi = {
+  readState(s) { return JSON.parse(s.getItem("roomSnsTrendDataV1") || "null") || { products: [] }; },
+  writeState(v, s) { s.setItem("roomSnsTrendDataV1", JSON.stringify(v)); },
+  upsertProduct(input, v1) { const product = { id: `v1-${v1.products.length + 1}`, name: input.name, keyword: input.keyword, itemUrl: input.itemUrl || "", notes: input.notes || "" }; return { state: { products: [...v1.products, product] }, product }; },
+  render() { renderCalls += 1; }
+};
+const youtubeState = api.upsertCandidate({ id: "stage7-youtube-1", source: "youtube", keyword: "防水トラベルシューズケース", title: "防水トラベルシューズケース", sourceUrl: "https://www.youtube.com/watch?v=test" }, { candidates: [] }).state;
+const youtubeAccepted = api.acceptCandidate("stage7-youtube-1", youtubeState, bridgeSnsApi, bridgeStorage);
+const youtubeV1 = bridgeSnsApi.readState(bridgeStorage);
+if (!youtubeAccepted.created || youtubeAccepted.state.candidates[0].status !== "accepted") throw new Error("youtube accept failed");
+if (!youtubeAccepted.roomTrendId || youtubeV1.products.length !== 1 || youtubeV1.products[0].id !== youtubeAccepted.roomTrendId) throw new Error("youtube v1 bridge failed");
+if (renderCalls !== 1) throw new Error("youtube v1 render refresh failed");
+const youtubeReloadedV1 = bridgeSnsApi.readState(bridgeStorage);
+if (!youtubeReloadedV1.products.some((item) => item.id === youtubeAccepted.roomTrendId)) throw new Error("youtube v1 reload failed");
+const youtubeAcceptedAgain = api.acceptCandidate("stage7-youtube-1", youtubeAccepted.state, bridgeSnsApi, bridgeStorage);
+if (youtubeAcceptedAgain.created || bridgeSnsApi.readState(bridgeStorage).products.length !== 1) throw new Error("youtube double accept failed");
+console.log("sns trend discovery stage 7 bridge cases: passed");
+
+const analyticsState = { candidates: [
+  { id: "analytics-google", source: "google_trends", keyword: "収納", title: "収納", detectedAt: "2026-09-01T00:00:00Z", roomTrendId: "room-google", status: "accepted" },
+  { id: "analytics-youtube", source: "youtube", keyword: "防水ケース", title: "防水ケース", detectedAt: "2026-09-02T00:00:00Z", roomTrendId: null, status: "unreviewed" },
+  { id: "analytics-name-only", source: "youtube", keyword: "名前だけ", title: "同じ名前", detectedAt: "2026-09-03T00:00:00Z", roomTrendId: "room-name", status: "accepted" }
+] };
+const analyticsV1 = { products: [
+  { id: "room-google", name: "収納", keyword: "収納", rakutenMatch: { itemCode: "shop:box", matchedAt: "2026-09-04T00:00:00Z" }, roomCandidate: { itemCode: "shop:box", savedAt: "2026-09-05T00:00:00Z" } },
+  { id: "room-name", name: "同じ名前", keyword: "別キーワード" }
+] };
+const analyticsRoom = { candidates: [{ destination: "room", itemCode: "shop:box" }], history: [{ itemCode: "shop:box", postedAt: "2026-09-06T00:00:00Z" }], sales: [] };
+const analyticsRecords = api.buildAnalyticsRecords(analyticsState, analyticsV1, analyticsRoom);
+const analyticsSummary = api.summarizeAnalytics(analyticsRecords);
+if (analyticsSummary.discovered !== 3 || analyticsSummary.accepted !== 2 || analyticsSummary.rakuten_matched !== 1 || analyticsSummary.room_candidate !== 1 || analyticsSummary.room_posted !== 1 || analyticsSummary.sold !== 0) throw new Error("analytics funnel counts failed");
+if (analyticsRecords.find((record) => record.discoveryId === "analytics-google").rakutenItemCode !== "shop:box") throw new Error("analytics itemCode match failed");
+if (analyticsRecords.find((record) => record.discoveryId === "analytics-google").acceptedAt !== null) throw new Error("acceptedAt must not be inferred");
+if (analyticsRecords.find((record) => record.discoveryId === "analytics-name-only").status !== "accepted") throw new Error("name-only match was incorrectly advanced");
+if (api.summarizeAnalytics([]).adoptionRate !== 0) throw new Error("analytics zero division failed");
+const analyticsSources = api.summarizeAnalyticsBySource(analyticsRecords);
+if (analyticsSources.find((entry) => entry.source === "google_trends").summary.room_candidate !== 1 || analyticsSources.find((entry) => entry.source === "youtube").summary.accepted !== 1) throw new Error("analytics source split failed");
+const analyticsView = api.analyticsRecordView(analyticsRecords[0], analyticsState, analyticsV1);
+if (analyticsView.rakutenItemCode !== "shop:box" || analyticsView.youtube.videoCount !== null) throw new Error("analytics success view failed");
+if (api.filterAnalyticsRecords(analyticsRecords, "rakuten_matched").length !== 1) throw new Error("analytics filter failed");
+if (api.filterAnalyticsRecords(analyticsRecords, "not_reached").length !== 1) throw new Error("analytics unreached filter failed");
+if (analyticsSources.every((entry) => entry.summary.accepted >= 5)) throw new Error("analytics reference threshold case missing");
+const fiveAccepted = Array.from({ length: 5 }, (_, index) => ({ status: "accepted", source: "google_trends", keyword: String(index) }));
+if (api.summarizeAnalyticsBySource(fiveAccepted)[0].summary.accepted !== 5) throw new Error("analytics normal threshold failed");
+console.log("trend analytics stage 8-1 cases: passed");
+
 (async () => {
   const workerPayload = {
     source: "google_trends",

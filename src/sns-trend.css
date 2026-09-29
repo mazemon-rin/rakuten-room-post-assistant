@@ -20,4 +20,9 @@
 .sns-trend-reason { margin: 0.35rem 0; color: #5d6870; font-size: 0.9rem; }
 .sns-trend-search-context { border-left: 4px solid #cf8f2d; }
 .sns-match-button { margin-top: 6px; }
+.trend-analytics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.trend-analytics-grid > div { border: 1px solid var(--line, #ddd); border-radius: 10px; padding: 10px; }
+.trend-analytics-grid span, .trend-analytics-grid strong { display: block; }
+.trend-analytics-source, .trend-analytics-record { border-top: 1px solid var(--line, #ddd); padding: 10px 0; }
 @media (max-width: 680px) { .sns-trend-card { display: grid; } }
+@media (max-width: 680px) { .trend-analytics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

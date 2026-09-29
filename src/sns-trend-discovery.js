@@ -290,12 +290,78 @@
       ? { state: v1State, product: duplicate }
       : snsApi.upsertProduct({ name: target.title || target.keyword, keyword: target.keyword || target.title, itemUrl: target.sourceUrl, notes: `発見元: ${target.source}` }, v1State);
     if (!duplicate) snsApi.writeState(result.state, storage);
+    if (typeof snsApi.render === "function") snsApi.render(snsApi.readState(storage));
     const next = { ...state, candidates: state.candidates.map((item) => item.id === id ? { ...item, status: "accepted", humanReviewed: true, roomTrendId: result.product.id } : item) };
     return { state: next, roomTrendId: result.product.id, created: !duplicate };
   }
 
   function rejectCandidate(id, state = readState()) {
     return { ...state, candidates: state.candidates.map((item) => item.id === id ? { ...item, status: "rejected", humanReviewed: true } : item) };
+  }
+
+  const ANALYTICS_STORAGE_KEY = "roomTrendAnalyticsV1";
+  const ANALYTICS_STATUSES = ["discovered", "accepted", "rakuten_matched", "room_candidate", "room_posted", "sold"];
+  function exactItemCode(item) { return String(item?.itemCode || item?.product?.itemCode || "").trim(); }
+  function safeRate(numerator, denominator) { return denominator > 0 ? Math.round((numerator / denominator) * 1000) / 10 : 0; }
+  function buildAnalyticsRecords(discoveryState = { candidates: [] }, v1State = { products: [] }, roomData = {}) {
+    const products = Array.isArray(v1State.products) ? v1State.products : [];
+    const roomCandidates = Array.isArray(roomData.candidates) ? roomData.candidates : [];
+    const history = Array.isArray(roomData.history) ? roomData.history : [];
+    const sales = Array.isArray(roomData.sales) ? roomData.sales : [];
+    return (discoveryState.candidates || []).map((candidate) => {
+      const product = products.find((item) => item.id === candidate.roomTrendId) || null;
+      const rakutenItemCode = String(product?.rakutenMatch?.itemCode || product?.roomCandidate?.itemCode || "").trim() || null;
+      const roomCandidate = rakutenItemCode && roomCandidates.find((item) => item.destination === "room" && exactItemCode(item) === rakutenItemCode);
+      const historyItem = rakutenItemCode && history.find((item) => exactItemCode(item) === rakutenItemCode);
+      const sale = rakutenItemCode && sales.find((item) => String(item.itemCode || "").trim() === rakutenItemCode);
+      let status = "discovered";
+      if (sale) status = "sold";
+      else if (historyItem) status = "room_posted";
+      else if (roomCandidate || product?.roomCandidate?.itemCode) status = "room_candidate";
+      else if (product?.rakutenMatch?.itemCode) status = "rakuten_matched";
+      else if (candidate.roomTrendId) status = "accepted";
+      return {
+        id: String(candidate.id), discoveryId: String(candidate.id), roomTrendId: candidate.roomTrendId || null,
+        source: candidate.source, keyword: candidate.keyword, discoveredAt: candidate.detectedAt, acceptedAt: candidate.acceptedAt || null,
+        rakutenMatchedAt: product?.rakutenMatch?.matchedAt || null, roomCandidateAt: product?.roomCandidate?.savedAt || null,
+        roomPostedAt: historyItem?.postedAt || null, soldAt: sale?.occurredAt || null, rakutenItemCode,
+        status, salesMatch: sale ? "confirmed" : (rakutenItemCode ? "unknown" : null)
+      };
+    });
+  }
+  function summarizeAnalytics(records = []) {
+    const count = (filter) => records.filter(filter).length;
+    const summary = { discovered: records.length, accepted: count((r) => ANALYTICS_STATUSES.indexOf(r.status) >= 1), rakuten_matched: count((r) => ANALYTICS_STATUSES.indexOf(r.status) >= 2), room_candidate: count((r) => ANALYTICS_STATUSES.indexOf(r.status) >= 3), room_posted: count((r) => ANALYTICS_STATUSES.indexOf(r.status) >= 4), sold: count((r) => r.status === "sold") };
+    return { ...summary, adoptionRate: safeRate(summary.accepted, summary.discovered), rakutenRate: safeRate(summary.rakuten_matched, summary.accepted), candidateRate: safeRate(summary.room_candidate, summary.accepted), postedRate: safeRate(summary.room_posted, summary.accepted), soldRate: safeRate(summary.sold, summary.accepted) };
+  }
+  function summarizeAnalyticsBySource(records = []) { return ["google_trends", "youtube"].map((source) => ({ source, records: records.filter((record) => record.source === source), summary: summarizeAnalytics(records.filter((record) => record.source === source)) })); }
+  function analyticsRecordView(record, discoveryState = { candidates: [] }, v1State = { products: [] }) {
+    const candidate = (discoveryState.candidates || []).find((item) => String(item.id) === String(record.discoveryId)) || {};
+    const product = (v1State.products || []).find((item) => item.id === record.roomTrendId) || {};
+    const metrics = candidate.metrics && typeof candidate.metrics === "object" ? candidate.metrics : {};
+    const youtube = metrics.youtube && typeof metrics.youtube === "object" ? metrics.youtube : {};
+    return { ...record, trendGrade: candidate.trendGrade || candidate.grade || metrics.trendGrade || null, traffic: metrics.searchVolumeLabel || metrics.traffic || null, relatedKeywords: Array.isArray(metrics.relatedKeywords) ? metrics.relatedKeywords : [], youtube: { videoCount: youtube.videoCount ?? youtube.count ?? null, recent3DayCount: youtube.recent3DayCount ?? null, recent7DayCount: youtube.recent7DayCount ?? null, maxViewCount: youtube.maxViewCount ?? null, totalViewCount: youtube.totalViewCount ?? null }, product };
+  }
+  function filterAnalyticsRecords(records, filter) { return records.filter((record) => filter === "all" || record.source === filter || (filter === "rakuten_matched" && record.rakutenItemCode) || (filter === "room_candidate" && ["room_candidate", "room_posted", "sold"].includes(record.status)) || (filter === "not_reached" && record.roomTrendId && !record.rakutenItemCode)); }
+  function readAnalyticsState(storage = window.localStorage) { try { const parsed = JSON.parse(storage.getItem(ANALYTICS_STORAGE_KEY) || "null"); return parsed && Array.isArray(parsed.records) ? parsed : { records: [] }; } catch (error) { return { records: [] }; } }
+  function writeAnalyticsState(records, storage = window.localStorage) { const state = { records: Array.isArray(records) ? records : [] }; storage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(state)); return state; }
+  function collectAnalytics(storage = window.localStorage) { const roomData = JSON.parse(storage.getItem("roomAssistantDataV1") || "null") || {}; const records = buildAnalyticsRecords(readState(storage), window.snsTrend?.readState?.(storage) || { products: [] }, roomData); return { records, summary: summarizeAnalytics(records), bySource: summarizeAnalyticsBySource(records) }; }
+  function renderAnalytics(storage = window.localStorage) {
+    const summaryNode = document.querySelector("#trendAnalyticsSummary");
+    if (!summaryNode) return;
+    const analytics = collectAnalytics(storage); writeAnalyticsState(analytics.records, storage);
+    const v1State = window.snsTrend?.readState?.(storage) || { products: [] };
+    const views = analytics.records.map((record) => analyticsRecordView(record, readState(storage), v1State));
+    const labels = [["discovered", "Discovery"], ["accepted", "採用"], ["rakuten_matched", "楽天商品"], ["room_candidate", "ROOM候補"], ["room_posted", "投稿"], ["sold", "売上"]];
+    summaryNode.innerHTML = `<div class="trend-analytics-grid">${labels.map(([key, label]) => `<div><span>${label}</span><strong>${analytics.summary[key]}</strong></div>`).join("")}</div><p>採用率 ${analytics.summary.adoptionRate}% ／ 楽天商品化率 ${analytics.summary.rakutenRate}% ／ ROOM候補化率 ${analytics.summary.candidateRate}% ／ 投稿到達率 ${analytics.summary.postedRate}% ／ 売上到達率 ${analytics.summary.soldRate}%</p>`;
+    const sourceNode = document.querySelector("#trendAnalyticsSources");
+    if (sourceNode) sourceNode.innerHTML = `<h4>source別比較</h4>` + analytics.bySource.map(({ source, summary }) => `<article class="trend-analytics-source"><h4>${escapeText(SOURCE_LABELS[source] || source)}</h4><p>Discovery ${summary.discovered} → 採用 ${summary.accepted} → 楽天商品 ${summary.rakuten_matched} → ROOM候補 ${summary.room_candidate} → 投稿 ${summary.room_posted} → 売上 ${summary.sold}</p><p>採用率 ${summary.adoptionRate}% ／ 楽天商品化率 ${summary.rakutenRate}% ／ ROOM候補化率 ${summary.candidateRate}%</p>${summary.accepted < 5 ? "<small>参考値（データ少数）</small>" : ""}</article>`).join("") || "<p>分析対象はありません。</p>";
+    const recordsNode = document.querySelector("#trendAnalyticsRecords");
+    const renderRows = (rows) => rows.length ? rows.map((record) => `<article class="trend-analytics-record"><strong>${escapeText(SOURCE_LABELS[record.source] || record.source)} ／ ${escapeText(record.keyword)}</strong><br>ステータス：${escapeText(record.status)}${record.trendGrade ? `<br>判定：${escapeText(record.trendGrade)}` : ""}${record.traffic ? `<br>traffic：${escapeText(record.traffic)}` : ""}${record.rakutenItemCode ? `<br>itemCode：${escapeText(record.rakutenItemCode)}` : ""}${record.youtube.videoCount != null ? `<br>YouTube動画：${record.youtube.videoCount}件／3日 ${record.youtube.recent3DayCount ?? "unknown"}件／7日 ${record.youtube.recent7DayCount ?? "unknown"}件／最大再生 ${record.youtube.maxViewCount ?? "unknown"}／合計再生 ${record.youtube.totalViewCount ?? "unknown"}` : ""}${record.salesMatch === "unknown" ? "<br>売上確認不能" : ""}</article>`).join("") : "<p>該当データはありません。</p>";
+    const filterNode = document.querySelector("#trendAnalyticsFilter");
+    const renderFiltered = () => { const filtered = filterAnalyticsRecords(views, filterNode?.value || "all"); if (recordsNode) recordsNode.innerHTML = `<h4>候補一覧</h4>${renderRows(filtered)}`; const successNode = document.querySelector("#trendAnalyticsSuccess"); if (successNode) successNode.innerHTML = `<h4>商品化成功</h4>${renderRows(filtered.filter((r) => r.rakutenItemCode))}`; const unreachedNode = document.querySelector("#trendAnalyticsUnreached"); if (unreachedNode) unreachedNode.innerHTML = `<h4>楽天商品未到達</h4>${renderRows(filtered.filter((r) => r.roomTrendId && !r.rakutenItemCode))}`; };
+    if (filterNode && !filterNode.dataset.bound) { filterNode.addEventListener("change", renderFiltered); filterNode.dataset.bound = "1"; }
+    renderFiltered();
   }
 
   function escapeText(value) {
@@ -351,6 +417,7 @@
   }
 
   function render(state = readState()) {
+    renderAnalytics();
     const list = document.querySelector("#snsTrendDiscoveryList");
     if (!list) return;
     list.innerHTML = state.candidates.length ? state.candidates.map((candidate) => `<article class="sns-trend-discovery-card"><div><h3>${escapeText(candidate.title || "タイトル未入力")}</h3><p class="sns-trend-meta">${escapeText(SOURCE_LABELS[candidate.source] || candidate.source)} ／ ${escapeText(candidate.keyword)}</p>${renderMetrics(candidate)}<p>状態：${escapeText(candidate.status)}${candidate.roomTrendId ? `<br>Ver.1 trend ID：${escapeText(candidate.roomTrendId)}` : ""}</p></div><div class="button-row"><button type="button" class="secondary-button" data-discovery-edit="${escapeText(candidate.id)}">編集</button><button type="button" class="primary-button" data-discovery-accept="${escapeText(candidate.id)}" ${candidate.roomTrendId || candidate.status === "rejected" ? "disabled" : ""}>採用</button><button type="button" class="secondary-button" data-discovery-reject="${escapeText(candidate.id)}" ${candidate.roomTrendId || candidate.status === "rejected" ? "disabled" : ""}>却下</button><button type="button" class="danger-button" data-discovery-delete="${escapeText(candidate.id)}">削除</button></div></article>`).join("") : "<p class=\"message\">登録したトレンド発見候補はありません。</p>";
@@ -524,6 +591,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, findGoogleTrendsCandidate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, renderWorkerPreview, renderYouTubePreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, findGoogleTrendsCandidate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, renderWorkerPreview, renderYouTubePreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());
