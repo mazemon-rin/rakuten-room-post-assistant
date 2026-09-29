@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "roomSnsTrendDiscoveryV2";
   const GOOGLE_TRENDS_WORKER_URL = "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/google-trends";
+  const YOUTUBE_SEARCH_WORKER_URL = "https://rakuten-room-trends-worker.rinrin8nana.workers.dev/youtube-search";
   const GOOGLE_TRENDS_SOURCE_URL = "https://trends.google.com/trending?geo=JP";
   const SOURCES = ["google_trends", "youtube", "threads", "x", "manual"];
   const SOURCE_LABELS = {
@@ -72,10 +73,10 @@
   }
 
   function findUnprocessedDuplicate(candidate, candidates = []) {
-    if (candidate.source !== "google_trends" || !candidate.keyword) return null;
+    if (!["google_trends", "youtube"].includes(candidate.source) || !candidate.keyword) return null;
     return candidates.find((item) =>
       item.id !== candidate.id &&
-      item.source === "google_trends" &&
+      item.source === candidate.source &&
       item.keyword === candidate.keyword &&
       isUnprocessedCandidate(item)
     ) || null;
@@ -119,6 +120,57 @@
     const validation = validateWorkerPayload(payload);
     if (!validation.valid) throw workerError(validation.code, validation.message);
     return payload;
+  }
+
+  function validateYouTubePayload(payload) {
+    const valid = payload && payload.source === "youtube" && typeof payload.keyword === "string" && Array.isArray(payload.items) &&
+      payload.items.every((item) => item && typeof item.videoId === "string" && (item.title === null || typeof item.title === "string") &&
+        (item.url === null || typeof item.url === "string") && (item.publishedAt === null || typeof item.publishedAt === "string") &&
+        (item.viewCount === null || Number.isFinite(item.viewCount)));
+    return valid ? { valid: true, payload } : { valid: false, code: "invalid_response", message: "YouTubeのレスポンス形式が不正です。" };
+  }
+
+  async function fetchYouTubeSearch(keyword, fetchImpl, now = new Date()) {
+    if (typeof fetchImpl !== "function") throw workerError("network_error", "YouTube Workerへ接続できません。");
+    const query = String(keyword || "").trim();
+    if (!query) throw workerError("invalid_query", "YouTube検索語がありません。");
+    const publishedAfter = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const url = `${YOUTUBE_SEARCH_WORKER_URL}?q=${encodeURIComponent(query)}&maxResults=10&order=date&publishedAfter=${encodeURIComponent(publishedAfter)}`;
+    let response;
+    try { response = await fetchImpl(url, { method: "GET", headers: { Accept: "application/json" } }); }
+    catch (error) { throw workerError("network_error", "YouTube Workerへの通信に失敗しました。"); }
+    if (!response || !response.ok) throw workerError("http_error", `YouTube WorkerがHTTPエラーを返しました（${response ? response.status : "不明"}）。`);
+    let payload;
+    try { payload = await response.json(); } catch (error) { throw workerError("invalid_json", "YouTube WorkerのJSONを読み取れませんでした。"); }
+    const validation = validateYouTubePayload(payload);
+    if (!validation.valid) throw workerError(validation.code, validation.message);
+    return payload;
+  }
+
+  function summarizeYouTubeVideos(items = [], now = new Date()) {
+    const recent3 = now.getTime() - 3 * 24 * 60 * 60 * 1000;
+    const recent7 = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+    const withViews = items.filter((item) => Number.isFinite(item.viewCount));
+    return {
+      recent3DayCount: items.filter((item) => item.publishedAt && Date.parse(item.publishedAt) >= recent3).length,
+      recent7DayCount: items.filter((item) => item.publishedAt && Date.parse(item.publishedAt) >= recent7).length,
+      maxViewCount: withViews.length ? Math.max(...withViews.map((item) => item.viewCount)) : null,
+      totalViewCount: withViews.length ? withViews.reduce((sum, item) => sum + item.viewCount, 0) : null,
+    };
+  }
+
+  function buildYouTubeCandidateInput(item, payload, now = new Date().toISOString()) {
+    const keyword = String(payload?.keyword || "").trim();
+    return {
+      source: "youtube", keyword, title: String(item?.title || keyword).trim(), sourceUrl: String(item?.url || "").trim(),
+      detectedAt: String(item?.publishedAt || now), observedAt: String(payload?.fetchedAt || now), status: "unreviewed", humanReviewed: false, roomTrendId: null,
+      metrics: { youtube: summarizeYouTubeVideos(payload?.items || [], new Date(now)), videoId: item?.videoId || null, channelTitle: item?.channelTitle || null }
+    };
+  }
+
+  function addYouTubeCandidate(item, payload, state = readState(), now = new Date().toISOString()) {
+    if (!item || !String(payload?.keyword || "").trim()) throw workerError("invalid_item", "YouTube候補の検索語がありません。");
+    return upsertCandidate(buildYouTubeCandidateInput(item, payload, now), state);
   }
 
   function buildGoogleTrendsCandidateInput(item, payload, now = new Date().toISOString()) {
@@ -259,6 +311,12 @@
       if (metrics.searchVolumeLabel) rows.push(`検索ボリューム：${escapeText(metrics.searchVolumeLabel)}`);
       if (candidate.observedAt) rows.push(`確認日時：${escapeText(candidate.observedAt)}`);
     }
+    if (candidate.source === "youtube") {
+      const youtube = metrics.youtube && typeof metrics.youtube === "object" ? metrics.youtube : {};
+      rows.push(`YouTube補助：直近3日 ${youtube.recent3DayCount ?? 0}件 ／ 直近7日 ${youtube.recent7DayCount ?? 0}件`);
+      if (youtube.maxViewCount != null) rows.push(`最大再生数：${escapeText(youtube.maxViewCount)}`);
+      if (youtube.channelTitle) rows.push(`チャンネル：${escapeText(youtube.channelTitle)}`);
+    }
     return rows.length ? `<p class="sns-trend-meta">${rows.join("<br>")}</p>` : "";
   }
 
@@ -278,8 +336,18 @@
       const newsHtml = news.length ? `<ul>${news.map((entry) => `<li>${escapeText(entry.title || "ニュースタイトル未取得")}</li>`).join("")}</ul>` : "<p class=\"sns-trend-meta\">関連ニュース：0件</p>";
       const gradeLabel = classification.grade === "A" ? "ROOM向き A" : classification.grade === "B" ? "ROOM向き B" : "対象外 C";
       const quickAction = classification.grade === "C" ? "" : `<button type="button" class="primary-button" data-google-trends-quick-search-index="${index}" ${existing?.roomTrendId ? "disabled" : ""}>${existing?.roomTrendId ? "楽天検索へ移動済み" : "採用して楽天で探す"}</button>`;
-      return `<article class="sns-trend-worker-card sns-trend-grade-${classification.grade.toLowerCase()}"><h4>${escapeText(item.keyword)}</h4><p class="sns-trend-grade-label">${gradeLabel}</p><p class="sns-trend-reason">理由：${classification.reasons.map((reason) => escapeText(reason)).join(" ／ ")}</p><p class="sns-trend-meta">検索ボリューム：${escapeText(item.traffic || "未取得")}<br>公開日時：${escapeText(item.publishedAt || "未取得")}<br>関連ニュース：${news.length}件</p>${newsHtml}<div class="button-row"><button type="button" class="secondary-button" data-google-trends-add-index="${index}" ${duplicate || existing ? "disabled" : ""}>${duplicate || existing ? "登録済み" : "Discoveryへ追加"}</button>${quickAction}</div></article>`;
+      const youtubeAction = classification.grade === "C" ? "" : `<button type="button" class="secondary-button" data-youtube-confirm-index="${index}">YouTubeで確認</button>`;
+      return `<article class="sns-trend-worker-card sns-trend-grade-${classification.grade.toLowerCase()}"><h4>${escapeText(item.keyword)}</h4><p class="sns-trend-grade-label">${gradeLabel}</p><p class="sns-trend-reason">理由：${classification.reasons.map((reason) => escapeText(reason)).join(" ／ ")}</p><p class="sns-trend-meta">検索ボリューム：${escapeText(item.traffic || "未取得")}<br>公開日時：${escapeText(item.publishedAt || "未取得")}<br>関連ニュース：${news.length}件</p>${newsHtml}<div class="button-row"><button type="button" class="secondary-button" data-google-trends-add-index="${index}" ${duplicate || existing ? "disabled" : ""}>${duplicate || existing ? "登録済み" : "Discoveryへ追加"}</button>${quickAction}${youtubeAction}</div></article>`;
     }).join("");
+  }
+
+  function renderYouTubePreview(payload, state = readState()) {
+    const preview = document.querySelector("#youtubeSearchPreview");
+    if (!preview) return;
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const summary = summarizeYouTubeVideos(items);
+    const summaryHtml = `<p class="sns-trend-meta">直近3日：${summary.recent3DayCount}件 ／ 直近7日：${summary.recent7DayCount}件 ／ 最大再生数：${summary.maxViewCount ?? "未取得"} ／ 合計再生数：${summary.totalViewCount ?? "未取得"}</p>`;
+    preview.innerHTML = summaryHtml + (items.length ? items.map((item, index) => `<article class="sns-trend-youtube-card"><h4>${escapeText(item.title || "タイトル未取得")}</h4><p class="sns-trend-meta">${escapeText(item.channelTitle || "チャンネル未取得")} ／ ${escapeText(item.publishedAt || "公開日時未取得")} ／ 再生数：${item.viewCount ?? "未取得"}</p><div class="button-row"><a class="secondary-button" href="${escapeText(item.url || "#")}" target="_blank" rel="noopener">動画を見る</a><button type="button" class="primary-button" data-youtube-add-index="${index}">Discoveryへ追加</button></div></article>`).join("") : "<p class=\"message\">関連動画はありません。</p>");
   }
 
   function render(state = readState()) {
@@ -373,9 +441,31 @@
         workerFetchButton.disabled = false;
       }
     });
+    let youtubePayload = null;
+    let youtubeLoading = false;
+    const youtubeSearchButton = document.querySelector("#youtubeSearchButton");
+    const youtubeQuery = document.querySelector("#youtubeSearchQuery");
+    const youtubeMessage = document.querySelector("#youtubeSearchMessage");
+    youtubeSearchButton?.addEventListener("click", async () => {
+      if (youtubeLoading) return;
+      youtubeLoading = true;
+      youtubeSearchButton.disabled = true;
+      if (youtubeMessage) youtubeMessage.textContent = "取得中…";
+      try {
+        youtubePayload = await fetchYouTubeSearch(youtubeQuery?.value || "", window.fetch.bind(window));
+        renderYouTubePreview(youtubePayload, state);
+        if (youtubeMessage) youtubeMessage.textContent = `取得完了：${youtubePayload.items.length}件。YouTube情報は補助根拠です。`;
+      } catch (error) {
+        youtubePayload = null;
+        if (youtubeMessage) youtubeMessage.textContent = error.message;
+        const preview = document.querySelector("#youtubeSearchPreview");
+        if (preview) preview.innerHTML = "";
+      } finally { youtubeLoading = false; youtubeSearchButton.disabled = false; }
+    });
     document.querySelector("#googleTrendsWorkerPreview")?.addEventListener("click", (event) => {
       const index = event.target.dataset.googleTrendsAddIndex;
       const quickIndex = event.target.dataset.googleTrendsQuickSearchIndex;
+      const youtubeIndex = event.target.dataset.youtubeConfirmIndex;
       if (quickIndex !== undefined) {
         if (!workerPayload || workerLoading) return;
         try {
@@ -390,6 +480,13 @@
         }
         return;
       }
+      if (youtubeIndex !== undefined) {
+        if (!workerPayload || workerLoading) return;
+        const query = workerPayload.items[Number(youtubeIndex)]?.keyword || "";
+        if (youtubeQuery) youtubeQuery.value = query;
+        youtubeSearchButton?.click();
+        return;
+      }
       if (index === undefined || !workerPayload || workerLoading) return;
       try {
         const result = addGoogleTrendsCandidate(workerPayload.items[Number(index)], workerPayload, state);
@@ -401,6 +498,18 @@
       } catch (error) {
         if (workerMessage) workerMessage.textContent = error.message;
       }
+    });
+    document.querySelector("#youtubeSearchPreview")?.addEventListener("click", (event) => {
+      const index = event.target.dataset.youtubeAddIndex;
+      if (index === undefined || !youtubePayload || youtubeLoading) return;
+      try {
+        const result = addYouTubeCandidate(youtubePayload.items[Number(index)], youtubePayload, state);
+        state = result.state;
+        writeState(state, storage);
+        renderYouTubePreview(youtubePayload, state);
+        render(state);
+        if (youtubeMessage) youtubeMessage.textContent = "YouTube候補をDiscoveryへ追加しました。採用後にVer.1へ渡せます。";
+      } catch (error) { if (youtubeMessage) youtubeMessage.textContent = error.message; }
     });
     list.addEventListener("click", (event) => {
       const id = event.target.dataset.discoveryEdit || event.target.dataset.discoveryAccept || event.target.dataset.discoveryReject || event.target.dataset.discoveryDelete;
@@ -415,6 +524,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, findGoogleTrendsCandidate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, renderWorkerPreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, findUnprocessedDuplicate, findGoogleTrendsCandidate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, classifyTrend, classifyTrendItems, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, renderWorkerPreview, renderYouTubePreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());

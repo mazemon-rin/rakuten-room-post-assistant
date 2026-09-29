@@ -226,6 +226,13 @@
         <p id="googleTrendsWorkerMessage" class="message" role="status" aria-live="polite"></p>
         <div id="googleTrendsWorkerPreview" class="sns-trend-worker-preview" aria-live="polite"></div>
       </section>
+      <section class="panel sns-trend-worker-panel">
+        <h3>YouTubeから商品候補を探す</h3>
+        <p>YouTube検索はこのボタンを押したときだけ実行します。取得結果は補助根拠として扱い、A/B/C判定を自動変更しません。</p>
+        <div class="button-row"><input id="youtubeSearchQuery" type="search" placeholder="例：買ってよかった 収納用品"><button id="youtubeSearchButton" class="primary-button" type="button">YouTubeで検索</button></div>
+        <p id="youtubeSearchMessage" class="message" role="status" aria-live="polite"></p>
+        <div id="youtubeSearchPreview" class="sns-trend-worker-preview" aria-live="polite"></div>
+      </section>
       <section class="panel"><h3>発見候補一覧</h3><div id="snsTrendDiscoveryList"></div></section>
     </section>
 

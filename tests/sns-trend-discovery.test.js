@@ -124,5 +124,22 @@ console.log("sns trend discovery v2 stage 2 cases: passed");
   let networkRejected = false;
   try { await api.fetchGoogleTrends(async () => { throw new Error("offline"); }); } catch (error) { networkRejected = error.code === "network_error"; }
   if (!networkRejected) throw new Error("network error handling failed");
+  const youtubePayload = {
+    source: "youtube", keyword: "収納ボックス", fetchedAt: "2026-09-29T00:00:00.000Z", count: 1,
+    items: [{ videoId: "video-1", title: "収納ボックス購入品", description: "", url: "https://www.youtube.com/watch?v=video-1", channelId: "channel-1", channelTitle: "暮らしチャンネル", publishedAt: "2026-09-28T00:00:00Z", viewCount: 1200, likeCount: 30, commentCount: 4, duration: "PT4M", categoryId: "26" }]
+  };
+  if (!api.validateYouTubePayload(youtubePayload).valid) throw new Error("youtube response validation failed");
+  const youtubeSummary = api.summarizeYouTubeVideos(youtubePayload.items, new Date("2026-09-29T00:00:00Z"));
+  if (youtubeSummary.recent3DayCount !== 1 || youtubeSummary.recent7DayCount !== 1 || youtubeSummary.maxViewCount !== 1200 || youtubeSummary.totalViewCount !== 1200) throw new Error("youtube summary failed");
+  const youtubeInput = api.buildYouTubeCandidateInput(youtubePayload.items[0], youtubePayload, "2026-09-29T00:00:00.000Z");
+  if (youtubeInput.source !== "youtube" || youtubeInput.keyword !== "収納ボックス" || youtubeInput.metrics.youtube.maxViewCount !== 1200) throw new Error("youtube candidate mapping failed");
+  const youtubeState = api.addYouTubeCandidate(youtubePayload.items[0], youtubePayload, { candidates: [] }).state;
+  if (youtubeState.candidates[0].source !== "youtube") throw new Error("youtube candidate add failed");
+  let youtubeDuplicateBlocked = false;
+  try { api.addYouTubeCandidate(youtubePayload.items[0], youtubePayload, youtubeState); } catch (error) { youtubeDuplicateBlocked = true; }
+  if (!youtubeDuplicateBlocked) throw new Error("youtube duplicate prevention failed");
+  let youtubeFetchCalls = 0;
+  const fetchedYouTube = await api.fetchYouTubeSearch("収納ボックス", async (url, options) => { youtubeFetchCalls += 1; if (options.method !== "GET" || !url.includes("youtube-search?q=")) throw new Error("youtube fetch request failed"); return { ok: true, status: 200, async json() { return youtubePayload; } }; }, new Date("2026-09-29T00:00:00Z"));
+  if (fetchedYouTube.items.length !== 1 || youtubeFetchCalls !== 1) throw new Error("youtube fetch failed");
   console.log("sns trend discovery v2 stage 3-3 cases: passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
