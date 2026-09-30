@@ -7,6 +7,16 @@ if (!source.includes('panel.dataset.initialized === "true"')) throw new Error("P
 const context = { window: { RoomRakutenApi: { hasCredentials: () => true, requestItemSearch: async (query) => ({ status: "ok", query, products: [{ itemCode: "shop:1", itemName: "秋服", itemPrice: 2980, reviewAverage: 4.5, reviewCount: 12 }] }) } }, document: { addEventListener() {}, querySelector() { return null; } }, Date, Math, JSON, Error, URLSearchParams };
 vm.runInNewContext(source, context);
 const api = context.window.snsTrendDiscovery;
+const storage = { data: {}, getItem(key) { return this.data[key] || null; }, setItem(key, value) { this.data[key] = value; }, removeItem(key) { delete this.data[key]; } };
+const saved = api.writeRoomTrendPhaseTwo({ savedAt: "2026-09-30T00:00:00.000Z", inputThemes: [{ theme: "秋雨・台風対策" }], results: [{ theme: "秋雨・台風対策", webEvidence: { results: [{ title: "web" }] }, youtubeMetrics: { videoCount: 1 }, rakutenEvidence: { productCount: 10, representativeProducts: [{ itemCode: "shop:1", reviewAverage: 4.5, reviewCount: 12 }], themeMatch: "要確認" } }], prompt: "最終5選用プロンプト" }, storage);
+if (saved.results.length !== 1 || saved.prompt !== "最終5選用プロンプト") throw new Error("Phase 2 persistence failed");
+const restored = api.readRoomTrendPhaseTwo(storage);
+if (restored.savedAt !== saved.savedAt || restored.results[0].rakutenEvidence.representativeProducts[0].itemCode !== "shop:1") throw new Error("Phase 2 restore failed");
+storage.data[api.ROOM_TREND_PHASE_TWO_STORAGE_KEY] = "{broken";
+if (api.readRoomTrendPhaseTwo(storage) !== null) throw new Error("Broken Phase 2 JSON handling failed");
+api.writeRoomTrendPhaseTwo(saved, storage); api.clearRoomTrendPhaseTwo(storage);
+if (storage.getItem(api.ROOM_TREND_PHASE_TWO_STORAGE_KEY) !== null) throw new Error("Phase 2 clear failed");
+console.log("ROOM trend Phase 2 persistence cases: passed");
 
 const google = { items: [
   { keyword: "秋服", traffic: "10K+", publishedAt: "2026-09-30T00:00:00Z", news: [] },

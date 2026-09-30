@@ -22,6 +22,7 @@
   const EMPTY_STATE = { candidates: [] };
   const RAKUTEN_ITEM_SEARCH_URL = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701";
   const ROOM_TREND_PHASE_TWO_REQUIRED_KEYS = ["theme", "reason", "purchaseWindow", "categories", "rakutenQueries", "purchaseIntent", "confidence", "sourceKeywords"];
+  const ROOM_TREND_PHASE_TWO_STORAGE_KEY = "roomTrendPhaseTwoV1";
 
   function readState(storage = window.localStorage) {
     try {
@@ -453,6 +454,21 @@
     return `あなたは楽天ROOMの最終トレンド選定担当です。\n現在日付：${date}\n\n以下はPhase 1で整理した購買テーマと、Tavily Web検索、YouTube、楽天商品検索による追加調査結果です。最終的に楽天ROOM向けの5テーマを選んでください。\n\n判断条件：\n- 購買意図と楽天ROOMとの相性\n- 今後7〜30日の需要と購入タイミング\n- 季節性、イベント、発売、セール等の根拠\n- Web情報の具体性と信頼性\n- YouTubeは話題性の補助指標として使い、数字だけで採用しない\n- 楽天商品が複数存在し、価格帯・レビュー・テーマ一致を確認できるか\n- 商品1件だけの存在や未確認情報だけでは採用しない\n- 事実が不明な価格、在庫、割引、レビューを推測しない\n\n必ずJSON配列だけを返してください。5件を選び、各要素に theme、reason、purchaseWindow、categories、rakutenQueries、purchaseIntent、confidence、sourceKeywords、webEvidence、youtubeMetrics、rakutenEvidence を含めてください。\n\n調査結果：\n${JSON.stringify(results, null, 2)}`;
   }
 
+  function readRoomTrendPhaseTwo(storage = window.localStorage) {
+    try {
+      const parsed = JSON.parse(storage.getItem(ROOM_TREND_PHASE_TWO_STORAGE_KEY) || "null");
+      return parsed && Array.isArray(parsed.results) ? parsed : null;
+    } catch { return null; }
+  }
+
+  function writeRoomTrendPhaseTwo(data, storage = window.localStorage) {
+    const payload = { schemaVersion: 1, savedAt: data.savedAt || new Date().toISOString(), inputThemes: Array.isArray(data.inputThemes) ? data.inputThemes : [], results: Array.isArray(data.results) ? data.results : [], prompt: String(data.prompt || "") };
+    storage.setItem(ROOM_TREND_PHASE_TWO_STORAGE_KEY, JSON.stringify(payload));
+    return payload;
+  }
+
+  function clearRoomTrendPhaseTwo(storage = window.localStorage) { storage.removeItem(ROOM_TREND_PHASE_TWO_STORAGE_KEY); }
+
   function renderRoomTrendPhaseTwoResults(results = []) {
     const node = document.querySelector("#roomTrendPhaseTwoResults");
     if (!node) return;
@@ -693,6 +709,18 @@
     const phaseTwoSummary = document.querySelector("#roomTrendPhaseTwoSummary");
     const phaseTwoPrompt = document.querySelector("#roomTrendPhaseTwoPrompt");
     const phaseTwoPromptPanel = document.querySelector("#roomTrendPhaseTwoPromptPanel");
+    const phaseTwoSavedAt = document.querySelector("#roomTrendPhaseTwoSavedAt");
+    const phaseTwoClear = document.querySelector("#roomTrendPhaseTwoClear");
+    const saved = readRoomTrendPhaseTwo();
+    if (saved) {
+      renderRoomTrendPhaseTwoResults(saved.results);
+      if (phaseTwoSummary) phaseTwoSummary.textContent = `${saved.results.length}テーマの保存済み結果を復元しました。`;
+      if (phaseTwoPrompt && saved.prompt) phaseTwoPrompt.value = saved.prompt;
+      if (phaseTwoPromptPanel && saved.prompt) phaseTwoPromptPanel.hidden = false;
+      if (phaseTwoSavedAt) phaseTwoSavedAt.textContent = `保存日時：${saved.savedAt}`;
+      if (phaseTwoMessage) phaseTwoMessage.textContent = "保存済みPhase 2結果を復元しました（API再通信なし）。";
+    }
+    phaseTwoClear?.addEventListener("click", () => { clearRoomTrendPhaseTwo(); if (phaseTwoSummary) phaseTwoSummary.textContent = "保存済みPhase 2結果を削除しました。"; if (phaseTwoSavedAt) phaseTwoSavedAt.textContent = ""; if (phaseTwoPrompt) phaseTwoPrompt.value = ""; if (phaseTwoPromptPanel) phaseTwoPromptPanel.hidden = true; if (phaseTwoMessage) phaseTwoMessage.textContent = "Phase 2専用の保存データだけを削除しました。"; });
     phaseTwoLoad?.addEventListener("click", () => {
       try { roomTrendPhaseTwoThemes = parseRoomTrendPhaseTwoJson(phaseTwoInput?.value || ""); phaseTwoRun.disabled = false; if (phaseTwoMessage) phaseTwoMessage.textContent = `${roomTrendPhaseTwoThemes.length}テーマを読み込みました。追加調査を実行できます。`; }
       catch (error) { roomTrendPhaseTwoThemes = []; phaseTwoRun.disabled = true; if (phaseTwoMessage) phaseTwoMessage.textContent = error.message; }
@@ -708,6 +736,8 @@
         if (phaseTwoSummary) phaseTwoSummary.textContent = `${results.length}テーマを調査しました。Web・YouTube・楽天商品データを確認できます。`;
         if (phaseTwoPrompt) phaseTwoPrompt.value = buildRoomTrendPhaseTwoPrompt(results, new Date());
         if (phaseTwoPromptPanel) phaseTwoPromptPanel.hidden = false;
+        const savedData = writeRoomTrendPhaseTwo({ inputThemes: roomTrendPhaseTwoThemes, results, prompt: phaseTwoPrompt?.value || "" });
+        if (phaseTwoSavedAt) phaseTwoSavedAt.textContent = `保存日時：${savedData.savedAt}`;
         if (phaseTwoMessage) phaseTwoMessage.textContent = "追加調査が完了しました。最終5選判断用プロンプトを確認してください。";
       } catch (error) { if (phaseTwoMessage) phaseTwoMessage.textContent = error.message || "追加調査に失敗しました。"; }
       finally { phaseTwoRun.disabled = false; }
@@ -966,6 +996,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, ROOM_TREND_FIVE_MAX_CANDIDATES, readState, writeState, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, isAcceptedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, mergeRoomTrendFiveCandidates, buildRoomTrendFivePrompt, parseRoomTrendPhaseTwoJson, fetchRakutenThemeEvidence, investigateRoomTrendPhaseTwoTheme, investigateRoomTrendPhaseTwoThemes, buildRoomTrendPhaseTwoPrompt, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, buildYahooReasonSearchQuery, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, ROOM_TREND_PHASE_TWO_STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, ROOM_TREND_FIVE_MAX_CANDIDATES, readState, writeState, readRoomTrendPhaseTwo, writeRoomTrendPhaseTwo, clearRoomTrendPhaseTwo, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, isAcceptedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, mergeRoomTrendFiveCandidates, buildRoomTrendFivePrompt, parseRoomTrendPhaseTwoJson, fetchRakutenThemeEvidence, investigateRoomTrendPhaseTwoTheme, investigateRoomTrendPhaseTwoThemes, buildRoomTrendPhaseTwoPrompt, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, buildYahooReasonSearchQuery, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());
