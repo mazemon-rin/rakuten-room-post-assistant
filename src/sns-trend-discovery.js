@@ -408,13 +408,29 @@
 
   function parseRoomTrendPhaseTwoJson(value) {
     let parsed;
-    try { parsed = typeof value === "string" ? JSON.parse(value) : value; } catch { throw new Error("AI分析結果JSONを読み取れません。"); }
+    if (typeof value === "string") {
+      let input = value.trim();
+      const fenced = input.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+      if (fenced) input = fenced[1].trim();
+      try { parsed = JSON.parse(input); } catch (error) { throw new Error(`JSONの形式が正しくありません。ChatGPTの回答全体ではなく、JSON配列を貼り付けてください。${error?.message ? `（${error.message}）` : ""}`); }
+    } else {
+      parsed = value;
+    }
     if (!Array.isArray(parsed) || !parsed.length || parsed.length > 20) throw new Error("AI分析結果は1〜20件のJSON配列で入力してください。");
     return parsed.map((item, index) => {
-      if (!item || typeof item !== "object" || ROOM_TREND_PHASE_TWO_REQUIRED_KEYS.some((key) => item[key] == null)) throw new Error(`AI分析結果の${index + 1}件目に必要な項目がありません。`);
-      const arrays = ["categories", "rakutenQueries", "sourceKeywords"].map((key) => [key, Array.isArray(item[key]) ? item[key].map((value) => String(value || "").trim()).filter(Boolean) : []]);
+      const position = index + 1;
+      const themeLabel = item && typeof item === "object" && String(item.theme || "").trim() ? `『${String(item.theme).trim()}』` : "";
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`テーマ${position}${themeLabel}：オブジェクト形式で指定してください。`);
+      const missing = ROOM_TREND_PHASE_TWO_REQUIRED_KEYS.find((key) => item[key] == null);
+      if (missing) throw new Error(`テーマ${position}${themeLabel}：${missing}がありません。`);
+      const arrays = ["categories", "rakutenQueries", "sourceKeywords"].map((key) => {
+        if (!Array.isArray(item[key])) throw new Error(`テーマ${position}${themeLabel}：${key}は配列で指定してください。`);
+        return [key, item[key].map((value) => String(value || "").trim()).filter(Boolean)];
+      });
       const normalized = Object.fromEntries(arrays);
-      if (!normalized.rakutenQueries.length || normalized.rakutenQueries.length > 5 || !normalized.categories.length || !normalized.sourceKeywords.length) throw new Error(`AI分析結果の${index + 1}件目の配列項目が不正です。`);
+      if (!normalized.categories.length) throw new Error(`テーマ${position}${themeLabel}：categoriesは1件以上の配列で指定してください。`);
+      if (!normalized.rakutenQueries.length || normalized.rakutenQueries.length > 5) throw new Error(`テーマ${position}${themeLabel}：rakutenQueriesは1〜5件の配列で指定してください。`);
+      if (!normalized.sourceKeywords.length) throw new Error(`テーマ${position}${themeLabel}：sourceKeywordsは1件以上の配列で指定してください。`);
       return { ...item, theme: String(item.theme).trim(), reason: String(item.reason).trim(), purchaseWindow: String(item.purchaseWindow).trim(), ...normalized, purchaseIntent: String(item.purchaseIntent).trim() };
     });
   }

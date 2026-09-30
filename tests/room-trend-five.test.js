@@ -60,6 +60,22 @@ console.log("ROOM trend five Phase 1 cases: passed");
 (async () => {
   const phaseTwo = api.parseRoomTrendPhaseTwoJson(JSON.stringify([{ theme: "秋服", reason: "衣替え", purchaseWindow: "今後30日", categories: ["ライトアウター"], rakutenQueries: ["秋服 ライトアウター", "ウインドブレーカー"], purchaseIntent: "高", confidence: 0.8, sourceKeywords: ["秋服"] }]));
   if (phaseTwo.length !== 1 || phaseTwo[0].rakutenQueries.length !== 2) throw new Error("Phase 2 JSON validation failed");
+  const phaseTwoJson = JSON.stringify([{ theme: "おせち早割・年末準備", reason: "年末需要", purchaseWindow: "現在〜12月上旬", categories: ["おせち", "冷凍おせち"], rakutenQueries: ["おせち 2026 早割", "冷凍おせち"], purchaseIntent: "high", confidence: "high", sourceKeywords: ["おせち 2026 早割"] }]);
+  for (const wrapped of [phaseTwoJson, `\n  ${phaseTwoJson}\n`, `\`\`\`json\n${phaseTwoJson}\n\`\`\``, `\`\`\`\n${phaseTwoJson}\n\`\`\``]) {
+    if (api.parseRoomTrendPhaseTwoJson(wrapped).length !== 1) throw new Error("Phase 2 JSON fence/whitespace parsing failed");
+  }
+  try { api.parseRoomTrendPhaseTwoJson("[broken"); throw new Error("invalid JSON accepted"); } catch (error) { if (!error.message.includes("JSONの形式が正しくありません") || error.message === "invalid JSON accepted") throw error; }
+  try { api.parseRoomTrendPhaseTwoJson(JSON.stringify({ themes: [] })); throw new Error("top-level object accepted"); } catch (error) { if (!error.message.includes("1〜20件のJSON配列") || error.message === "top-level object accepted") throw error; }
+  try { api.parseRoomTrendPhaseTwoJson(JSON.stringify([{ theme: "秋冬の照明・省エネ", reason: "季節", categories: ["照明"], rakutenQueries: ["LED照明"], purchaseIntent: "high", confidence: "high", sourceKeywords: ["照明"] }])); throw new Error("missing field accepted"); } catch (error) { if (!error.message.includes("テーマ1『秋冬の照明・省エネ』：purchaseWindowがありません") || error.message === "missing field accepted") throw error; }
+  for (const field of ["categories", "rakutenQueries", "sourceKeywords"]) {
+    const invalid = { theme: "秋冬の照明・省エネ", reason: "季節", purchaseWindow: "今後30日", categories: ["照明"], rakutenQueries: ["LED照明"], purchaseIntent: "high", confidence: "high", sourceKeywords: ["照明"] };
+    invalid[field] = "文字列";
+    try { api.parseRoomTrendPhaseTwoJson(JSON.stringify([invalid])); throw new Error(`${field} accepted`); } catch (error) { if (!error.message.includes(`：${field}は配列で指定してください`) || error.message === `${field} accepted`) throw error; }
+  }
+  const tooManyQueries = JSON.parse(phaseTwoJson); tooManyQueries[0].rakutenQueries = ["1", "2", "3", "4", "5", "6"];
+  try { api.parseRoomTrendPhaseTwoJson(JSON.stringify(tooManyQueries)); throw new Error("too many queries accepted"); } catch (error) { if (!error.message.includes("rakutenQueriesは1〜5件") || error.message === "too many queries accepted") throw error; }
+  const tenThemes = JSON.stringify(Array.from({ length: 10 }, (_, index) => ({ ...JSON.parse(phaseTwoJson)[0], theme: `テーマ${index + 1}` })));
+  if (api.parseRoomTrendPhaseTwoJson(tenThemes).length !== 10) throw new Error("10-theme JSON validation failed");
   if (!api.buildRoomTrendPhaseTwoPrompt([{ ...phaseTwo[0], webEvidence: { results: [] }, youtubeMetrics: { videoCount: 0 }, rakutenEvidence: { productCount: 0 } }], new Date("2026-09-30T12:00:00Z")).includes("最終的に楽天ROOM向けの5テーマ")) throw new Error("Phase 2 prompt generation failed");
   const rakutenEvidence = await api.fetchRakutenThemeEvidence(phaseTwo[0], async () => { throw new Error("must use shared API helper"); }, {});
   if (rakutenEvidence.queryResults.length !== 2 || rakutenEvidence.uniqueItemCount !== 1 || rakutenEvidence.priceRange.min !== 2980) throw new Error("Phase 2 Rakuten evidence failed");
