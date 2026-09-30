@@ -449,6 +449,30 @@ async function readRakutenApiError(response) {
   }
 }
 
+async function requestRakutenItemSearch(keyword, options = {}) {
+  const fetchImpl = options.fetchImpl || window.fetch.bind(window);
+  if (!hasRakutenCredentials()) return { status: "not_configured", query: String(keyword || "").trim(), products: [] };
+  const params = new URLSearchParams({
+    format: "json",
+    applicationId: data.settings.applicationId,
+    accessKey: data.settings.accessKey,
+    keyword: String(keyword || "").trim(),
+    hits: String(options.hits || 10),
+    sort: options.sort || "standard"
+  });
+  addAffiliateIdParam(params);
+  const response = await fetchImpl(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`, { method: "GET", headers: { Accept: "application/json" } });
+  if (!response?.ok) {
+    const error = new Error(await readRakutenApiError(response));
+    error.status = response?.status || null;
+    throw error;
+  }
+  const payload = await response.json();
+  return { status: "ok", query: String(keyword || "").trim(), products: normalizeRakutenItems(payload) };
+}
+
+window.RoomRakutenApi = { requestItemSearch: requestRakutenItemSearch, hasCredentials: hasRakutenCredentials };
+
 async function fetchRankingCategory(category, page = 1, fallbackWaitMs = RANKING_INTERVAL_SHORT_MS) {
   const params = new URLSearchParams({
     format: "json",

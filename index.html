@@ -218,6 +218,24 @@
         <label>確認日時<input id="googleTrendsObservedAt" name="observedAt" type="datetime-local"></label>
         <div class="button-row"><button class="primary-button" type="submit">Google Trends候補を登録</button><button id="googleTrendsClear" class="secondary-button" type="button">入力をクリア</button></div>
       </form></details>
+      <section id="roomTrendFivePanel" class="panel room-trend-five-panel">
+        <div class="section-heading"><h3>今日のROOMトレンド5選</h3><p>Google TrendsとYahoo!ショッピング急上昇を統合し、ChatGPT／Codexで約10テーマへ整理するための候補を作ります。Phase 1ではAI分析用プロンプトの生成まで行い、DiscoveryやROOM候補は変更しません。</p></div>
+        <div class="button-row"><button id="roomTrendFiveFetch" class="primary-button" type="button">候補を取得</button></div>
+        <p id="roomTrendFiveMessage" class="message" role="status" aria-live="polite"></p>
+        <div id="roomTrendFiveSummary" class="sns-trend-meta"></div>
+        <details id="roomTrendFivePromptPanel" hidden><summary>AI分析用プロンプト</summary><textarea id="roomTrendFivePrompt" rows="18" readonly></textarea><div class="button-row"><button id="roomTrendFiveCopy" class="secondary-button" type="button">プロンプトをコピー</button></div></details>
+        <div id="roomTrendFiveCandidates" class="sns-trend-worker-preview" aria-live="polite"></div>
+        <section id="roomTrendPhaseTwo" class="room-trend-phase-two">
+          <h4>Phase 2：AI分析結果の追加調査</h4>
+          <p>Phase 1のAI分析結果JSONを貼り付け、約10テーマだけを追加調査します。DiscoveryやROOM候補は変更しません。</p>
+          <textarea id="roomTrendPhaseTwoInput" rows="12" placeholder='AIが返したJSON配列を貼り付けてください'></textarea>
+          <div class="button-row"><button id="roomTrendPhaseTwoLoad" class="secondary-button" type="button">AI分析結果を読み込む</button><button id="roomTrendPhaseTwoRun" class="primary-button" type="button" disabled>追加調査を実行</button></div>
+          <p id="roomTrendPhaseTwoMessage" class="message" role="status" aria-live="polite"></p>
+          <div id="roomTrendPhaseTwoSummary" class="sns-trend-meta"></div>
+          <div id="roomTrendPhaseTwoResults" class="sns-trend-worker-preview" aria-live="polite"></div>
+          <details id="roomTrendPhaseTwoPromptPanel" hidden><summary>最終5選判断用プロンプト</summary><textarea id="roomTrendPhaseTwoPrompt" rows="18" readonly></textarea><div class="button-row"><button id="roomTrendPhaseTwoCopy" class="secondary-button" type="button">プロンプトをコピー</button></div></details>
+        </section>
+      </section>
       <details class="discovery-accordion"><summary>Google Trends Trending Now</summary><section class="panel sns-trend-worker-panel">
         <p>「今日のトレンドを取得」を押したときだけ公開Workerへ接続し、登録前にプレビューします。自動取得・全件追加は行いません。</p>
         <div class="button-row"><button id="googleTrendsFetch" class="primary-button" type="button">今日のトレンドを取得</button></div>
