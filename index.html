@@ -233,6 +233,12 @@
           <p id="roomTrendPhaseTwoMessage" class="message" role="status" aria-live="polite"></p>
           <div id="roomTrendPhaseTwoSummary" class="sns-trend-meta"></div>
           <p id="roomTrendPhaseTwoSavedAt" class="sns-trend-meta"></p>
+          <p id="roomTrendPhaseTwoStorageStatus" class="sns-trend-meta"></p>
+          <div class="button-row">
+            <button id="roomTrendPhaseTwoExport" class="secondary-button" type="button">Phase 2結果をJSON保存</button>
+            <button id="roomTrendPhaseTwoImport" class="secondary-button" type="button">Phase 2結果をJSONから復元</button>
+            <input id="roomTrendPhaseTwoImportFile" type="file" accept="application/json,.json" hidden>
+          </div>
           <button id="roomTrendPhaseTwoClear" class="secondary-button" type="button">保存済みPhase 2結果をクリア</button>
           <div id="roomTrendPhaseTwoResults" class="sns-trend-worker-preview" aria-live="polite"></div>
           <details id="roomTrendPhaseTwoPromptPanel" hidden><summary>最終5選判断用プロンプト</summary><textarea id="roomTrendPhaseTwoPrompt" rows="18" readonly></textarea><div class="button-row"><button id="roomTrendPhaseTwoCopy" class="secondary-button" type="button">プロンプトをコピー</button></div></details>

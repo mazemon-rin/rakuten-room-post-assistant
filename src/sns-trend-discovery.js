@@ -467,6 +467,27 @@
     return payload;
   }
 
+  function verifyRoomTrendPhaseTwoSave(expected, storage = window.localStorage) {
+    const saved = readRoomTrendPhaseTwo(storage);
+    if (!saved || saved.savedAt !== expected.savedAt || saved.results.length !== expected.results.length || saved.prompt !== expected.prompt) {
+      throw new Error("Phase 2保存後の検証に失敗しました。");
+    }
+    return saved;
+  }
+
+  function validateRoomTrendPhaseTwoBackup(value) {
+    if (!value || typeof value !== "object" || value.schemaVersion !== 1) throw new Error("Phase 2バックアップのschemaVersionが不正です。");
+    if (typeof value.savedAt !== "string" || !Array.isArray(value.inputThemes) || !Array.isArray(value.results) || typeof value.prompt !== "string") throw new Error("Phase 2バックアップの必須項目が不足しています。");
+    if (value.results.some((result) => !result || typeof result !== "object" || !String(result.theme || "").trim())) throw new Error("Phase 2バックアップのresultsが不正です。");
+    return value;
+  }
+
+  function exportRoomTrendPhaseTwoJson(data, now = new Date()) {
+    const payload = validateRoomTrendPhaseTwoBackup(data);
+    const stamp = (now instanceof Date ? now : new Date()).toISOString().slice(0, 10).replace(/-/g, "");
+    return { filename: `rakuten-room-phase2-${stamp}-${String(payload.savedAt).replace(/[^0-9]/g, "").slice(-6)}.json`, text: JSON.stringify(payload, null, 2) };
+  }
+
   function clearRoomTrendPhaseTwo(storage = window.localStorage) { storage.removeItem(ROOM_TREND_PHASE_TWO_STORAGE_KEY); }
 
   function renderRoomTrendPhaseTwoResults(results = []) {
@@ -710,8 +731,17 @@
     const phaseTwoPrompt = document.querySelector("#roomTrendPhaseTwoPrompt");
     const phaseTwoPromptPanel = document.querySelector("#roomTrendPhaseTwoPromptPanel");
     const phaseTwoSavedAt = document.querySelector("#roomTrendPhaseTwoSavedAt");
+    const phaseTwoStorageStatus = document.querySelector("#roomTrendPhaseTwoStorageStatus");
+    const phaseTwoExport = document.querySelector("#roomTrendPhaseTwoExport");
+    const phaseTwoImport = document.querySelector("#roomTrendPhaseTwoImport");
+    const phaseTwoImportFile = document.querySelector("#roomTrendPhaseTwoImportFile");
     const phaseTwoClear = document.querySelector("#roomTrendPhaseTwoClear");
+    const renderStorageStatus = (saved) => {
+      if (!phaseTwoStorageStatus) return;
+      phaseTwoStorageStatus.textContent = saved ? `保存状態：localStorage：あり ／ 保存日時：${saved.savedAt} ／ テーマ数：${saved.results.length} ／ 最終5選プロンプト：${saved.prompt ? "あり" : "なし"}` : "保存状態：localStorage：なし";
+    };
     const saved = readRoomTrendPhaseTwo();
+    renderStorageStatus(saved);
     if (saved) {
       renderRoomTrendPhaseTwoResults(saved.results);
       if (phaseTwoSummary) phaseTwoSummary.textContent = `${saved.results.length}テーマの保存済み結果を復元しました。`;
@@ -720,7 +750,35 @@
       if (phaseTwoSavedAt) phaseTwoSavedAt.textContent = `保存日時：${saved.savedAt}`;
       if (phaseTwoMessage) phaseTwoMessage.textContent = "保存済みPhase 2結果を復元しました（API再通信なし）。";
     }
-    phaseTwoClear?.addEventListener("click", () => { clearRoomTrendPhaseTwo(); if (phaseTwoSummary) phaseTwoSummary.textContent = "保存済みPhase 2結果を削除しました。"; if (phaseTwoSavedAt) phaseTwoSavedAt.textContent = ""; if (phaseTwoPrompt) phaseTwoPrompt.value = ""; if (phaseTwoPromptPanel) phaseTwoPromptPanel.hidden = true; if (phaseTwoMessage) phaseTwoMessage.textContent = "Phase 2専用の保存データだけを削除しました。"; });
+    phaseTwoExport?.addEventListener("click", () => {
+      const current = readRoomTrendPhaseTwo();
+      if (!current) { if (phaseTwoMessage) phaseTwoMessage.textContent = "保存済みPhase 2結果がありません。"; return; }
+      try {
+        const backup = exportRoomTrendPhaseTwoJson(current);
+        const url = URL.createObjectURL(new Blob([backup.text], { type: "application/json;charset=utf-8" }));
+        const link = document.createElement("a"); link.href = url; link.download = backup.filename; link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        if (phaseTwoMessage) phaseTwoMessage.textContent = `Phase 2結果をJSON保存しました：${backup.filename}`;
+      } catch (error) { if (phaseTwoMessage) phaseTwoMessage.textContent = error.message; }
+    });
+    phaseTwoImport?.addEventListener("click", () => phaseTwoImportFile?.click());
+    phaseTwoImportFile?.addEventListener("change", async () => {
+      const file = phaseTwoImportFile.files?.[0]; if (!file) return;
+      try {
+        const imported = validateRoomTrendPhaseTwoBackup(JSON.parse(await file.text()));
+        const restored = writeRoomTrendPhaseTwo(imported);
+        verifyRoomTrendPhaseTwoSave(restored);
+        renderRoomTrendPhaseTwoResults(restored.results);
+        if (phaseTwoSummary) phaseTwoSummary.textContent = `${restored.results.length}テーマのJSONバックアップを復元しました。`;
+        if (phaseTwoPrompt) phaseTwoPrompt.value = restored.prompt;
+        if (phaseTwoPromptPanel) phaseTwoPromptPanel.hidden = !restored.prompt;
+        if (phaseTwoSavedAt) phaseTwoSavedAt.textContent = `保存日時：${restored.savedAt}`;
+        renderStorageStatus(restored);
+        if (phaseTwoMessage) phaseTwoMessage.textContent = "JSONからPhase 2結果を復元しました（API再通信なし）。";
+      } catch (error) { if (phaseTwoMessage) phaseTwoMessage.textContent = error.message || "JSON復元に失敗しました。"; }
+      finally { phaseTwoImportFile.value = ""; }
+    });
+    phaseTwoClear?.addEventListener("click", () => { clearRoomTrendPhaseTwo(); renderStorageStatus(null); if (phaseTwoSummary) phaseTwoSummary.textContent = "保存済みPhase 2結果を削除しました。"; if (phaseTwoSavedAt) phaseTwoSavedAt.textContent = ""; if (phaseTwoPrompt) phaseTwoPrompt.value = ""; if (phaseTwoPromptPanel) phaseTwoPromptPanel.hidden = true; if (phaseTwoMessage) phaseTwoMessage.textContent = "Phase 2専用の保存データだけを削除しました。"; });
     phaseTwoLoad?.addEventListener("click", () => {
       try { roomTrendPhaseTwoThemes = parseRoomTrendPhaseTwoJson(phaseTwoInput?.value || ""); phaseTwoRun.disabled = false; if (phaseTwoMessage) phaseTwoMessage.textContent = `${roomTrendPhaseTwoThemes.length}テーマを読み込みました。追加調査を実行できます。`; }
       catch (error) { roomTrendPhaseTwoThemes = []; phaseTwoRun.disabled = true; if (phaseTwoMessage) phaseTwoMessage.textContent = error.message; }
@@ -737,6 +795,8 @@
         if (phaseTwoPrompt) phaseTwoPrompt.value = buildRoomTrendPhaseTwoPrompt(results, new Date());
         if (phaseTwoPromptPanel) phaseTwoPromptPanel.hidden = false;
         const savedData = writeRoomTrendPhaseTwo({ inputThemes: roomTrendPhaseTwoThemes, results, prompt: phaseTwoPrompt?.value || "" });
+        verifyRoomTrendPhaseTwoSave(savedData);
+        renderStorageStatus(savedData);
         if (phaseTwoSavedAt) phaseTwoSavedAt.textContent = `保存日時：${savedData.savedAt}`;
         if (phaseTwoMessage) phaseTwoMessage.textContent = "追加調査が完了しました。最終5選判断用プロンプトを確認してください。";
       } catch (error) { if (phaseTwoMessage) phaseTwoMessage.textContent = error.message || "追加調査に失敗しました。"; }
@@ -996,6 +1056,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, ROOM_TREND_PHASE_TWO_STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, ROOM_TREND_FIVE_MAX_CANDIDATES, readState, writeState, readRoomTrendPhaseTwo, writeRoomTrendPhaseTwo, clearRoomTrendPhaseTwo, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, isAcceptedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, mergeRoomTrendFiveCandidates, buildRoomTrendFivePrompt, parseRoomTrendPhaseTwoJson, fetchRakutenThemeEvidence, investigateRoomTrendPhaseTwoTheme, investigateRoomTrendPhaseTwoThemes, buildRoomTrendPhaseTwoPrompt, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, buildYahooReasonSearchQuery, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, ROOM_TREND_PHASE_TWO_STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, ROOM_TREND_FIVE_MAX_CANDIDATES, readState, writeState, readRoomTrendPhaseTwo, writeRoomTrendPhaseTwo, verifyRoomTrendPhaseTwoSave, validateRoomTrendPhaseTwoBackup, exportRoomTrendPhaseTwoJson, clearRoomTrendPhaseTwo, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, isAcceptedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, mergeRoomTrendFiveCandidates, buildRoomTrendFivePrompt, parseRoomTrendPhaseTwoJson, fetchRakutenThemeEvidence, investigateRoomTrendPhaseTwoTheme, investigateRoomTrendPhaseTwoThemes, buildRoomTrendPhaseTwoPrompt, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, buildYahooReasonSearchQuery, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());

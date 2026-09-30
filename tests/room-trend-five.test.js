@@ -16,6 +16,17 @@ storage.data[api.ROOM_TREND_PHASE_TWO_STORAGE_KEY] = "{broken";
 if (api.readRoomTrendPhaseTwo(storage) !== null) throw new Error("Broken Phase 2 JSON handling failed");
 api.writeRoomTrendPhaseTwo(saved, storage); api.clearRoomTrendPhaseTwo(storage);
 if (storage.getItem(api.ROOM_TREND_PHASE_TWO_STORAGE_KEY) !== null) throw new Error("Phase 2 clear failed");
+api.writeRoomTrendPhaseTwo(saved, storage);
+if (api.verifyRoomTrendPhaseTwoSave(saved, storage).results.length !== 1) throw new Error("Phase 2 save verification failed");
+const backup = api.exportRoomTrendPhaseTwoJson(saved, new Date("2026-09-30T12:00:00Z"));
+const parsedBackup = JSON.parse(backup.text);
+if (!backup.filename.startsWith("rakuten-room-phase2-20260930-")) throw new Error("Phase 2 export filename failed");
+if (parsedBackup.results[0].rakutenEvidence.representativeProducts[0].itemCode !== "shop:1" || parsedBackup.prompt !== saved.prompt) throw new Error("Phase 2 export data failed");
+if (backup.text.includes("applicationId") || backup.text.includes("accessKey") || backup.text.includes("affiliateId")) throw new Error("Phase 2 export leaked secrets");
+if (api.validateRoomTrendPhaseTwoBackup(parsedBackup).results.length !== 1) throw new Error("Phase 2 import validation failed");
+for (const invalid of [{ ...parsedBackup, schemaVersion: 2 }, { ...parsedBackup, results: "bad" }, { ...parsedBackup, prompt: null }]) {
+  try { api.validateRoomTrendPhaseTwoBackup(invalid); throw new Error("invalid Phase 2 backup accepted"); } catch (error) { if (error.message === "invalid Phase 2 backup accepted") throw error; }
+}
 console.log("ROOM trend Phase 2 persistence cases: passed");
 
 const google = { items: [
