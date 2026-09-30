@@ -454,7 +454,7 @@
   async function investigateRoomTrendPhaseTwoTheme(theme, options = {}) {
     const fetchImpl = options.fetchImpl || window.fetch.bind(window);
     const now = options.now || new Date();
-    const web = await fetchWebSearch(`${theme.theme} ${theme.reason} 季節 イベント 発売 セール 今後 需要`, fetchImpl).catch((error) => ({ error: error.message, results: [] }));
+    const web = await fetchWebSearch(buildRoomTrendWebSearchQuery(theme), fetchImpl).catch((error) => ({ error: error.message, results: [] }));
     const youtube = await fetchYouTubeSearch(theme.theme, fetchImpl, now).catch((error) => ({ error: error.message, items: [] }));
     const rakuten = await fetchRakutenThemeEvidence(theme, fetchImpl, options.settings || {});
     return { ...theme, webEvidence: web.error ? { error: web.error, results: [] } : { query: web.query, results: web.results }, youtubeMetrics: youtube.error ? { error: youtube.error, videoCount: 0, recent3DayCount: 0, recent7DayCount: 0, maxViewCount: null, totalViewCount: 0 } : { videoCount: youtube.items.length, ...summarizeYouTubeVideos(youtube.items, now) }, rakutenEvidence: rakuten };
@@ -464,6 +464,21 @@
     const results = [];
     for (const theme of themes) results.push(await investigateRoomTrendPhaseTwoTheme(theme, options));
     return results;
+  }
+
+  function buildRoomTrendWebSearchQuery(theme = {}, maxLength = 100) {
+    const themeKeyword = String(theme.theme || "").trim();
+    const sourceKeywords = Array.isArray(theme.sourceKeywords) ? theme.sourceKeywords : [];
+    const tokens = [themeKeyword, ...sourceKeywords.map((keyword) => String(keyword || "").trim()), "季節", "需要"]
+      .filter(Boolean)
+      .filter((token, index, values) => values.indexOf(token) === index);
+    let query = "";
+    for (const token of tokens) {
+      const next = query ? `${query} ${token}` : token;
+      if (next.length > maxLength) continue;
+      query = next;
+    }
+    return query || themeKeyword.slice(0, maxLength);
   }
 
   function buildRoomTrendPhaseTwoPrompt(results = [], now = new Date()) {
@@ -1078,6 +1093,6 @@
     });
   }
 
-  window.snsTrendDiscovery = { STORAGE_KEY, ROOM_TREND_PHASE_TWO_STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, ROOM_TREND_FIVE_MAX_CANDIDATES, readState, writeState, readRoomTrendPhaseTwo, writeRoomTrendPhaseTwo, verifyRoomTrendPhaseTwoSave, validateRoomTrendPhaseTwoBackup, exportRoomTrendPhaseTwoJson, clearRoomTrendPhaseTwo, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, isAcceptedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, mergeRoomTrendFiveCandidates, buildRoomTrendFivePrompt, parseRoomTrendPhaseTwoJson, fetchRakutenThemeEvidence, investigateRoomTrendPhaseTwoTheme, investigateRoomTrendPhaseTwoThemes, buildRoomTrendPhaseTwoPrompt, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, formatRoomTrendWebEvidence, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, buildYahooReasonSearchQuery, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
+  window.snsTrendDiscovery = { STORAGE_KEY, ROOM_TREND_PHASE_TWO_STORAGE_KEY, ANALYTICS_STORAGE_KEY, SOURCES, GOOGLE_TRENDS_WORKER_URL, YOUTUBE_SEARCH_WORKER_URL, WEB_SEARCH_WORKER_URL, YAHOO_SHOPPING_RANKING_WORKER_URL, GOOGLE_TRENDS_SOURCE_URL, ROOM_TREND_FIVE_MAX_CANDIDATES, readState, writeState, readRoomTrendPhaseTwo, writeRoomTrendPhaseTwo, verifyRoomTrendPhaseTwoSave, validateRoomTrendPhaseTwoBackup, exportRoomTrendPhaseTwoJson, clearRoomTrendPhaseTwo, normalizeRelatedKeywords, normalizeCandidate, isUnprocessedCandidate, isAcceptedCandidate, findUnprocessedDuplicate, upsertCandidate, removeCandidate, acceptCandidate, acceptAndSearchCandidate, rejectCandidate, buildAnalyticsRecords, summarizeAnalytics, summarizeAnalyticsBySource, analyticsRecordView, filterAnalyticsRecords, readAnalyticsState, writeAnalyticsState, collectAnalytics, renderAnalytics, classifyTrend, classifyTrendItems, mergeRoomTrendFiveCandidates, buildRoomTrendFivePrompt, parseRoomTrendPhaseTwoJson, fetchRakutenThemeEvidence, investigateRoomTrendPhaseTwoTheme, investigateRoomTrendPhaseTwoThemes, buildRoomTrendPhaseTwoPrompt, validateWorkerPayload, fetchGoogleTrends, validateYouTubePayload, fetchYouTubeSearch, validateWebSearchPayload, fetchWebSearch, buildRoomTrendWebSearchQuery, formatRoomTrendWebEvidence, validateYahooRankingPayload, fetchYahooRanking, summarizeYouTubeVideos, buildYouTubeCandidateInput, addYouTubeCandidate, buildGoogleTrendsCandidateInput, addGoogleTrendsCandidate, buildYahooCandidateInput, addYahooCandidate, buildYahooReasonSearchQuery, investigateYahooReason, classifyYahooReason, renderYahooReasonOutput, renderWorkerPreview, renderYouTubePreview, renderYahooPreview, render };
   document.addEventListener("DOMContentLoaded", init);
 }());
