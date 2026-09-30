@@ -76,6 +76,9 @@ console.log("ROOM trend five Phase 1 cases: passed");
   try { api.parseRoomTrendPhaseTwoJson(JSON.stringify(tooManyQueries)); throw new Error("too many queries accepted"); } catch (error) { if (!error.message.includes("rakutenQueriesは1〜5件") || error.message === "too many queries accepted") throw error; }
   const tenThemes = JSON.stringify(Array.from({ length: 10 }, (_, index) => ({ ...JSON.parse(phaseTwoJson)[0], theme: `テーマ${index + 1}` })));
   if (api.parseRoomTrendPhaseTwoJson(tenThemes).length !== 10) throw new Error("10-theme JSON validation failed");
+  const smartQuotedInput = tenThemes.replace(/"([^"\\]*)"(?=\s*:|\s*,|\s*\]|\s*\})/g, "“$1”");
+  const smartParsed = api.parseRoomTrendPhaseTwoJson(smartQuotedInput);
+  if (smartParsed.length !== 10 || smartParsed[0].reason !== "年末需要" || smartParsed[0].theme !== "テーマ1") throw new Error("smart quote 10-theme JSON validation failed");
   if (!api.buildRoomTrendPhaseTwoPrompt([{ ...phaseTwo[0], webEvidence: { results: [] }, youtubeMetrics: { videoCount: 0 }, rakutenEvidence: { productCount: 0 } }], new Date("2026-09-30T12:00:00Z")).includes("最終的に楽天ROOM向けの5テーマ")) throw new Error("Phase 2 prompt generation failed");
   const rakutenEvidence = await api.fetchRakutenThemeEvidence(phaseTwo[0], async () => { throw new Error("must use shared API helper"); }, {});
   if (rakutenEvidence.queryResults.length !== 2 || rakutenEvidence.uniqueItemCount !== 1 || rakutenEvidence.priceRange.min !== 2980) throw new Error("Phase 2 Rakuten evidence failed");

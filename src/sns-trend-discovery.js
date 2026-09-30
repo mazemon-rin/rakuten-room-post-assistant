@@ -412,6 +412,7 @@
       let input = value.trim();
       const fenced = input.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
       if (fenced) input = fenced[1].trim();
+      input = input.replace(/[“”]/g, '"');
       try { parsed = JSON.parse(input); } catch (error) { throw new Error(`JSONの形式が正しくありません。ChatGPTの回答全体ではなく、JSON配列を貼り付けてください。${error?.message ? `（${error.message}）` : ""}`); }
     } else {
       parsed = value;
