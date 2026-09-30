@@ -451,7 +451,7 @@
 
   function buildRoomTrendPhaseTwoPrompt(results = [], now = new Date()) {
     const date = now instanceof Date ? now.toISOString().slice(0, 10) : String(now).slice(0, 10);
-    return `あなたは楽天ROOMの最終トレンド選定担当です。\n現在日付：${date}\n\n以下はPhase 1で整理した購買テーマと、Tavily Web検索、YouTube、楽天商品検索による追加調査結果です。最終的に楽天ROOM向けの5テーマを選んでください。\n\n判断条件：\n- 購買意図と楽天ROOMとの相性\n- 今後7〜30日の需要と購入タイミング\n- 季節性、イベント、発売、セール等の根拠\n- Web情報の具体性と信頼性\n- YouTubeは話題性の補助指標として使い、数字だけで採用しない\n- 楽天商品が複数存在し、価格帯・レビュー・テーマ一致を確認できるか\n- 商品1件だけの存在や未確認情報だけでは採用しない\n- 事実が不明な価格、在庫、割引、レビューを推測しない\n\n必ずJSON配列だけを返してください。5件を選び、各要素に theme、reason、purchaseWindow、categories、rakutenQueries、purchaseIntent、confidence、sourceKeywords、webEvidence、youtubeMetrics、rakutenEvidence を含めてください。\n\n調査結果：\n${JSON.stringify(results, null, 2)}`;
+    return `あなたは楽天ROOMの最終トレンド選定担当です。\n現在日付：${date}\n\n以下はPhase 1で整理した購買テーマと、Tavily Web検索、YouTube、楽天商品検索による追加調査結果です。10テーマを相対比較し、最終的に楽天ROOM向けの5テーマを選んでください。\n\n判断条件：\n- 現在の需要、購買意図、「今買う理由」\n- 今後7〜30日の需要と購入タイミング\n- 季節性、イベント、発売、セール等の根拠\n- Web情報の具体性と信頼性\n- YouTubeは話題性の補助指標として使い、数字だけで採用しない\n- 楽天市場で商品が成立しているか、商品数、価格帯、レビュー情報、テーマと商品の一致\n- 楽天ROOMとの相性\n- 楽天商品が複数存在するかを確認し、商品が存在するだけでは採用しない\n- 商品1件だけの存在や未確認情報だけでは採用しない\n- 事実が不明な価格、在庫、割引、レビューを推測しない\n\n必ずJSON配列だけを返してください。5件を選び、各要素に theme、reason、purchaseWindow、categories、rakutenQueries、purchaseIntent、confidence、sourceKeywords、webEvidence、youtubeMetrics、rakutenEvidence を含めてください。\n\n調査結果：\n${JSON.stringify(results, null, 2)}`;
   }
 
   function readRoomTrendPhaseTwo(storage = window.localStorage) {

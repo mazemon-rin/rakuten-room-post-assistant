@@ -9,6 +9,18 @@
 .sns-trend-discovery-card h3 { margin: 0 0 6px; }
 .sns-trend-worker-panel { display: grid; gap: 10px; }
 .sns-trend-worker-preview { display: grid; gap: 12px; }
+
+.room-trend-guide { margin: 16px 0; padding: 12px; border: 1px solid var(--line, #d9dee7); border-radius: 10px; background: var(--panel-soft, #f8fafc); }
+.room-trend-guide h4 { margin: 0 0 10px; }
+.room-trend-guide-steps { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.room-trend-guide-steps span:not([aria-hidden="true"]) { display: grid; gap: 3px; min-width: 110px; text-align: center; }
+.room-trend-guide-steps b { font-size: .78rem; color: var(--muted, #667085); }
+.room-trend-step-help { margin: 8px 0; }
+
+@media (max-width: 680px) {
+  .room-trend-guide-steps { display: grid; grid-template-columns: 1fr; }
+  .room-trend-guide-steps span[aria-hidden="true"] { display: none; }
+}
 .sns-trend-worker-card { padding: 14px; border: 1px solid var(--line, #ddd); border-radius: 10px; background: var(--panel, #fff); }
 .sns-trend-worker-card h4 { margin: 0 0 6px; }
 .sns-trend-worker-card ul { margin: 6px 0 10px; padding-left: 20px; }

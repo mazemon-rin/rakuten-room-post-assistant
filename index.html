@@ -219,29 +219,31 @@
         <div class="button-row"><button class="primary-button" type="submit">Google Trends候補を登録</button><button id="googleTrendsClear" class="secondary-button" type="button">入力をクリア</button></div>
       </form></details>
       <section id="roomTrendFivePanel" class="panel room-trend-five-panel">
-        <div class="section-heading"><h3>今日のROOMトレンド5選</h3><p>Google TrendsとYahoo!ショッピング急上昇を統合し、ChatGPT／Codexで約10テーマへ整理するための候補を作ります。Phase 1ではAI分析用プロンプトの生成まで行い、DiscoveryやROOM候補は変更しません。</p></div>
-        <div class="button-row"><button id="roomTrendFiveFetch" class="primary-button" type="button">候補を取得</button></div>
+        <div class="section-heading"><h3>今日のROOMトレンド5選</h3><p>Google TrendsとYahoo!ショッピング急上昇を統合し、ChatGPT／Codexで約10テーマへ整理するための候補を作ります。画面のSTEP 1〜5に沿って進めてください。DiscoveryやROOM候補は変更しません。</p></div>
+        <div class="room-trend-guide" aria-label="今日のROOMトレンド5選 操作手順"><h4>操作手順</h4><div class="room-trend-guide-steps"><span><b>STEP 1</b>候補を取得</span><span aria-hidden="true">→</span><span><b>STEP 2</b>AIで約10テーマに整理</span><span aria-hidden="true">→</span><span><b>STEP 3</b>追加調査</span><span aria-hidden="true">→</span><span><b>STEP 4</b>JSON保存</span><span aria-hidden="true">→</span><span><b>STEP 5</b>AIで最終5選を決定</span></div></div>
+        <div class="button-row"><button id="roomTrendFiveFetch" class="primary-button" type="button">STEP 1：候補を取得</button></div>
         <p id="roomTrendFiveMessage" class="message" role="status" aria-live="polite"></p>
         <div id="roomTrendFiveSummary" class="sns-trend-meta"></div>
-        <details id="roomTrendFivePromptPanel" hidden><summary>AI分析用プロンプト</summary><textarea id="roomTrendFivePrompt" rows="18" readonly></textarea><div class="button-row"><button id="roomTrendFiveCopy" class="secondary-button" type="button">プロンプトをコピー</button></div></details>
+        <details id="roomTrendFivePromptPanel" hidden><summary>STEP 2：AI分析用プロンプト</summary><p class="room-trend-step-help">このプロンプトをChatGPT／Codexへ渡してください。AIから返されたJSON配列をSTEP 3へ貼り付けます。</p><textarea id="roomTrendFivePrompt" rows="18" readonly></textarea><div class="button-row"><button id="roomTrendFiveCopy" class="secondary-button" type="button">STEP 2：AI分析用プロンプトをコピー</button></div></details>
         <div id="roomTrendFiveCandidates" class="sns-trend-worker-preview" aria-live="polite"></div>
         <section id="roomTrendPhaseTwo" class="room-trend-phase-two">
-          <h4>Phase 2：AI分析結果の追加調査</h4>
-          <p>Phase 1のAI分析結果JSONを貼り付け、約10テーマだけを追加調査します。DiscoveryやROOM候補は変更しません。</p>
+          <h4>STEP 3：約10テーマを追加調査</h4>
+          <p>AIが返したJSON配列を貼り付け、約10テーマだけを追加調査します。Tavily Web検索、YouTube、楽天商品検索を使用します。追加調査を実行してもDiscoveryやROOM投稿候補は変更されません。</p>
           <textarea id="roomTrendPhaseTwoInput" rows="12" placeholder='AIが返したJSON配列を貼り付けてください'></textarea>
-          <div class="button-row"><button id="roomTrendPhaseTwoLoad" class="secondary-button" type="button">AI分析結果を読み込む</button><button id="roomTrendPhaseTwoRun" class="primary-button" type="button" disabled>追加調査を実行</button></div>
+          <div class="button-row"><button id="roomTrendPhaseTwoLoad" class="secondary-button" type="button">STEP 3-1：AI結果を読み込む</button><button id="roomTrendPhaseTwoRun" class="primary-button" type="button" disabled>STEP 3-2：追加調査を実行</button></div>
           <p id="roomTrendPhaseTwoMessage" class="message" role="status" aria-live="polite"></p>
           <div id="roomTrendPhaseTwoSummary" class="sns-trend-meta"></div>
           <p id="roomTrendPhaseTwoSavedAt" class="sns-trend-meta"></p>
           <p id="roomTrendPhaseTwoStorageStatus" class="sns-trend-meta"></p>
+          <p class="room-trend-step-help"><b>STEP 4：調査結果をバックアップ</b><br>追加調査が終わったら、最終判断の前にJSON保存を推奨します。保存したJSONからAPI再通信なしで復元できます。</p>
           <div class="button-row">
-            <button id="roomTrendPhaseTwoExport" class="secondary-button" type="button">Phase 2結果をJSON保存</button>
+            <button id="roomTrendPhaseTwoExport" class="secondary-button" type="button">STEP 4：Phase 2結果をJSON保存</button>
             <button id="roomTrendPhaseTwoImport" class="secondary-button" type="button">Phase 2結果をJSONから復元</button>
             <input id="roomTrendPhaseTwoImportFile" type="file" accept="application/json,.json" hidden>
           </div>
           <button id="roomTrendPhaseTwoClear" class="secondary-button" type="button">保存済みPhase 2結果をクリア</button>
           <div id="roomTrendPhaseTwoResults" class="sns-trend-worker-preview" aria-live="polite"></div>
-          <details id="roomTrendPhaseTwoPromptPanel" hidden><summary>最終5選判断用プロンプト</summary><textarea id="roomTrendPhaseTwoPrompt" rows="18" readonly></textarea><div class="button-row"><button id="roomTrendPhaseTwoCopy" class="secondary-button" type="button">プロンプトをコピー</button></div></details>
+          <details id="roomTrendPhaseTwoPromptPanel" hidden><summary>STEP 5：最終5選をAIで決める</summary><p class="room-trend-step-help">10テーマを相対比較し、現在の需要、購買意図、「今買う理由」、今後7〜30日の需要、季節・イベント・発売・セールのタイミング、Webの根拠、YouTubeの話題性、楽天市場の商品数・価格帯・レビュー・テーマ一致、楽天ROOMとの相性を判断します。YouTubeは補助指標です。楽天商品が見つかっただけでは自動採用しません。</p><textarea id="roomTrendPhaseTwoPrompt" rows="18" readonly></textarea><div class="button-row"><button id="roomTrendPhaseTwoCopy" class="secondary-button" type="button">STEP 5：最終5選判断用プロンプトをコピー</button></div></details>
         </section>
       </section>
       <details class="discovery-accordion"><summary>Google Trends Trending Now</summary><section class="panel sns-trend-worker-panel">
