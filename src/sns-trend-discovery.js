@@ -681,28 +681,10 @@
     if (node) node.textContent = message;
   }
 
-  function init() {
-    const form = document.querySelector("#snsTrendDiscoveryForm");
-    const googleForm = document.querySelector("#googleTrendsDiscoveryForm");
-    const list = document.querySelector("#snsTrendDiscoveryList");
-    if (!form || !list) return;
-    document.querySelectorAll(".discovery-accordion").forEach((section) => section.addEventListener("toggle", () => {
-      if (!section.open) return;
-      document.querySelectorAll(".discovery-accordion").forEach((other) => { if (other !== section) other.open = false; });
-    }));
-    const storage = window.localStorage;
-    let state = readState(storage);
-    let workerPayload = null;
-    let workerLoading = false;
-    render(state);
-
-    let roomTrendFiveLoading = false;
-    let roomTrendFiveResult = null;
-    const roomTrendFiveFetchButton = document.querySelector("#roomTrendFiveFetch");
-    const roomTrendFiveMessage = document.querySelector("#roomTrendFiveMessage");
-    const roomTrendFiveSummary = document.querySelector("#roomTrendFiveSummary");
-    const roomTrendFivePromptPanel = document.querySelector("#roomTrendFivePromptPanel");
-    const roomTrendFivePrompt = document.querySelector("#roomTrendFivePrompt");
+  function initRoomTrendPhaseTwo() {
+    const panel = document.querySelector("#roomTrendPhaseTwo");
+    if (!panel || panel.dataset.initialized === "true") return;
+    panel.dataset.initialized = "true";
     let roomTrendPhaseTwoThemes = [];
     const phaseTwoInput = document.querySelector("#roomTrendPhaseTwoInput");
     const phaseTwoLoad = document.querySelector("#roomTrendPhaseTwoLoad");
@@ -731,6 +713,31 @@
       finally { phaseTwoRun.disabled = false; }
     });
     document.querySelector("#roomTrendPhaseTwoCopy")?.addEventListener("click", async () => { const text = phaseTwoPrompt?.value || ""; if (!text) return; try { await navigator.clipboard.writeText(text); if (phaseTwoMessage) phaseTwoMessage.textContent = "最終5選判断用プロンプトをコピーしました。"; } catch { phaseTwoPrompt.select(); if (phaseTwoMessage) phaseTwoMessage.textContent = "コピーできませんでした。表示された内容を手動でコピーしてください。"; } });
+  }
+
+  function init() {
+    const form = document.querySelector("#snsTrendDiscoveryForm");
+    const googleForm = document.querySelector("#googleTrendsDiscoveryForm");
+    const list = document.querySelector("#snsTrendDiscoveryList");
+    if (!form || !list) return;
+    document.querySelectorAll(".discovery-accordion").forEach((section) => section.addEventListener("toggle", () => {
+      if (!section.open) return;
+      document.querySelectorAll(".discovery-accordion").forEach((other) => { if (other !== section) other.open = false; });
+    }));
+    const storage = window.localStorage;
+    let state = readState(storage);
+    let workerPayload = null;
+    let workerLoading = false;
+    render(state);
+    initRoomTrendPhaseTwo();
+
+    let roomTrendFiveLoading = false;
+    let roomTrendFiveResult = null;
+    const roomTrendFiveFetchButton = document.querySelector("#roomTrendFiveFetch");
+    const roomTrendFiveMessage = document.querySelector("#roomTrendFiveMessage");
+    const roomTrendFiveSummary = document.querySelector("#roomTrendFiveSummary");
+    const roomTrendFivePromptPanel = document.querySelector("#roomTrendFivePromptPanel");
+    const roomTrendFivePrompt = document.querySelector("#roomTrendFivePrompt");
     roomTrendFiveFetchButton?.addEventListener("click", async () => {
       if (roomTrendFiveLoading) return;
       roomTrendFiveLoading = true;

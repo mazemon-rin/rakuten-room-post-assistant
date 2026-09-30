@@ -1,6 +1,9 @@
 const fs = require("fs");
 const vm = require("vm");
 const source = fs.readFileSync("src/sns-trend-discovery.js", "utf8");
+if (!source.includes("function initRoomTrendPhaseTwo()")) throw new Error("Phase 2 initializer missing");
+if (!source.includes("initRoomTrendPhaseTwo();")) throw new Error("Phase 2 initializer is not called from init");
+if (!source.includes('panel.dataset.initialized === "true"')) throw new Error("Phase 2 initializer is not idempotent");
 const context = { window: { RoomRakutenApi: { hasCredentials: () => true, requestItemSearch: async (query) => ({ status: "ok", query, products: [{ itemCode: "shop:1", itemName: "秋服", itemPrice: 2980, reviewAverage: 4.5, reviewCount: 12 }] }) } }, document: { addEventListener() {}, querySelector() { return null; } }, Date, Math, JSON, Error, URLSearchParams };
 vm.runInNewContext(source, context);
 const api = context.window.snsTrendDiscovery;
