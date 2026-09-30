@@ -9,6 +9,11 @@
 .sns-trend-discovery-card h3 { margin: 0 0 6px; }
 .sns-trend-worker-panel { display: grid; gap: 10px; }
 .sns-trend-worker-preview { display: grid; gap: 12px; }
+.room-trend-candidates-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; }
+.room-trend-candidates-toggle { white-space: nowrap; }
+.room-trend-candidates-list { display: grid; gap: 12px; }
+.room-trend-five-prompt-panel { margin: 12px 0; }
+.room-trend-five-prompt-panel h4 { margin: 0 0 8px; }
 
 .room-trend-guide { margin: 16px 0; padding: 12px; border: 1px solid var(--line, #d9dee7); border-radius: 10px; background: var(--panel-soft, #f8fafc); }
 .room-trend-guide h4 { margin: 0 0 10px; }
@@ -42,4 +47,5 @@
 .trend-analytics-grid span, .trend-analytics-grid strong { display: block; }
 .trend-analytics-source, .trend-analytics-record { border-top: 1px solid var(--line, #ddd); padding: 10px 0; }
 @media (max-width: 680px) { .sns-trend-card { display: grid; } }
+@media (max-width: 680px) { .room-trend-candidates-header { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 680px) { .trend-analytics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

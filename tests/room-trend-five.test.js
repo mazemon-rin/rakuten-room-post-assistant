@@ -4,6 +4,8 @@ const source = fs.readFileSync("src/sns-trend-discovery.js", "utf8");
 const html = fs.readFileSync("index.html", "utf8");
 if (!["STEP 1：候補を取得", "STEP 2：AI分析用プロンプト", "STEP 3：約10テーマを追加調査", "STEP 3-1：AI結果を読み込む", "STEP 3-2：追加調査を実行", "STEP 4：Phase 2結果をJSON保存", "STEP 5：最終5選をAIで決める", "STEP 5：最終5選判断用プロンプトをコピー"].every((label) => html.includes(label))) throw new Error("ROOM trend five STEP UI labels missing");
 if (!html.includes("このプロンプトをChatGPT／Codexへ渡してください") || !html.includes("楽天商品が見つかっただけでは自動採用しません")) throw new Error("ROOM trend five guidance missing");
+if (!source.includes("room-trend-candidates-toggle") || !source.includes("候補一覧を閉じる ▲") || !source.includes("候補一覧を表示 ▼")) throw new Error("ROOM trend five candidate toggle missing");
+if (!source.includes("aria-expanded") || !source.includes("room-trend-candidates-list")) throw new Error("ROOM trend five candidate toggle behavior missing");
 if (!source.includes("function initRoomTrendPhaseTwo()")) throw new Error("Phase 2 initializer missing");
 if (!source.includes("initRoomTrendPhaseTwo();")) throw new Error("Phase 2 initializer is not called from init");
 if (!source.includes('panel.dataset.initialized === "true"')) throw new Error("Phase 2 initializer is not idempotent");

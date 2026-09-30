@@ -403,7 +403,17 @@
   function renderRoomTrendFiveCandidates(result = {}) {
     const node = document.querySelector("#roomTrendFiveCandidates");
     if (!node) return;
-    node.innerHTML = result.candidates?.length ? result.candidates.map((candidate) => `<article class="sns-trend-discovery-card"><div><h4>${escapeText(candidate.keyword)}</h4><p class="sns-trend-meta">${escapeText(candidate.sources.join(" / "))} ／ 判定 ${escapeText(candidate.classification.grade)} ／ ${escapeText(candidate.classification.reasons.join("、"))}</p></div></article>`).join("") : "<p class=\"message\">利用可能な候補はありません。</p>";
+    const candidates = Array.isArray(result.candidates) ? result.candidates : [];
+    const cards = candidates.length ? candidates.map((candidate) => `<article class="sns-trend-discovery-card"><div><h4>${escapeText(candidate.keyword)}</h4><p class="sns-trend-meta">${escapeText(candidate.sources.join(" / "))} ／ 判定 ${escapeText(candidate.classification.grade)} ／ ${escapeText(candidate.classification.reasons.join("、"))}</p></div></article>`).join("") : "<p class=\"message\">利用可能な候補はありません。</p>";
+    node.innerHTML = `<div class="room-trend-candidates-header"><strong>一次候補：${candidates.length}件</strong><button type="button" class="secondary-button room-trend-candidates-toggle" aria-expanded="true">候補一覧を閉じる ▲</button></div><div class="room-trend-candidates-list">${cards}</div>`;
+    const toggle = node.querySelector(".room-trend-candidates-toggle");
+    const list = node.querySelector(".room-trend-candidates-list");
+    toggle?.addEventListener("click", () => {
+      const expanded = toggle.getAttribute("aria-expanded") !== "true";
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.textContent = expanded ? "候補一覧を閉じる ▲" : "候補一覧を表示 ▼";
+      if (list) list.hidden = !expanded;
+    });
   }
 
   function parseRoomTrendPhaseTwoJson(value) {
