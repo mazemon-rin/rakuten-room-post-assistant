@@ -43,7 +43,7 @@ vm.runInContext(affiliateSalesSource, context);
 vm.runInContext(productNormalizationSource, context);
 vm.runInContext(rankingRulesSource, context);
 vm.runInContext(trendRulesSource, context);
-vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, validateGeneratedCopy, data };`, context);
+vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, validateGeneratedCopy, data };`, context);
 
 const scoring = context.__scoring;
 scoring.evaluateRoomProduct = context.evaluateRoomProduct;
@@ -654,6 +654,33 @@ scoring.data.history = [];
 scoring.recordRoomPosting(introCandidate, { postedAt: "2026-09-26T00:00:00.000Z", introText: pendingIntro });
 assert(scoring.data.history[0].introText === pendingIntro && introCandidate.introText === pendingIntro, "Intro persistence C: posting record keeps the same intro text on candidate and history");
 scoring.data.history = previousHistory;
+
+// ROOM投稿経路の最終境界: 保存済み本文を投稿直前に整形し、履歴にも同じ本文を残す。
+const roomDiscountCandidate = {
+  id: "room-final-discount",
+  itemCode: "shop:nb-30",
+  title: "ニューバランス ランニングシューズ",
+  postStatus: "投稿待ち",
+  product: { itemCode: "shop:nb-30", itemName: "ニューバランス ランニングシューズ", discountRate: 30, rateConfirmed: true, discountRateType: "exact" },
+  introText: "ニューバランスのランニングシューズです。本文にも30%OFFと書かれています。",
+  hashTags: "#ニューバランス",
+  snsPosts: scoring.createSnsPosts()
+};
+const finalPayload = scoring.validateRoomPostingPayload(roomDiscountCandidate, roomDiscountCandidate.introText);
+assert(finalPayload.ok && finalPayload.introText.startsWith("30%OFF🉐 "), "ROOM integration A: posting payload starts with confirmed direct discount");
+assert(finalPayload.introText.match(/30%OFF/g).length === 1, "ROOM integration B: duplicate discount text is removed");
+assert(scoring.finalizeRoomIntro(roomDiscountCandidate, "30%OFF🉐 ニューバランスのランニングシューズです。").startsWith("30%OFF🉐 ニューバランス"), "ROOM integration B2: existing correct header keeps the product body");
+const previousRoomHistory = scoring.data.history;
+scoring.data.history = [];
+scoring.recordRoomPosting(roomDiscountCandidate, { postedAt: "2026-10-03T00:00:00.000Z", introText: roomDiscountCandidate.introText });
+assert(roomDiscountCandidate.introText.startsWith("30%OFF🉐 ") && scoring.data.history[0].introText.startsWith("30%OFF🉐 "), "ROOM integration C: candidate and history keep final ROOM intro");
+scoring.data.history = previousRoomHistory;
+const couponIntro = scoring.finalizeRoomIntro({ product: { itemName: "アディダス シューズ", discountRate: 50, rateConfirmed: true, discountRateType: "exact", discountType: "coupon", discountCondition: "クーポン利用", confirmedDiscountLabel: "50%OFFクーポン" } }, "アディダスのシューズです。");
+assert(couponIntro.startsWith("50%OFFクーポン対象🉐 "), "ROOM integration D: active coupon is first");
+const preStartIntro = scoring.finalizeRoomIntro({ couponStart: "10/4 20:00", product: { itemName: "アディダス シューズ", saleStatus: "販売開始前", discountRate: 50, rateConfirmed: true, discountRateType: "exact", discountType: "coupon", discountCondition: "クーポン利用", confirmedDiscountLabel: "50%OFFクーポン" } }, "アディダスのシューズです。");
+assert(preStartIntro.startsWith("50%OFFクーポン対象｜10/4 20:00開始🉐 "), "ROOM integration E: pre-start coupon states its start time");
+const uncertainIntro = scoring.finalizeRoomIntro({ product: { itemName: "最大50%OFFセール", discountRate: 50, rateConfirmed: false, discountRateType: "unknown" } }, "ニューバランスの商品です。");
+assert(uncertainIntro === "ニューバランスの商品です。", "ROOM integration F: unconfirmed discount is not added");
 
 console.log(JSON.stringify({
   caseA: { trendFit: caseA.selectionScore.trendFit, opportunity: caseA.selectionScore.opportunity, total: caseA.selectionScore.total },

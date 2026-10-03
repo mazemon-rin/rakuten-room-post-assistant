@@ -161,6 +161,64 @@ function mergeConfirmedDealHeader(introText = "", product = {}) {
   const body = lines.join("\n").trim();
   return body ? `${header}\n${body}` : header;
 }
+
+// ROOMへ渡す最終紹介文だけを、確認済み割引の表示ルールに合わせて整形します。
+// AIの生成順序や、保存済み紹介文の古い形式には依存しません。
+function buildRoomFinalDiscountHeader(item = {}) {
+  const product = item.product || item;
+  const discount = getRoomDiscountPromptContext(item);
+  if (!discount.confirmed || !discount.discountRate || discount.saleAvailabilityStatus === "unavailable") return "";
+  const rate = Number(discount.discountRate);
+  if (!Number.isFinite(rate)) return "";
+  const condition = String(product.discountCondition || item.discountCondition || "").trim();
+  const confirmedLabel = String(product.confirmedDiscountLabel || item.confirmedDiscountLabel || "").trim();
+  const isCoupon = discount.discountType === "coupon" || /クーポン/.test(condition) || /クーポン/.test(confirmedLabel);
+  const label = isCoupon
+    ? (/クーポン/.test(condition) || !condition || /クーポン/.test(confirmedLabel) ? `${rate}%OFFクーポン対象` : `${condition.replace(/で$/, "")}で${rate}%OFF`)
+    : `${rate}%OFF`;
+  const detected = extractCouponCandidates(product);
+  const start = String(item.couponStart || product.couponStart || item.detectedDeadlineStart || product.detectedDeadlineStart || detected.detectedDeadlineStart || "").trim();
+  if (discount.saleAvailabilityStatus === "before_start") {
+    return `${label}${start ? `｜${start}開始` : "（販売開始前）"}🉐`;
+  }
+  return `${label}🉐`;
+}
+
+function finalizeRoomIntro(item = {}, generatedIntro = "") {
+  const current = String(generatedIntro || "").trim();
+  const header = buildRoomFinalDiscountHeader(item);
+  if (!header) return current;
+
+  const discount = getRoomDiscountPromptContext(item);
+  const label = header.replace(/🉐/g, "").replace(/（販売開始前）|｜.*開始/g, "").trim();
+  const lines = current.split("\n");
+  const firstLine = (lines.shift() || "").trim();
+  const startsWithHeader = firstLine === header || firstLine.startsWith(`${header} `);
+  const sameRateHeader = /🉐|クーポン|販売開始前|現在購入不可|表示価格|円→/.test(firstLine)
+    && firstLine.includes(`${Number(discount.discountRate)}%OFF`);
+  const body = startsWithHeader
+    ? [firstLine.slice(header.length).trim(), ...lines].filter(Boolean).join("\n").trim()
+    : sameRateHeader
+      ? [firstLine.slice(firstLine.indexOf("🉐") + 1).trim(), ...lines].filter(Boolean).join("\n").trim()
+      : [firstLine, ...lines].join("\n").trim();
+  // 本文に同じ割引ラベルが残っている場合だけ、その重複表現を除きます。
+  const deduplicatedBody = label ? body.split(label).join("").replace(/\s{2,}/g, " ").trim() : body;
+  return deduplicatedBody ? `${header} ${deduplicatedBody}` : header;
+}
+
+function validateRoomPostingPayload(candidate = {}, introText = "") {
+  const itemCode = String(candidate.itemCode || candidate.product?.itemCode || "").trim();
+  const title = String(candidate.title || candidate.product?.itemName || "").trim();
+  if (!itemCode) return { ok: false, error: "itemCodeがないためROOM投稿を開始できません。" };
+  if (!title) return { ok: false, error: "商品名がないためROOM投稿を開始できません。" };
+  const finalIntro = finalizeRoomIntro(candidate, introText);
+  if (!finalIntro) return { ok: false, error: "紹介文がないためROOM投稿を開始できません。" };
+  const header = buildRoomFinalDiscountHeader(candidate);
+  if (header && !finalIntro.startsWith(`${header} `) && finalIntro !== header) {
+    return { ok: false, error: "確認済み割引を紹介文の先頭へ配置できないため、ROOM投稿を停止しました。" };
+  }
+  return { ok: true, itemCode, title, introText: finalIntro };
+}
 const COUPON_SEARCH_OPTIONS = Object.freeze(Object.fromEntries([
   ["10", { label: "10%以上", queries: ["10%OFF", "10％OFF", "10%OFFクーポン", "10％OFFクーポン", ...buildDiscountSearchTermsForMinimum(20)] }],
   ...DISCOUNT_RATES.map((rate) => [String(rate), { label: `${rate}%以上`, queries: buildDiscountSearchTermsForMinimum(rate) }]),
@@ -2120,17 +2178,18 @@ function applyCodexResult() {
   if (!parsed.introText || !parsed.hashTags || !parsed.isConfirmationReady) return fail("紹介文・ハッシュタグ・状態:確認待ちを確認できないため保存していません。");
   const copyError = validateGeneratedCopy(parsed.introText, matches[0]);
   if (copyError) return fail(copyError);
-  if (`${parsed.introText}\n${parsed.hashTags}`.length > 500) return fail("紹介文とハッシュタグが500文字を超えているため保存していません。");
+  const finalIntroText = finalizeRoomIntro(matches[0], parsed.introText);
+  if (`${finalIntroText}\n${parsed.hashTags}`.length > 500) return fail("紹介文とハッシュタグが500文字を超えているため保存していません。");
   const candidate = matches[0];
   const blocker = getProcessingBlocker(candidate.id);
   if (blocker) return fail(`別の商品「${blocker.title}」が${blocker.postStatus}のため、同時に保存できません。`);
-  candidate.introText = mergeConfirmedDealHeader(parsed.introText, candidate);
+  candidate.introText = finalIntroText;
   candidate.hashTags = parsed.hashTags;
   candidate.status = "文章作成済み";
   candidate.postStatus = "確認待ち";
   saveData();
   const saved = data.candidates.find((item) => item.id === candidate.id);
-  if (!saved || saved.introText !== parsed.introText || saved.hashTags !== parsed.hashTags) {
+  if (!saved || saved.introText !== finalIntroText || saved.hashTags !== parsed.hashTags) {
     if (saved) { saved.postStatus = "エラー"; saveData(); }
     return fail("保存後の内容確認に失敗したため、確認待ちにしていません。");
   }
@@ -3134,13 +3193,14 @@ function applyCombinedSnsResult(id) {
     toast(copyError);
     return;
   }
-  if (`${parsed.introText}\n${parsed.hashTags}`.length > 500) {
+  const finalIntroText = finalizeRoomIntro(candidate, parsed.introText);
+  if (`${finalIntroText}\n${parsed.hashTags}`.length > 500) {
     codexPasteErrors.set(id, "ROOM紹介文とハッシュタグが500文字を超えています。既存データは保存していません。");
     renderCandidates();
     toast("ROOM紹介文とハッシュタグが500文字を超えています。");
     return;
   }
-  candidate.introText = mergeConfirmedDealHeader(parsed.introText, candidate);
+  candidate.introText = finalIntroText;
   candidate.hashTags = parsed.hashTags;
   candidate.snsPosts = createSnsPosts(candidate.snsPosts);
   candidate.snsPosts.x.text = parsed.xText;
@@ -3351,7 +3411,8 @@ async function pasteCodexResult(id) {
     toast(copyError);
     return;
   }
-  if (`${introText}\n${hashTags}`.length > 500) {
+  const finalIntroText = finalizeRoomIntro(candidate, introText);
+  if (`${finalIntroText}\n${hashTags}`.length > 500) {
     codexPasteErrors.set(id, "紹介文とハッシュタグが500文字を超えています。保存していません。内容を手動で確認してください。");
     renderCandidates();
     toast("紹介文とハッシュタグが500文字を超えています。保存していません。");
@@ -3387,13 +3448,13 @@ async function pasteCodexResult(id) {
     return;
   }
 
-  candidate.introText = introText;
+  candidate.introText = finalIntroText;
   candidate.hashTags = hashTags;
   candidate.status = "文章作成済み";
   candidate.postStatus = "確認待ち";
   saveData();
   const savedCandidate = data.candidates.find((item) => item.id === id);
-  if (savedCandidate?.introText !== introText || savedCandidate?.hashTags !== hashTags) {
+  if (savedCandidate?.introText !== finalIntroText || savedCandidate?.hashTags !== hashTags) {
     codexPasteErrors.set(id, "保存後の内容確認に失敗したため、確認待ちには変更していません。");
     savedCandidate.postStatus = "エラー";
     saveData();
@@ -3568,8 +3629,9 @@ function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "", 
   item.postStatus = "投稿済み";
   item.postedAt = resolvedPostedAt;
   item.roomUrl = resolvedRoomUrl;
-  item.introText = introText;
-  const historySnapshot = createHistoryRecord(item, { roomUrl: resolvedRoomUrl, postedAt: resolvedPostedAt, introText });
+  const finalIntroText = finalizeRoomIntro(item, introText);
+  item.introText = finalIntroText;
+  const historySnapshot = createHistoryRecord(item, { roomUrl: resolvedRoomUrl, postedAt: resolvedPostedAt, introText: finalIntroText });
   historySnapshot.id = historyId;
   historySnapshot.originalPhoto = existingHistory?.originalPhoto ?? historySnapshot.originalPhoto;
   if (existingHistory) Object.assign(existingHistory, historySnapshot);
@@ -3597,12 +3659,22 @@ function completePendingRoomPost() {
   }
   const previousPending = pending;
   try {
-    const introText = String(pending.introText || item.introText || "").trim();
-    if (!introText) {
-      toast("投稿開始時の紹介文が保存されていないため、投稿完了を記録できません。紹介文を入力してから投稿を開始してください。");
+    if (String(pending.itemCode || "").trim() !== String(item.itemCode || item.product?.itemCode || "").trim()) {
+      toast("投稿開始時と現在の商品itemCodeが一致しないため、投稿完了を記録せず停止しました。");
       return false;
     }
-    recordRoomPosting(item, { postedAt: new Date().toISOString(), introText });
+    const pendingTitle = String(pending.title || "").trim();
+    const currentTitle = String(item.title || item.product?.itemName || "").trim();
+    if (pendingTitle && currentTitle && pendingTitle !== currentTitle) {
+      toast("投稿開始時と現在の商品名が一致しないため、投稿完了を記録せず停止しました。");
+      return false;
+    }
+    const payload = validateRoomPostingPayload(item, pending.introText || item.introText);
+    if (!payload.ok) {
+      toast(payload.error);
+      return false;
+    }
+    recordRoomPosting(item, { postedAt: new Date().toISOString(), introText: payload.introText });
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     const savedHistory = (saved.history || []).find((entry) => (entry.itemCode || entry.product?.itemCode || "") === pending.itemCode);
@@ -3769,12 +3841,13 @@ async function startCodexPost(id) {
     toast("商品URLがないため、Codex投稿準備を開始できません。");
     return;
   }
-  const introText = String(candidate.introText || "").trim();
-  if (!introText) {
-    toast("紹介文がアプリに保存されていません。紹介文を入力・保存してからROOM投稿を開始してください。");
-    openDetailByCandidate(id);
+  const payload = validateRoomPostingPayload(candidate, candidate.introText);
+  if (!payload.ok) {
+    toast(payload.error);
+    if (!payload.introText) openDetailByCandidate(id);
     return;
   }
+  const introText = payload.introText;
   candidate.introText = introText;
   ensureOriginalPhotoContent(candidate);
   if (!candidate.introText || `${candidate.introText}\n${candidate.hashTags || ""}`.length > 500) {
@@ -3787,7 +3860,7 @@ async function startCodexPost(id) {
     candidateId: candidate.id,
     itemCode,
     title: candidate.title || candidate.product?.itemName || "",
-    introText,
+    introText: candidate.introText,
     originalPhoto: normalizeOriginalPhoto(candidate.originalPhoto),
     startedAt: new Date().toISOString()
   };
@@ -3823,11 +3896,13 @@ function prepareCandidatePost(id) {
     toast("商品URLがありません。");
     return;
   }
-  if (!candidate.introText.trim()) {
-    toast("先に紹介文を入力してください。");
+  const payload = validateRoomPostingPayload(candidate, candidate.introText);
+  if (!payload.ok) {
+    toast(payload.error);
     openDetailByCandidate(id);
     return;
   }
+  candidate.introText = payload.introText;
   ensureOriginalPhotoContent(candidate);
   const postText = `${candidate.introText.trim()}\n${candidate.hashTags || ""}`.trim();
   if (postText.length > 500) {
