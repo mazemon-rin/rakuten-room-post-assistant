@@ -35,3 +35,40 @@ for (const [minimum, expected] of [[20, 8], [50, 5], [80, 2], [90, 1]]) {
 assert(rules.matchesCouponDiscountFilter({ discountRate: 80, rateConfirmed: true, discountRateType: "exact" }, ["80"]));
 assert(!rules.matchesCouponDiscountFilter({ discountRate: 80, rateConfirmed: false, discountRateType: "unknown" }, ["80"]));
 console.log("discount rules regression cases: passed");
+
+for (const prices of ["7,960円⇒3,980円", "7,960円→3,980円", "7960円⇒3980円", "7,960円 → 3,980円"]) {
+  const product = { itemName: `【期間限定50％OFF！${prices}】北海道産 干物`, itemPrice: 3980, rateConfirmed: false, discountRateType: "unknown" };
+  const before = JSON.stringify(product);
+  const evidence = rules.getCouponEvidence(product);
+  assert.strictEqual(evidence.regularPrice, 7960);
+  assert.strictEqual(evidence.salePrice, 3980);
+  assert.strictEqual(evidence.discountRate, 50);
+  assert.strictEqual(evidence.discountType, "sale");
+  assert.strictEqual(evidence.rateConfirmed, true);
+  assert.strictEqual(evidence.discountRateType, "exact");
+  assert.strictEqual(rules.evaluateDealStatus(product, "50").status, "confirmed");
+  assert.strictEqual(rules.buildDealHeader(product), "7,960円→3,980円🉐 50%OFF");
+  assert.strictEqual(JSON.stringify(product), before, "Read-only evaluation leaves saved data unchanged");
+  const prepared = rules.prepareCouponSearchProduct(product);
+  assert.strictEqual(prepared.regularPrice, 7960);
+  assert.strictEqual(prepared.rateConfirmed, true);
+}
+for (const product of [
+  { itemName: "50%OFF 10,000円→8,000円", itemPrice: 8000 },
+  { itemName: "50%OFF 7,960円→3,980円", itemPrice: 4500 },
+  { itemName: "最大50%OFF 7,960円→3,980円", itemPrice: 3980 },
+  { itemName: "50%OFF対象商品あり 7,960円→3,980円", itemPrice: 3980 },
+  { itemName: "50%OFF 7,960円→3,980円", itemPrice: 3980, regularPrice: 10000 },
+  { itemName: "50%OFF 7,960円→3,980円", itemPrice: 3980, salePrice: 4500 }
+]) {
+  assert.strictEqual(rules.getCouponEvidence(product).rateConfirmed, false);
+  assert.strictEqual(rules.buildDealHeader(product), "");
+}
+const preSale = { itemName: "期間限定50%OFF 7,960円⇒3,980円", itemPrice: 3980, saleStatus: "販売開始前" };
+assert.strictEqual(rules.getCouponEvidence(preSale).rateConfirmed, true);
+assert.strictEqual(rules.getSaleAvailabilityStatus(preSale), "before_start");
+assert.strictEqual(rules.buildDealHeader(preSale), "販売開始前・表示価格：7,960円→3,980円🉐 50%OFF");
+assert(!/今なら|今買える|今日まで|本日限定/.test(rules.buildDealHeader(preSale)));
+assert.strictEqual(rules.getSaleAvailabilityStatus({ itemPrice: 3980 }), "unknown");
+assert.strictEqual(rules.buildDealHeader({ regularPrice: 9900, salePrice: 4950, rateConfirmed: true, discountRateType: "exact", discountRate: 50 }), "9,900円→4,950円🉐 50%OFF");
+console.log("title price evidence and sale availability cases: passed");

@@ -145,6 +145,7 @@ function mergeConfirmedDealHeader(introText = "", product = {}) {
   const current = String(introText || "").trim();
   const header = buildDealHeader(product);
   if (!header) return current;
+  if (current === header || current.startsWith(`${header}\n`)) return current;
 
   const lines = current.split("\n");
   const isDealHeaderLine = (line) => /^(?:[\d,]+円→[\d,]+円)?🉐\s*(?:最大)?\d{1,3}\s*%\s*(?:OFF|オフ)(?:クーポン)?(?:\s.*)?$/i.test(line.trim());
@@ -665,6 +666,7 @@ function checkProductTrust(product = {}) {
 // 商品データに明記されたセール情報だけを紹介文プロンプトへ渡します。
 // 価格差や割引率などを、項目がない状態から推測しないための共通処理です。
 function getSaleInfo(product = {}) {
+  const evidence = getCouponEvidence(product);
   const nested = product.saleInfo || product.campaign || {};
   const pick = (...keys) => {
     for (const key of keys) {
@@ -674,9 +676,9 @@ function getSaleInfo(product = {}) {
     return "";
   };
   const entries = [
-    ["セール価格", pick("salePrice", "discountPrice", "campaignPrice")],
-    ["通常価格", pick("regularPrice", "originalPrice", "listPrice")],
-    ["割引率", pick("discountRate", "saleRate")],
+    ["セール価格", evidence.rateConfirmed ? evidence.salePrice ?? "" : pick("salePrice", "discountPrice", "campaignPrice")],
+    ["通常価格", evidence.rateConfirmed ? evidence.regularPrice ?? "" : pick("regularPrice", "originalPrice", "listPrice")],
+    ["割引率", evidence.rateConfirmed ? `${evidence.discountRate}%OFF（確認済み）` : pick("discountRate", "saleRate")],
     ["クーポン", pick("coupon", "couponInfo", "couponText")],
     ["セール期間", pick("salePeriod", "campaignPeriod", "saleStartEnd")],
     ["ポイント還元", pick("pointBack", "pointRate", "pointCampaign")],
@@ -687,11 +689,12 @@ function getSaleInfo(product = {}) {
 
 function getRoomDiscountPromptContext(item = {}) {
   const product = item.product || item;
-  const status = item.discountStatus || product.discountStatus || item.dealEvaluation?.status || product.dealEvaluation?.status || "unknown";
+  const evidence = getCouponEvidence(item);
+  const confirmedHeader = buildDealHeader(item) || buildDealHeader(product) || "";
+  const status = confirmedHeader ? "confirmed" : item.discountStatus || product.discountStatus || item.dealEvaluation?.status || product.dealEvaluation?.status || "unknown";
   const discountText = item.discountText || product.discountText || item.dealEvaluation?.label || product.dealEvaluation?.label || "";
   const warnings = [...new Set([...(Array.isArray(item.warnings) ? item.warnings : []), ...(Array.isArray(product.warnings) ? product.warnings : [])])];
   const priorityReasons = [...new Set([...(Array.isArray(item.priorityReasons) ? item.priorityReasons : []), ...(Array.isArray(product.priorityReasons) ? product.priorityReasons : [])])];
-  const confirmedHeader = buildDealHeader(item) || buildDealHeader(product) || "";
   const detected = extractCouponCandidates(product);
   const confirmed = Boolean(confirmedHeader) && (status === "confirmed" || detected.detectedDiscountType === "coupon");
   return {
@@ -700,7 +703,12 @@ function getRoomDiscountPromptContext(item = {}) {
     warnings,
     priorityReasons,
     confirmedHeader,
-    confirmed
+    confirmed,
+    discountType: evidence.discountType || detected.detectedDiscountType,
+    regularPrice: evidence.regularPrice,
+    salePrice: evidence.salePrice,
+    discountRate: evidence.discountRate ?? detected.detectedDiscountRate,
+    saleAvailabilityStatus: discountRules.getSaleAvailabilityStatus(item)
   };
 }
 
@@ -806,6 +814,8 @@ function extractCandidateDiscountRate(product = {}) {
 }
 
 function applyCouponEvidenceToCandidate(candidate, source = {}) {
+  const evidence = getCouponEvidence(source);
+  source = { ...source, ...evidence };
   const verifiedRate = source.rateConfirmed === true && source.discountRateType === "exact" && Number.isFinite(Number(source.discountRate));
   const detected = extractCouponCandidates(candidate.product || candidate);
   const discountType = source.discountType || source.detectedDiscountType || detected.detectedDiscountType || "";
@@ -849,8 +859,11 @@ function applyCouponEvidenceToCandidate(candidate, source = {}) {
       ...(source.couponConfirmed === true ? { coupon: candidate.coupon, couponInfo: candidate.couponInfo } : {})
     });
   }
-  const mergedIntroText = mergeConfirmedDealHeader(candidate.introText, candidate);
-  if (mergedIntroText !== String(candidate.introText || "").trim()) candidate.introText = mergedIntroText;
+  // 割引情報の保存だけでは、未作成の紹介文を見出しだけで作成済みにしない。
+  if (String(candidate.introText || "").trim()) {
+    const mergedIntroText = mergeConfirmedDealHeader(candidate.introText, candidate);
+    if (mergedIntroText !== String(candidate.introText).trim()) candidate.introText = mergedIntroText;
+  }
   return candidate;
 }
 
@@ -1572,6 +1585,7 @@ ${getSaleInfo(currentProduct) || "記載なし"}
 ${buildDealHeader(currentProduct) || "なし。未確認の割引率・クーポン・期限は書かない。"}
 
 割引確認状態：${discountContext.status}
+販売状態：${discountContext.saleAvailabilityStatus}
 割引情報（確認状態を含む内部情報）：${discountContext.discountText || "なし"}
 警告（警告対象は確定情報として紹介文へ使用しない）：${discountContext.warnings.join(" / ") || "なし"}
 選定理由（商品事実ではなく選定用の内部情報）：${discountContext.priorityReasons.join(" / ") || "なし"}
@@ -1612,7 +1626,8 @@ ${getRoomIntroDeadlineRule(currentProduct)}
 実際に使っていない場合は「使いました」と書かないでください。
 効果、最安値、在庫、セール期限を断定しないでください。
 セール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、数量限定などは、上記のセール情報に明記されている場合だけ自然に紹介文へ反映してください。
-割引確認状態がconfirmedで確認済みヘッダーがある場合だけ、50%OFFや半額などの確認済み表現を目立つ位置へ使用してよい。candidateやunknownは割引候補として扱い、50%OFFや半額と断定しない。警告対象と選定理由は内部情報であり、未確認情報を商品事実として文章化しない。`;
+割引確認状態がconfirmedで確認済みヘッダーがある場合だけ、50%OFFや半額などの確認済み表現を目立つ位置へ使用してよい。candidateやunknownは割引候補として扱い、50%OFFや半額と断定しない。警告対象と選定理由は内部情報であり、未確認情報を商品事実として文章化しない。
+${getSalePromptRule()}`;
   $("#promptOutput").value = prompt;
   $("#hashTags").value = makeTags(currentProduct, tagCount).join(" ");
   toast("プロンプトを作成しました。");
@@ -1665,6 +1680,7 @@ function quickSave(product, options = {}) {
     snsPosts: createSnsPosts()
   };
   candidate.originalPhoto = normalizeOriginalPhoto(options.originalPhotoEnabled === true);
+  applyCouponEvidenceToCandidate(candidate, productWithUrl);
   ensureOriginalPhotoContent(candidate);
   Object.assign(candidate, checkProductTrust(productWithUrl));
   applyRoomProductEvaluation(candidate);
@@ -2676,6 +2692,7 @@ function updateCandidate(id, field, value) {
 
 function getSnsProductFacts(item) {
   const product = item.product || item;
+  const discount = getRoomDiscountPromptContext(item);
   return [
     `商品名：${item.title || product.itemName || "未設定"}`,
     `価格：${item.price ?? product.itemPrice ?? "未設定"}`,
@@ -2686,6 +2703,12 @@ function getSnsProductFacts(item) {
     `レビュー：評価${product.reviewAverage ?? "未設定"}／${product.reviewCount ?? "未設定"}件`,
     `セール・クーポン情報：${getSaleInfo(product) || product.couponInfo || product.pointInfo || "未設定"}`,
     `信頼性判定：${item.trustStatus || "未確認"}`,
+    `割引種別：${discount.discountType === "coupon" ? "条件付き割引（クーポン利用）" : discount.discountType === "sale" ? "通常値下げ" : "未確認"}`,
+    `元価格：${discount.regularPrice ?? "未確認"}`,
+    `割引表示価格：${discount.salePrice ?? "未確認"}`,
+    `割引信頼性：${discount.confirmed ? "確認済み" : "要確認"}（商品の総合信頼性判定とは別）`,
+    `紹介文で使用してよい確認済み割引情報：${discount.confirmed ? discount.confirmedHeader : "なし"}`,
+    `販売状態：${({ before_start: "販売開始前", available: "販売可能", unavailable: "現在購入不可", unknown: "未確認" })[discount.saleAvailabilityStatus]}`,
     `ROOM紹介文：${item.introText || "未設定"}`,
     `ハッシュタグ：${item.hashTags || "未設定"}`,
     `usageStatus：${item.usageStatus || "unknown"}`,
@@ -2710,7 +2733,7 @@ function getRoomUrlPromptRule(roomUrl = "") {
 }
 
 function getSalePromptRule() {
-  return "価格、クーポン、ポイント倍率、セール情報は変動する可能性がある。現在有効であることが確認できない場合は、SNS投稿文へ積極的に使用しない。商品名に含まれているだけのセール表現を、現在有効な情報として断定しない。アプリ側で確認済みとして保持された情報がある場合だけ、事実として自然に反映する。";
+  return "価格、クーポン、ポイント倍率、セール情報は変動する可能性がある。現在有効であることが確認できない場合は、SNS投稿文へ積極的に使用しない。商品名に含まれているだけのセール表現を、現在有効な情報として断定しない。アプリ側で確認済みとして保持された情報がある場合だけ、事実として自然に反映する。割引信頼性と商品の総合信頼性判定は別であり、総合判定が要確認でも確認済み割引情報は条件を保持して紹介文へ反映する。クーポン利用の条件を省略しない。販売開始前の場合は割引情報を削除せず『販売開始前・表示価格』として記載し、『今なら○%OFF』『今買える』『今がお得』『販売中』とは書かない。販売状態未確認の場合も現在購入可能とは断定しない。期間限定という商品名だけから『今日まで』『本日限定』『あと○時間』『まもなく終了』など終了日時を推測しない。ポイント条件不明時はポイント情報を自動挿入しない。";
 }
 
 function getXLengthPromptRule() {

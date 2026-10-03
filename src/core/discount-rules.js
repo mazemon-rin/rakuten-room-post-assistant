@@ -17,13 +17,17 @@
 
   function getCouponEvidence(item = {}) {
     const product = item.product || item;
+    // 古い候補も読み取り時に再評価する。保存済みオブジェクトは変更しない。
+    const priceEvidence = getTitlePriceEvidence({ ...product, ...item, itemName: product.itemName || item.title });
     const rate = Number(item.discountRate ?? product.discountRate ?? item.saleRate ?? product.saleRate);
     const deadline = String(item.couponDeadline ?? product.couponDeadline ?? item.salePeriod ?? product.salePeriod ?? "").trim();
     return {
-      discountRate: Number.isFinite(rate) && rate > 0 ? rate : null,
-      rateConfirmed: item.rateConfirmed === true || product.rateConfirmed === true,
-      discountRateType: item.discountRateType || product.discountRateType || "unknown",
-      discountType: item.discountType || product.discountType || "",
+      discountRate: priceEvidence?.discountRate ?? (Number.isFinite(rate) && rate > 0 ? rate : null),
+      rateConfirmed: priceEvidence ? priceEvidence.rateConfirmed : item.rateConfirmed === true || product.rateConfirmed === true,
+      discountRateType: priceEvidence ? (priceEvidence.rateConfirmed ? "exact" : "unknown") : item.discountRateType || product.discountRateType || "unknown",
+      discountType: priceEvidence?.discountType || item.discountType || product.discountType || "",
+      regularPrice: priceEvidence?.regularPrice ?? item.regularPrice ?? product.regularPrice ?? product.originalPrice ?? product.listPrice ?? null,
+      salePrice: priceEvidence?.salePrice ?? item.salePrice ?? product.salePrice ?? product.discountPrice ?? product.campaignPrice ?? product.itemPrice ?? null,
       discountCondition: item.discountCondition || product.discountCondition || "",
       couponDeadline: deadline,
       deadlineConfirmed: item.deadlineConfirmed === true || product.deadlineConfirmed === true,
@@ -34,6 +38,40 @@
 
   function normalizeCouponCandidateText(value = "") {
     return String(value || "").normalize("NFKC").replace(/[～〜]/g, "〜").replace(/[‐‑‒–—−]/g, "-");
+  }
+
+  function getTitlePriceEvidence(product = {}) {
+    const text = normalizeCouponCandidateText(product.itemName || product.title || "");
+    const pair = text.match(/([\d,]+)\s*円\s*[⇒→]\s*([\d,]+)\s*円/);
+    if (!pair) return null;
+    const regularPrice = Number(pair[1].replace(/,/g, ""));
+    const salePrice = Number(pair[2].replace(/,/g, ""));
+    const currentPrice = Number(product.itemPrice ?? product.price);
+    const detected = extractDiscountCandidate(text);
+    // クーポン適用後価格と通常値下げを混同しない。既存の条件付き経路を使う。
+    if (detected.discountType === "coupon") return null;
+    const rate = detected.discountRate;
+    const explicitRegular = Number(product.regularPrice ?? product.originalPrice ?? product.listPrice);
+    const explicitSale = Number(product.salePrice ?? product.discountPrice ?? product.campaignPrice);
+    const consistent = regularPrice > salePrice && salePrice > 0 && currentPrice === salePrice
+      && Number.isFinite(rate) && Math.abs((regularPrice - salePrice) / regularPrice * 100 - rate) <= 1
+      && !(explicitRegular > 0 && explicitRegular !== regularPrice)
+      && !(explicitSale > 0 && explicitSale !== salePrice)
+      && !(Number(product.discountRate) > 0 && Number(product.discountRate) !== rate)
+      && !/(最大|対象商品あり|実質|終了)/.test(text) && detected.discountType !== "coupon";
+    return { regularPrice, salePrice, discountRate: rate, discountType: "sale", rateConfirmed: consistent };
+  }
+
+  function getSaleAvailabilityStatus(item = {}) {
+    const product = item.product || item;
+    const status = String(item.saleAvailabilityStatus || product.saleAvailabilityStatus || product.saleStatus || product.stockStatus || "");
+    if (/^(before_start|not_started)$|販売開始前|販売前|予約開始前/.test(status)) return "before_start";
+    if (/^(ended|unavailable)$|販売終了|売り切れ|売切れ/.test(status)) return "unavailable";
+    if (/^available$|^販売中$/.test(status)) return "available";
+    // availability=0だけでは販売開始前・終了・売切れを区別できない。
+    const availability = product.availability ?? product.itemAvailability;
+    if (availability === 0 || availability === "0" || availability === false) return "unavailable";
+    return "unknown";
   }
 
   function extractDiscountCandidate(itemName = "") {
@@ -160,6 +198,8 @@
       discountRate: evidence.discountRate,
       rateConfirmed: evidence.rateConfirmed,
       discountRateType: evidence.discountRateType,
+      regularPrice: evidence.regularPrice,
+      salePrice: evidence.salePrice,
       couponDeadline: evidence.couponDeadline,
       deadlineConfirmed: evidence.deadlineConfirmed,
       couponSource: evidence.couponSource || "楽天商品検索API（検索候補）",
@@ -185,13 +225,15 @@
         : (String(product.confirmedDiscountLabel || product.discountLabel || "").trim() || `${rate}%OFF`))
       : "";
     if (!label) return "";
-    const regular = Number(product.regularPrice ?? product.originalPrice ?? product.listPrice);
-    const current = Number(product.salePrice ?? product.discountPrice ?? product.campaignPrice ?? product.itemPrice);
+    const regular = Number(evidence.regularPrice ?? product.listPrice);
+    const current = Number(evidence.salePrice ?? product.discountPrice ?? product.campaignPrice ?? product.itemPrice);
     const pricePart = Number.isFinite(regular) && regular > 0 && Number.isFinite(current) && current > 0
       ? `${formatYen(regular)}→${formatYen(current)}🉐 `
       : "🉐 ";
     const deadline = evidence.deadlineConfirmed && evidence.couponDeadline ? `\n${evidence.couponDeadline}まで` : "";
-    return `${pricePart}${label}${deadline}`;
+    const availability = getSaleAvailabilityStatus(product);
+    const availabilityPrefix = availability === "before_start" ? "販売開始前・表示価格：" : availability === "unavailable" ? "現在購入不可・表示価格：" : "";
+    return `${availabilityPrefix}${pricePart}${label}${deadline}`;
   }
 
   root.discountRules = Object.freeze({
@@ -210,6 +252,8 @@
     summarizeDealStatuses,
     prepareCouponSearchProduct,
     buildDealHeader,
-    isPriceRateConsistent
+    isPriceRateConsistent,
+    getTitlePriceEvidence,
+    getSaleAvailabilityStatus
   });
 })(typeof window === "undefined" ? globalThis : window);
