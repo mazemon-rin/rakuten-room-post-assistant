@@ -148,7 +148,14 @@ function mergeConfirmedDealHeader(introText = "", product = {}) {
   if (current === header || current.startsWith(`${header}\n`)) return current;
 
   const lines = current.split("\n");
-  const isDealHeaderLine = (line) => /^(?:[\d,]+円→[\d,]+円)?🉐\s*(?:最大)?\d{1,3}\s*%\s*(?:OFF|オフ)(?:クーポン)?(?:\s.*)?$/i.test(line.trim());
+  const headerRate = header.match(/(\d{1,3})\s*%\s*(?:OFF|オフ)/i)?.[1] || "";
+  const firstLineRatePosition = headerRate ? lines[0].search(new RegExp(`${headerRate}\\s*%\\s*(?:OFF|オフ)`, "i")) : -1;
+  if (firstLineRatePosition >= 0 && firstLineRatePosition <= 30 && /🉐|クーポン|販売開始前|現在購入不可|表示価格|円→/.test(lines[0].slice(0, firstLineRatePosition + headerRate.length + 5))) return current;
+  const isDealHeaderLine = (line) => {
+    const normalized = line.trim();
+    if (!normalized || !/\d{1,3}\s*%\s*(?:OFF|オフ)/i.test(normalized)) return false;
+    return normalized.startsWith(`${headerRate}%`) || normalized.includes("🉐") || /クーポン|販売開始前|現在購入不可|表示価格|円→/.test(normalized);
+  };
   while (lines.length && isDealHeaderLine(lines[0])) lines.shift();
   if (lines.length && /^\s*\d{1,4}(?:[./]\d{1,2})?.*まで\s*$/.test(lines[0])) lines.shift();
   const body = lines.join("\n").trim();
@@ -722,6 +729,20 @@ function getRoomIntroDeadlineRule(product = {}) {
     return `商品タイトルから検出した期限候補「${detected}」があります。これは未確認の候補なので断定せず、商品ページ確認後に採用できる場合だけ、紹介文の冒頭付近へ「${detected}まで」など自然に入力する。確認前は期限を事実として書かない。`;
   }
   return "クーポン最終有効日が確認できた場合は、紹介文の冒頭付近へ自然に入力する。未確認の期限は書かない。";
+}
+
+function getRoomIntroPlacementRule(item = {}) {
+  const discount = getRoomDiscountPromptContext(item);
+  if (!discount.confirmed || !discount.confirmedHeader) {
+    return "確認済み割引情報がない場合、割引率・クーポン・期限をROOM紹介文の冒頭へ追加しない。要確認・最大割引・条件不明の情報は使用しない。";
+  }
+  if (discount.saleAvailabilityStatus === "unavailable") {
+    return "割引情報は現在購入可能な情報として使用しない。ROOM紹介文では必要なら『現在購入不可・表示価格』など、確認済みの状態を明記し、現在有効な割引と誤認させない。";
+  }
+  if (discount.saleAvailabilityStatus === "before_start") {
+    return `ROOM紹介文の冒頭20〜30文字程度に、開始前であることが分かる確認済み情報を1回だけ置く。使用可能なヘッダーは「${discount.confirmedHeader}」を基準にし、「今なら」「今買える」「販売中」とは書かない。`;
+  }
+  return `ROOM紹介文は確認済み割引情報「${discount.confirmedHeader}」を先頭（最初の20〜30文字程度）に1回だけ置き、その後に商品名・特徴・利用場面を続ける。商品説明内の同じ割引情報は重複させない。要確認情報は使用しない。`;
 }
 
 function extractDeadlineCandidate(itemName = "", eventSettings = data.eventSettings || {}) {
@@ -1584,6 +1605,9 @@ ${getSaleInfo(currentProduct) || "記載なし"}
 確認済みのお得情報ヘッダー（確認済みの場合だけ紹介文の冒頭へ使用）：
 ${buildDealHeader(currentProduct) || "なし。未確認の割引率・クーポン・期限は書かない。"}
 
+ROOM紹介文の割引表示位置：
+${getRoomIntroPlacementRule(currentProduct)}
+
 割引確認状態：${discountContext.status}
 販売状態：${discountContext.saleAvailabilityStatus}
 割引情報（確認状態を含む内部情報）：${discountContext.discountText || "なし"}
@@ -2100,7 +2124,7 @@ function applyCodexResult() {
   const candidate = matches[0];
   const blocker = getProcessingBlocker(candidate.id);
   if (blocker) return fail(`別の商品「${blocker.title}」が${blocker.postStatus}のため、同時に保存できません。`);
-  candidate.introText = parsed.introText;
+  candidate.introText = mergeConfirmedDealHeader(parsed.introText, candidate);
   candidate.hashTags = parsed.hashTags;
   candidate.status = "文章作成済み";
   candidate.postStatus = "確認待ち";
@@ -2969,7 +2993,7 @@ function buildCombinedContentPrompt(item) {
     : "usageStatusはusedではない。使ってみた、買ってみた、愛用しています、使いやすかった、おすすめです、買ってよかった等の使用経験・断定を絶対に書かない。便利そう、気になりました、チェックしておきたい等の安全な表現を使う。";
   const xRules = `Xは短め、冒頭の1〜2行を重視し、商品名の羅列から始めない。${getSnsTypeSpecificRule("x", posts.x.postType)} 投稿タイプは${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}（${posts.x.postType}）。絵文字は少なめ、#PRを付け、必要なら#楽天ROOMを付ける。${getXLengthPromptRule()}`;
   const threadsRules = `ThreadsはXより少し長めの会話調にし、共感・困りごと・発見から始める。商品名や価格だけで始めず、なぜ気になったかを伝え、売り込み感を弱くする。Xの単純な長文化にしない。${getSnsTypeSpecificRule("threads", posts.threads.postType)} 投稿タイプは${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}（${posts.threads.postType}）。絵文字は少なめ、#PRを付ける。`;
-  return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\n${getRoomUrlPromptRule(roomUrl)}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、対象者・困りごと・特徴・利用場面が伝わる自然な紹介文を作る。未使用または不明の商品は体験談を書かない。\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\n${getSalePromptRule()}\nURL未設定時は、投稿本文に「ROOM個別URL未設定」と書かず、URL部分を省略する。登録済みURLがある場合は、X_POSTとTHREADS_POSTの両方へ登録URLを1回だけそのまま記載する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_THREADS_POST===`;
+  return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\n${getRoomUrlPromptRule(roomUrl)}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、対象者・困りごと・特徴・利用場面が伝わる自然な紹介文を作る。確認済み割引がある場合は割引情報を冒頭に置き、商品説明内で同じ割引情報を不自然に繰り返さない。未使用または不明の商品は体験談を書かない。\n${getRoomIntroPlacementRule(item)}\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\n${getSalePromptRule()}\nURL未設定時は、投稿本文に「ROOM個別URL未設定」と書かず、URL部分を省略する。登録済みURLがある場合は、X_POSTとTHREADS_POSTの両方へ登録URLを1回だけそのまま記載する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_THREADS_POST===`;
 }
 
 function parseCombinedContentResult(rawText = "") {
@@ -3116,7 +3140,7 @@ function applyCombinedSnsResult(id) {
     toast("ROOM紹介文とハッシュタグが500文字を超えています。");
     return;
   }
-  candidate.introText = parsed.introText;
+  candidate.introText = mergeConfirmedDealHeader(parsed.introText, candidate);
   candidate.hashTags = parsed.hashTags;
   candidate.snsPosts = createSnsPosts(candidate.snsPosts);
   candidate.snsPosts.x.text = parsed.xText;
