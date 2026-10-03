@@ -10,8 +10,17 @@ const rules = context.discountRules;
 
 assert.deepStrictEqual(Array.from(rules.DISCOUNT_RATES), [20, 30, 40, 50, 60, 70, 80, 90]);
 for (const text of ["80%OFF", "80％OFF", "最大80%OFF", "最大80％OFF", "80%OFFクーポン", "最大80%OFFクーポン"]) {
-  assert.strictEqual(rules.extractDiscountCandidate(text).discountRate, 80, text);
+assert.strictEqual(rules.extractDiscountCandidate(text).discountRate, 80, text);
 }
+const couponTitle = rules.extractDiscountCandidate("《クーポンご利用で50%OFF》リンツ クリアランスバッグ 500g");
+assert(couponTitle.discountRate === 50 && couponTitle.discountType === "coupon" && couponTitle.discountCondition === "クーポン利用", "Conditional coupon title is classified with its condition");
+assert(rules.evaluateDealStatus({ itemName: "《クーポンご利用で50%OFF》リンツ クリアランスバッグ 500g" }, "50").status === "confirmed", "Conditional coupon is visibly confirmed with its condition");
+assert.strictEqual(rules.buildDealHeader({ itemName: "《クーポンご利用で50%OFF》リンツ クリアランスバッグ 500g", itemPrice: 7200 }), "🉐 クーポン利用で50%OFF", "Conditional coupon keeps the condition without inventing a deadline");
+assert.strictEqual(rules.buildDealHeader({ regularPrice: 11000, salePrice: 5500, itemPrice: 5500, rateConfirmed: true, discountRateType: "exact", discountRate: 50 }), "11,000円→5,500円🉐 50%OFF", "Price reduction with matching rate is usable");
+assert.strictEqual(rules.buildDealHeader({ regularPrice: 10000, salePrice: 8000, itemPrice: 8000, rateConfirmed: true, discountRateType: "exact", discountRate: 50 }), "", "Contradictory price reduction is not asserted");
+assert.strictEqual(rules.buildDealHeader({ itemName: "最大50%OFFセール", itemPrice: 5000 }), "", "Maximum discount remains unconfirmed");
+assert.strictEqual(rules.buildDealHeader({ itemName: "50%OFF対象商品あり", itemPrice: 5000 }), "", "Target-product wording remains unconfirmed");
+assert.strictEqual(rules.buildDealHeader({ itemName: "クーポン利用で30%OFF", itemPrice: 3000 }), "🉐 クーポン利用で30%OFF", "Conditional rate remains usable without a deadline");
 assert.strictEqual(rules.evaluateDealStatus({ itemName: "最大80%OFFクーポン" }, "80").status, "candidate");
 assert.strictEqual(rules.evaluateDealStatus({ discountRate: 80, rateConfirmed: true, discountRateType: "exact" }, "80").status, "confirmed");
 assert.strictEqual(rules.evaluateDealStatus({ itemName: "通常商品" }, "80").status, "unknown");

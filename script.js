@@ -692,7 +692,8 @@ function getRoomDiscountPromptContext(item = {}) {
   const warnings = [...new Set([...(Array.isArray(item.warnings) ? item.warnings : []), ...(Array.isArray(product.warnings) ? product.warnings : [])])];
   const priorityReasons = [...new Set([...(Array.isArray(item.priorityReasons) ? item.priorityReasons : []), ...(Array.isArray(product.priorityReasons) ? product.priorityReasons : [])])];
   const confirmedHeader = buildDealHeader(item) || buildDealHeader(product) || "";
-  const confirmed = status === "confirmed" && Boolean(confirmedHeader);
+  const detected = extractCouponCandidates(product);
+  const confirmed = Boolean(confirmedHeader) && (status === "confirmed" || detected.detectedDiscountType === "coupon");
   return {
     status,
     discountText,
@@ -806,12 +807,17 @@ function extractCandidateDiscountRate(product = {}) {
 
 function applyCouponEvidenceToCandidate(candidate, source = {}) {
   const verifiedRate = source.rateConfirmed === true && source.discountRateType === "exact" && Number.isFinite(Number(source.discountRate));
+  const detected = extractCouponCandidates(candidate.product || candidate);
+  const discountType = source.discountType || source.detectedDiscountType || detected.detectedDiscountType || "";
+  const discountCondition = source.discountCondition || source.detectedDiscountCondition || detected.detectedDiscountCondition || "";
   Object.assign(candidate, {
     regularPrice: source.regularPrice ?? candidate.regularPrice ?? null,
     salePrice: source.salePrice ?? candidate.salePrice ?? null,
     discountRate: verifiedRate ? Number(source.discountRate) : (source.discountRate ?? null),
     rateConfirmed: verifiedRate,
     discountRateType: source.discountRateType || "unknown",
+    discountType,
+    discountCondition,
     confirmedDiscountLabel: verifiedRate ? (source.confirmedDiscountLabel || extractDiscountLabel(candidate.product?.itemName || candidate.itemName) || `${source.discountRate}%OFF`) : "",
     couponDeadline: source.couponDeadline || "",
     deadlineConfirmed: source.deadlineConfirmed === true,
@@ -835,6 +841,8 @@ function applyCouponEvidenceToCandidate(candidate, source = {}) {
       discountRate: candidate.discountRate,
       rateConfirmed: candidate.rateConfirmed,
       discountRateType: candidate.discountRateType,
+      discountType: candidate.discountType,
+      discountCondition: candidate.discountCondition,
       confirmedDiscountLabel: candidate.confirmedDiscountLabel,
       couponDeadline: candidate.couponDeadline,
       deadlineConfirmed: candidate.deadlineConfirmed,

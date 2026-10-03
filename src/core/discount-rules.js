@@ -23,6 +23,8 @@
       discountRate: Number.isFinite(rate) && rate > 0 ? rate : null,
       rateConfirmed: item.rateConfirmed === true || product.rateConfirmed === true,
       discountRateType: item.discountRateType || product.discountRateType || "unknown",
+      discountType: item.discountType || product.discountType || "",
+      discountCondition: item.discountCondition || product.discountCondition || "",
       couponDeadline: deadline,
       deadlineConfirmed: item.deadlineConfirmed === true || product.deadlineConfirmed === true,
       couponSource: item.couponSource || product.couponSource || "",
@@ -36,21 +38,25 @@
 
   function extractDiscountCandidate(itemName = "") {
     const text = normalizeCouponCandidateText(itemName);
+    const couponMatch = text.match(/クーポン(?:ご利用|利用|使用|適用)?[^0-9%]{0,8}(\d{1,3})\s*%\s*(?:OFF|オフ)/i);
+    if (couponMatch && Number(couponMatch[1]) > 0 && Number(couponMatch[1]) <= 100 && !/最大/.test(couponMatch[0])) {
+      return { discountRate: Number(couponMatch[1]), source: "itemName", discountType: "coupon", discountCondition: "クーポン利用" };
+    }
     const percentMatches = [...text.matchAll(/(\d{1,3})\s*%\s*(?:OFF|オフ)/gi)];
     for (const match of percentMatches) {
       const before = text.slice(Math.max(0, match.index - 8), match.index);
       const after = text.slice(match.index + match[0].length, match.index + match[0].length + 4);
       if (/(実質|ポイント)/.test(before) || /^相当/.test(after)) continue;
       const rate = Number(match[1]);
-      if (rate > 0 && rate <= 100) return { discountRate: rate, source: "itemName" };
+      if (rate > 0 && rate <= 100) return { discountRate: rate, source: "itemName", discountType: "sale", discountCondition: "" };
     }
     const halfIndex = text.indexOf("半額");
     if (halfIndex >= 0) {
       const before = text.slice(Math.max(0, halfIndex - 8), halfIndex);
       const after = text.slice(halfIndex + 2, halfIndex + 6);
-      if (!/(最大|実質|ポイント)/.test(before) && !/^相当/.test(after)) return { discountRate: 50, source: "itemName" };
+      if (!/(最大|実質|ポイント)/.test(before) && !/^相当/.test(after)) return { discountRate: 50, source: "itemName", discountType: "sale", discountCondition: "" };
     }
-    return { discountRate: null, source: "" };
+    return { discountRate: null, source: "", discountType: "", discountCondition: "" };
   }
 
   function extractDiscountLabel(itemName = "") {
@@ -91,10 +97,20 @@
       detectedDiscountRate: discount.discountRate,
       detectedDiscountLabel: extractDiscountLabel(itemName),
       detectedDiscountSource: discount.source,
+      detectedDiscountType: discount.discountType || "",
+      detectedDiscountCondition: discount.discountCondition || "",
       detectedDeadline: deadline.end,
       detectedDeadlineStart: deadline.start,
       detectedDeadlineSource: deadline.source
     };
+  }
+
+  function isPriceRateConsistent(product = {}, rate) {
+    const regular = Number(product.regularPrice ?? product.originalPrice ?? product.listPrice);
+    const current = Number(product.salePrice ?? product.discountPrice ?? product.campaignPrice ?? product.itemPrice);
+    if (!Number.isFinite(regular) || regular <= 0 || !Number.isFinite(current) || current <= 0) return true;
+    const calculated = ((regular - current) / regular) * 100;
+    return Math.abs(calculated - Number(rate)) <= 1;
   }
 
   function matchesCouponDiscountFilter(item, filters = []) {
@@ -109,8 +125,12 @@
     const threshold = dealCondition === "50plus" ? 50 : Number(dealCondition);
     const hasCondition = dealCondition === "50plus" || Number.isFinite(threshold) && threshold > 0;
     if (!hasCondition) return { status: "unknown", rate: null, label: "お買い得情報：指定なし" };
+    if (detected.detectedDiscountType === "coupon" && Number.isFinite(detected.detectedDiscountRate) && detected.detectedDiscountRate >= threshold) {
+      return { status: "confirmed", rate: detected.detectedDiscountRate, label: `🟢 クーポン利用で${detected.detectedDiscountRate}%OFF確認済み` };
+    }
     if (evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(evidence.discountRate)) {
       const meets = evidence.discountRate >= threshold;
+      if (meets && !isPriceRateConsistent(product, evidence.discountRate)) return { status: "unknown", rate: evidence.discountRate, label: `割引率${evidence.discountRate}%（価格情報と不整合）` };
       const label = product.confirmedDiscountLabel || `${evidence.discountRate}%OFF`;
       return { status: meets ? "confirmed" : "unknown", rate: evidence.discountRate, label: meets ? `🟢 ${label}確認済み` : `割引率${evidence.discountRate}%（条件未達）` };
     }
@@ -150,8 +170,19 @@
 
   function buildDealHeader(product = {}, formatYen = (value) => `${Number(value).toLocaleString("ja-JP")}円`) {
     const evidence = getCouponEvidence(product);
-    const label = evidence.rateConfirmed && evidence.discountRateType === "exact"
-      ? (String(product.confirmedDiscountLabel || product.discountLabel || "").trim() || `${evidence.discountRate}%OFF`)
+    const detected = extractCouponCandidates(product);
+    const labelRate = String(product.confirmedDiscountLabel || product.discountLabel || "").match(/(\d{1,3})\s*%\s*(?:OFF|オフ)/i);
+    const rate = Number.isFinite(evidence.discountRate)
+      ? evidence.discountRate
+      : (detected.detectedDiscountRate ?? (labelRate ? Number(labelRate[1]) : null));
+    const discountType = evidence.discountType || detected.detectedDiscountType;
+    const discountCondition = evidence.discountCondition || detected.detectedDiscountCondition;
+    const exactConfirmed = evidence.rateConfirmed && evidence.discountRateType === "exact" && Number.isFinite(rate) && isPriceRateConsistent(product, rate);
+    const conditionalConfirmed = discountType === "coupon" && Boolean(discountCondition) && Number.isFinite(rate);
+    const label = exactConfirmed || conditionalConfirmed
+      ? (conditionalConfirmed
+        ? `${discountCondition}で${rate}%OFF`
+        : (String(product.confirmedDiscountLabel || product.discountLabel || "").trim() || `${rate}%OFF`))
       : "";
     if (!label) return "";
     const regular = Number(product.regularPrice ?? product.originalPrice ?? product.listPrice);
@@ -178,6 +209,7 @@
     evaluateDealStatus,
     summarizeDealStatuses,
     prepareCouponSearchProduct,
-    buildDealHeader
+    buildDealHeader,
+    isPriceRateConsistent
   });
 })(typeof window === "undefined" ? globalThis : window);
