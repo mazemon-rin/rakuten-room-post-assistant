@@ -117,6 +117,21 @@ const defaultData = {
   eventSettings: { eventName: "", startDate: "", endDate: "", enabled: false }
 };
 
+const POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS = Object.freeze(["product", "introPrompt", "combinedPrompt"]);
+
+function normalizeStoredData(saved) {
+  return {
+    ...defaultData,
+    ...(saved || {}),
+    candidates: normalizeSnsRecords(Array.isArray(saved?.candidates) ? saved.candidates : []),
+    history: normalizeSnsRecords(Array.isArray(saved?.history) ? saved.history : []),
+    sales: Array.isArray(saved?.sales) ? saved.sales : [],
+    settings: { ...defaultData.settings, ...(saved?.settings || {}) },
+    trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) },
+    eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) }
+  };
+}
+
 const SNS_POST_TYPES = Object.freeze({
   discovery: "発見型",
   problem: "困りごと型",
@@ -304,15 +319,86 @@ document.addEventListener("DOMContentLoaded", () => {
 function loadData() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return { ...defaultData, ...saved, candidates: normalizeSnsRecords(Array.isArray(saved?.candidates) ? saved.candidates : []), history: normalizeSnsRecords(Array.isArray(saved?.history) ? saved.history : []), sales: Array.isArray(saved?.sales) ? saved.sales : [], settings: { ...defaultData.settings, ...(saved?.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(saved?.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(saved?.eventSettings || {}) } };
+    return normalizeStoredData(saved);
   } catch {
     return structuredClone(defaultData);
   }
 }
 
-function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  renderAll();
+function getSerializedDataSnapshot(nextData = data) {
+  const json = JSON.stringify(nextData);
+  const bytes = getUtf8ByteLength(json);
+  return { json, bytes };
+}
+
+function getUtf8ByteLength(text = "") {
+  if (typeof TextEncoder === "function") return new TextEncoder().encode(String(text)).length;
+  if (typeof Blob === "function") return new Blob([String(text)]).size;
+  return unescape(encodeURIComponent(String(text))).length;
+}
+
+function isQuotaExceededError(error) {
+  return Boolean(error && (error.name === "QuotaExceededError" || error.code === 22 || error.code === 1014));
+}
+
+function formatStorageSize(bytes = 0) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
+}
+
+function getStorageMetrics(nextData = data) {
+  try {
+    const snapshot = getSerializedDataSnapshot(nextData);
+    const persisted = localStorage.getItem(STORAGE_KEY) || "";
+    const persistedBytes = getUtf8ByteLength(persisted);
+    return { bytes: snapshot.bytes, persistedBytes, persisted: Boolean(persisted) };
+  } catch {
+    return { bytes: 0, persistedBytes: 0, persisted: false };
+  }
+}
+
+function renderStorageStatus() {
+  const status = $("#storageStatus");
+  if (!status) return;
+  const metrics = getStorageMetrics();
+  if (!metrics.persisted) {
+    status.textContent = "保存データ：未保存";
+    return;
+  }
+  const level = metrics.persistedBytes >= 7 * 1024 * 1024 ? "容量逼迫" : metrics.persistedBytes >= 5 * 1024 * 1024 ? "注意" : "正常";
+  status.textContent = `保存データ：${formatStorageSize(metrics.persistedBytes)}（${level}）`;
+}
+
+function notifyStorageSaveFailure(error, bytes = 0) {
+  const detail = isQuotaExceededError(error) ? "保存容量を超えています。投稿済み候補の軽量化またはJSONバックアップを確認してください。" : "保存中にエラーが発生しました。変更は保存されていません。";
+  const message = `保存に失敗しました（${formatStorageSize(bytes)}）。${detail}`;
+  const messageEl = $("#storageSaveMessage");
+  if (messageEl) messageEl.textContent = message;
+  if (typeof toast === "function" && $("#toast")) toast(message);
+  else console.warn(message, error);
+}
+
+function saveData(nextData = data, { render = true } = {}) {
+  let snapshot;
+  try {
+    snapshot = getSerializedDataSnapshot(nextData);
+    localStorage.setItem(STORAGE_KEY, snapshot.json);
+    const persisted = localStorage.getItem(STORAGE_KEY);
+    if (persisted !== snapshot.json) throw new Error("保存後の内容確認に失敗しました。");
+    if (nextData !== data) data = nextData;
+    if (render) renderAll();
+    renderStorageStatus();
+    return { ok: true, bytes: snapshot.bytes };
+  } catch (error) {
+    // 保存に失敗した状態をメモリだけに残さない。既存の保存内容を正本として再読込する。
+    data = loadData();
+    if (render) renderAll();
+    renderStorageStatus();
+    notifyStorageSaveFailure(error, snapshot?.bytes || 0);
+    return { ok: false, error, bytes: snapshot?.bytes || 0 };
+  }
 }
 
 function bindTabs() {
@@ -361,6 +447,8 @@ function bindForms() {
   on("#saveAffiliateImport", "click", saveAffiliateImport);
   on("#cancelAffiliateImport", "click", closeAffiliateImport);
   on("#clearData", "click", clearData);
+  on("#previewPostedCandidateCleanup", "click", previewPostedCandidateCleanup);
+  on("#executePostedCandidateCleanup", "click", executePostedCandidateCleanup);
 }
 
 function resetRoomCandidates() {
@@ -419,7 +507,7 @@ function setCandidateView(view) {
 
 function saveRankingCategorySelection() {
   data.settings.rankingCategoryIds = $$("input[name='unifiedCategory']:checked").map((input) => input.value);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  saveData(data, { render: false });
 }
 
 function fillSettings() {
@@ -440,6 +528,7 @@ function fillSettings() {
   });
   $("#hits").value = data.settings.defaultHits || "10";
   $("#calendarMonth").value = new Date().toISOString().slice(0, 7);
+  renderStorageStatus();
 }
 
 async function searchProducts(event) {
@@ -1893,11 +1982,7 @@ function renderCandidates() {
     }
   });
   if (trustUpdated) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (error) {
-      console.warn("ROOM候補の補完保存に失敗しました。表示処理は継続します。", error);
-    }
+    saveData(data, { render: false });
   }
   updateCandidateViewCounts();
   const keyword = $("#candidateFilter")?.value?.trim() || "";
@@ -3221,7 +3306,7 @@ function saveSnsPost(id, medium, field, value) {
   item.snsPosts[medium][field] = value;
   if (field === "text") {
     item.snsPosts[medium].status = "draft";
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    saveData(data, { render: false });
     const counter = document.querySelector(`[data-sns-count="sns-text-${medium}-${id}"]`);
     const length = Array.from(value || "").length;
     if (counter) {
@@ -3539,6 +3624,144 @@ function findAnyHistoryRecord(item) {
   return itemCode ? data.history.find((historyItem) => (historyItem.itemCode || historyItem.product?.itemCode || "") === itemCode) || null : null;
 }
 
+function hasPostedHistoryRecord(candidate, history = data.history) {
+  const itemCode = String(candidate.itemCode || candidate.product?.itemCode || "").trim();
+  if (!itemCode) return false;
+  return history.some((historyItem) => !historyItem.repostRequested && (historyItem.itemCode || historyItem.product?.itemCode || "") === itemCode);
+}
+
+function isPostedCandidateForCompaction(candidate, history = data.history) {
+  const posted = candidate?.postStatus === "投稿済み" || candidate?.status === "投稿済み";
+  return Boolean(posted && hasPostedHistoryRecord(candidate, history));
+}
+
+function getCandidateRequiredFields(candidate) {
+  return [
+    ["itemCode", candidate.itemCode || candidate.product?.itemCode || ""],
+    ["title", candidate.title || candidate.product?.itemName || ""],
+    ["itemUrl", candidate.itemUrl || candidate.product?.itemUrl || candidate.product?.affiliateUrl || ""],
+    ["introText", candidate.introText || ""],
+    ["hashTags", candidate.hashTags || ""],
+    ["postStatus", candidate.postStatus || ""],
+    ["postedAt", candidate.postedAt || ""]
+  ];
+}
+
+function validatePostedCandidateForCompaction(candidate) {
+  const missing = getCandidateRequiredFields(candidate).filter(([, value]) => !String(value).trim()).map(([field]) => field);
+  return { ok: missing.length === 0, missing };
+}
+
+function compactPostedCandidate(candidate, history = data.history) {
+  if (!isPostedCandidateForCompaction(candidate, history)) return { changed: false, skipped: true, reason: "投稿済み履歴が確認できません" };
+  const validation = validatePostedCandidateForCompaction(candidate);
+  if (!validation.ok) return { changed: false, skipped: true, reason: `必須項目不足：${validation.missing.join("、")}` };
+  const removedFields = POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.filter((field) => Object.prototype.hasOwnProperty.call(candidate, field));
+  removedFields.forEach((field) => { delete candidate[field]; });
+  return { changed: removedFields.length > 0, removedFields, skipped: false };
+}
+
+function buildPostedCandidateCompactionPreview(sourceData = data) {
+  const before = getSerializedDataSnapshot(sourceData);
+  const compactedData = typeof structuredClone === "function" ? structuredClone(sourceData) : JSON.parse(JSON.stringify(sourceData));
+  const candidates = compactedData.candidates || [];
+  const targetCandidates = candidates.filter((candidate) => isPostedCandidateForCompaction(candidate, compactedData.history || []));
+  const results = targetCandidates.map((candidate) => compactPostedCandidate(candidate, compactedData.history || []));
+  const after = getSerializedDataSnapshot(compactedData);
+  const changed = results.filter((result) => result.changed).length;
+  const skipped = results.filter((result) => result.skipped).length;
+  const fields = Object.fromEntries(POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.map((field) => [field, results.filter((result) => result.removedFields?.includes(field)).length]));
+  return {
+    compactedData,
+    beforeBytes: before.bytes,
+    afterBytes: after.bytes,
+    targetCount: targetCandidates.length,
+    changedCount: changed,
+    skippedCount: skipped,
+    fields,
+    targetItemCodes: targetCandidates.map((candidate) => String(candidate.itemCode || candidate.product?.itemCode || "")).filter(Boolean),
+    candidateCountBefore: (sourceData.candidates || []).length,
+    candidateCountAfter: (compactedData.candidates || []).length,
+    historyCountBefore: (sourceData.history || []).length,
+    historyCountAfter: (compactedData.history || []).length,
+    unpostedCountBefore: (sourceData.candidates || []).filter((candidate) => !isPostedCandidateForCompaction(candidate, sourceData.history || [])).length,
+    unpostedCountAfter: (compactedData.candidates || []).filter((candidate) => !isPostedCandidateForCompaction(candidate, compactedData.history || [])).length
+  };
+}
+
+function validateCompactedDataSnapshot(savedData, preview) {
+  if (!savedData || !Array.isArray(savedData.candidates) || !Array.isArray(savedData.history)) return false;
+  if (savedData.candidates.length !== preview.candidateCountBefore || savedData.history.length !== preview.historyCountBefore) return false;
+  const targetCodes = new Set(preview.targetItemCodes || []);
+  return savedData.candidates.filter((candidate) => targetCodes.has(String(candidate.itemCode || candidate.product?.itemCode || ""))).every((candidate) => {
+    const fields = validatePostedCandidateForCompaction(candidate);
+    return fields.ok && POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.every((field) => !Object.prototype.hasOwnProperty.call(candidate, field));
+  });
+}
+
+function formatCompactionPreview(preview) {
+  const reduction = Math.max(0, preview.beforeBytes - preview.afterBytes);
+  return `対象：${preview.targetCount}件（実変更：${preview.changedCount}件、対象外：${preview.skippedCount}件）\n` +
+    `候補件数：${preview.candidateCountBefore}件 → ${preview.candidateCountAfter}件\n` +
+    `履歴件数：${preview.historyCountBefore}件 → ${preview.historyCountAfter}件\n` +
+    `未投稿候補：${preview.unpostedCountBefore}件 → ${preview.unpostedCountAfter}件\n` +
+    `保存サイズ：${formatStorageSize(preview.beforeBytes)} → ${formatStorageSize(preview.afterBytes)}（推定削減 ${formatStorageSize(reduction)}）\n` +
+    `削減候補：${POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.join(" / ")}`;
+}
+
+let postedCandidateCompactionPreview = null;
+
+function previewPostedCandidateCleanup() {
+  try {
+    postedCandidateCompactionPreview = buildPostedCandidateCompactionPreview(data);
+    const message = $("#postedCandidateCleanupPreview");
+    if (message) message.textContent = formatCompactionPreview(postedCandidateCompactionPreview);
+    const execute = $("#executePostedCandidateCleanup");
+    if (execute) execute.disabled = postedCandidateCompactionPreview.changedCount === 0;
+    toast(postedCandidateCompactionPreview.changedCount ? "軽量化プレビューを作成しました。実行前にJSONバックアップを確認してください。" : "軽量化対象はありません。");
+  } catch (error) {
+    postedCandidateCompactionPreview = null;
+    const message = $("#postedCandidateCleanupPreview");
+    if (message) message.textContent = `プレビュー作成に失敗しました。${error.message || "保存データを確認してください。"}`;
+    const execute = $("#executePostedCandidateCleanup");
+    if (execute) execute.disabled = true;
+  }
+}
+
+function executePostedCandidateCleanup() {
+  const preview = buildPostedCandidateCompactionPreview(data);
+  postedCandidateCompactionPreview = preview;
+  const message = $("#postedCandidateCleanupPreview");
+  if (message) message.textContent = formatCompactionPreview(preview);
+  if (!preview.changedCount) {
+    toast("軽量化対象はありません。");
+    return;
+  }
+  if (!window.confirm("実行前にJSONバックアップを保存しましたか？バックアップには設定中の認証情報が含まれる可能性があります。保存後、投稿済み候補だけを軽量化します。")) return;
+  const previousSnapshot = getSerializedDataSnapshot(data);
+  const result = saveData(preview.compactedData);
+  if (!result.ok) {
+    toast("軽量化保存に失敗しました。元の保存データを維持しています。");
+    return;
+  }
+  let persistedData;
+  try {
+    persistedData = JSON.parse(localStorage.getItem(STORAGE_KEY));
+  } catch {
+    persistedData = null;
+  }
+  if (!validateCompactedDataSnapshot(persistedData, preview)) {
+    try { localStorage.setItem(STORAGE_KEY, previousSnapshot.json); } catch (restoreError) { console.warn("軽量化後の検証失敗時に元データを復元できませんでした。", restoreError); }
+    data = loadData();
+    renderAll();
+    toast("軽量化後の保存検証に失敗したため、元の保存データへ戻しました。");
+    return;
+  }
+  postedCandidateCompactionPreview = buildPostedCandidateCompactionPreview(data);
+  if (message) message.textContent = `軽量化を保存しました。\n${formatCompactionPreview(postedCandidateCompactionPreview)}`;
+  toast("投稿済み候補の軽量化を保存しました。履歴と未投稿候補は変更していません。");
+}
+
 function restoreHistoryToRoomCandidate(id) {
   const historyItem = data.history.find((item) => item.id === id);
   if (!historyItem) return;
@@ -3652,12 +3875,20 @@ function completePendingRoomPost() {
     return false;
   }
   if (findPostedHistoryRecord(item)) {
+    const previousState = structuredClone(data);
     data.pendingRoomPost = null;
-    saveData();
+    const result = saveData();
+    if (!result.ok) {
+      data = previousState;
+      renderAll();
+      toast("ROOMへの投稿は完了していますが、アプリの履歴保存に失敗しました。同じ商品を再投稿しないよう注意してください。");
+      return false;
+    }
     toast("この商品はすでに投稿履歴にあります。重複登録は行いません。");
     return true;
   }
-  const previousPending = pending;
+  const previousState = structuredClone(data);
+  const previousSnapshot = getSerializedDataSnapshot(data);
   try {
     if (String(pending.itemCode || "").trim() !== String(item.itemCode || item.product?.itemCode || "").trim()) {
       toast("投稿開始時と現在の商品itemCodeが一致しないため、投稿完了を記録せず停止しました。");
@@ -3675,19 +3906,26 @@ function completePendingRoomPost() {
       return false;
     }
     recordRoomPosting(item, { postedAt: new Date().toISOString(), introText: payload.introText });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    compactPostedCandidate(item, data.history);
+    data.pendingRoomPost = null;
+    const savedResult = saveData(data, { render: false });
+    if (!savedResult.ok) {
+      data = previousState;
+      renderAll();
+      toast("ROOMへの投稿は完了していますが、アプリの履歴保存に失敗しました。同じ商品を再投稿しないよう注意してください。");
+      return false;
+    }
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     const savedHistory = (saved.history || []).find((entry) => (entry.itemCode || entry.product?.itemCode || "") === pending.itemCode);
     if (!savedHistory?.postedAt) throw new Error("投稿履歴の保存確認に失敗しました。");
-    data.pendingRoomPost = null;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     renderAll();
     toast("ROOM投稿完了をアプリへ記録しました。");
     return true;
   } catch (error) {
-    data.pendingRoomPost = previousPending;
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (storageError) { console.warn("pending情報の復元保存にも失敗しました。", storageError); }
-    toast(`投稿完了の記録に失敗しました。pending情報は保持しています。${error.message ? ` ${error.message}` : ""}`);
+    try { localStorage.setItem(STORAGE_KEY, previousSnapshot.json); } catch (restoreError) { console.warn("投稿完了処理の検証失敗時に元データを復元できませんでした。", restoreError); }
+    data = previousState;
+    renderAll();
+    toast(`ROOMへの投稿は完了していますが、アプリの履歴保存に失敗しました。同じ商品を再投稿しないよう注意してください。${error.message ? ` ${error.message}` : ""}`);
     return false;
   }
 }
@@ -3702,7 +3940,9 @@ function markPosted(id) {
   }
   // URL取得前の従来運用でもROOM投稿完了を記録できる。後のURL登録時は同じ履歴を更新する。
   recordRoomPosting(item);
-  saveData();
+  compactPostedCandidate(item, data.history);
+  const result = saveData();
+  if (!result.ok) return;
   showTab("history");
   toast("投稿履歴に記録しました。");
 }
@@ -3975,8 +4215,8 @@ function saveSettings(event) {
     endDate: $("#eventEndDate").value,
     enabled: $("#eventEnabled").checked
   };
-  saveData();
-  toast("設定を保存しました。");
+  const result = saveData();
+  if (result.ok) toast("設定を保存しました。");
 }
 
 function findDuplicate(product, ignoreId = "") {
@@ -4065,8 +4305,9 @@ function importJson(event) {
       if (!Array.isArray(imported.candidates) || !Array.isArray(imported.history) || typeof imported.settings !== "object") {
         throw new Error("バックアップ形式が違います。");
       }
-      data = { ...defaultData, ...imported, candidates: normalizeSnsRecords(Array.isArray(imported.candidates) ? imported.candidates : []), history: normalizeSnsRecords(Array.isArray(imported.history) ? imported.history : []), sales: Array.isArray(imported.sales) ? imported.sales : [], settings: { ...defaultData.settings, ...(imported.settings || {}) }, trendSettings: { ...defaultData.trendSettings, ...(imported.trendSettings || {}) }, eventSettings: { ...defaultData.eventSettings, ...(imported.eventSettings || {}) } };
-      saveData();
+      data = normalizeStoredData(imported);
+      const result = saveData();
+      if (!result.ok) return;
       fillSettings();
       toast("バックアップを復元しました。");
     } catch (error) {
@@ -4607,7 +4848,7 @@ function getPriorityScoreLabel(product = {}) {
 
 async function searchTrendProducts() {
   const keywords = $(`#trendKeywords`)?.value.split(/[,、\n]/).map((word) => word.trim()).filter(Boolean).slice(0, TREND_KEYWORD_MAX) || [];
-  data.trendSettings = { keywords, updatedAt: new Date().toISOString() }; localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  data.trendSettings = { keywords, updatedAt: new Date().toISOString() }; saveData(data, { render: false });
   const message = $("#trendMessage"); if (!keywords.length) { if (message) message.textContent = "トレンドワードを入力してください。"; return; }
   if (!hasRakutenCredentials()) { if (message) message.textContent = "楽天API認証情報が未設定のため検索できません。"; return; }
   const merged = new Map();

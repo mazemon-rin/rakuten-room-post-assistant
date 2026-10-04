@@ -31,8 +31,10 @@ const context = {
   setTimeout,
   clearTimeout,
   document: { addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, createElement() { return { innerHTML: "", textContent: "" }; } },
-  localStorage: { getItem() { return null; }, setItem() {} },
+  localStorage: { value: null, fail: false, getItem() { return this.value; }, setItem(key, value) { if (this.fail) { const error = new Error("quota"); error.name = "QuotaExceededError"; throw error; } this.value = value; } },
   fetch: async () => { throw new Error("fetch is not used in scoring tests"); },
+  TextEncoder,
+  Blob,
   window: null
 };
 context.window = context;
@@ -46,6 +48,11 @@ vm.runInContext(trendRulesSource, context);
 vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, validateGeneratedCopy, data };`, context);
 
 const scoring = context.__scoring;
+scoring.compactPostedCandidate = context.compactPostedCandidate;
+scoring.buildPostedCandidateCompactionPreview = context.buildPostedCandidateCompactionPreview;
+scoring.validateCompactedDataSnapshot = context.validateCompactedDataSnapshot;
+scoring.getSerializedDataSnapshot = context.getSerializedDataSnapshot;
+scoring.saveData = context.saveData;
 scoring.evaluateRoomProduct = context.evaluateRoomProduct;
 scoring.applyRoomProductEvaluation = context.applyRoomProductEvaluation;
 scoring.scoreProductSelection = context.scoreProductSelection;
@@ -681,6 +688,43 @@ const preStartIntro = scoring.finalizeRoomIntro({ couponStart: "10/4 20:00", pro
 assert(preStartIntro.startsWith("50%OFFクーポン対象｜10/4 20:00開始🉐 "), "ROOM integration E: pre-start coupon states its start time");
 const uncertainIntro = scoring.finalizeRoomIntro({ product: { itemName: "最大50%OFFセール", discountRate: 50, rateConfirmed: false, discountRateType: "unknown" } }, "ニューバランスの商品です。");
 assert(uncertainIntro === "ニューバランスの商品です。", "ROOM integration F: unconfirmed discount is not added");
+
+// localStorage容量対策: 投稿済み候補だけを軽量化し、履歴と未投稿候補を保持する。
+const compactionHistory = [{ id: "posted-1", itemCode: "shop:posted-1", title: "投稿済み商品" }];
+const compactionPosted = {
+  id: "posted-1", itemCode: "shop:posted-1", title: "投稿済み商品", shopName: "ショップ", itemUrl: "https://example.com/posted-1",
+  introText: "紹介文", hashTags: "#商品", postStatus: "投稿済み", status: "投稿済み", postedAt: "2026-10-04T00:00:00.000Z",
+  product: { itemCode: "shop:posted-1", itemName: "投稿済み商品", itemCaption: "大きな商品情報" }, introPrompt: "大きな指示文", combinedPrompt: "大きな統合プロンプト"
+};
+const compactionUnposted = {
+  id: "pending-1", itemCode: "shop:pending-1", title: "未投稿商品", shopName: "ショップ", itemUrl: "https://example.com/pending-1",
+  introText: "紹介文", hashTags: "#商品", postStatus: "投稿待ち", status: "投稿待ち", product: { itemCode: "shop:pending-1", itemName: "未投稿商品" }, introPrompt: "保持", combinedPrompt: "保持"
+};
+const compactionState = { ...scoring.data, candidates: [compactionPosted, compactionUnposted], history: compactionHistory, sales: [] };
+const compactionPreview = scoring.buildPostedCandidateCompactionPreview(compactionState);
+assert(compactionPreview.targetCount === 1 && compactionPreview.changedCount === 1, "Compaction A: only posted candidate with history is targeted");
+assert(compactionPreview.candidateCountBefore === 2 && compactionPreview.candidateCountAfter === 2, "Compaction B: candidate count is unchanged");
+assert(compactionPreview.historyCountBefore === 1 && compactionPreview.historyCountAfter === 1, "Compaction C: history count is unchanged");
+assert(!compactionPreview.compactedData.candidates[0].product && !compactionPreview.compactedData.candidates[0].introPrompt && !compactionPreview.compactedData.candidates[0].combinedPrompt, "Compaction D: heavy posted fields are removed");
+assert(compactionPreview.compactedData.candidates[1].product && compactionPreview.compactedData.candidates[1].introPrompt && compactionPreview.compactedData.candidates[1].combinedPrompt, "Compaction E: unposted candidate is unchanged");
+assert(compactionPreview.compactedData.candidates[0].itemCode === "shop:posted-1" && compactionPreview.compactedData.candidates[0].introText === "紹介文", "Compaction F: posting identity and copy are retained");
+assert(scoring.validateCompactedDataSnapshot(compactionPreview.compactedData, compactionPreview), "Compaction F2: saved compacted snapshot retains counts and required fields");
+const noHistoryCandidate = { ...compactionPosted, itemCode: "shop:no-history" };
+const noHistoryState = { ...compactionState, candidates: [noHistoryCandidate] };
+const noHistoryPreview = scoring.buildPostedCandidateCompactionPreview(noHistoryState);
+assert(noHistoryPreview.targetCount === 0 && noHistoryPreview.afterBytes === noHistoryPreview.beforeBytes, "Compaction G: candidate without history is not changed");
+const serialized = scoring.getSerializedDataSnapshot(compactionPreview.compactedData);
+assert(serialized.bytes > 0 && JSON.parse(serialized.json).history.length === 1, "Compaction H: compacted data remains exportable JSON");
+context.localStorage.value = JSON.stringify({ candidates: [], history: [], settings: {} });
+const normalSave = scoring.saveData({ ...scoring.data, candidates: [], history: [] }, { render: false });
+assert(normalSave.ok && JSON.parse(context.localStorage.value).candidates.length === 0, "Compaction H2: normal save is verified against localStorage");
+const previousStoredJson = context.localStorage.value;
+context.localStorage.fail = true;
+const failedSave = scoring.saveData({ ...scoring.data, candidates: [{ id: "memory-only", itemCode: "memory-only" }] }, { render: false });
+context.localStorage.fail = false;
+assert(failedSave && failedSave.ok === false, "Compaction I: quota failure is not reported as success");
+assert(context.localStorage.value === previousStoredJson, "Compaction J: existing localStorage is preserved on quota failure");
+context.localStorage.value = previousStoredJson;
 
 console.log(JSON.stringify({
   caseA: { trendFit: caseA.selectionScore.trendFit, opportunity: caseA.selectionScore.opportunity, total: caseA.selectionScore.total },

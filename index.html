@@ -432,6 +432,17 @@
           <button id="clearData" class="danger-button" type="button">全データ削除</button>
         </div>
         <p class="small-note">復元前に、ファイル形式とデータ項目を確認します。</p>
+        <p id="storageStatus" class="small-note" role="status" aria-live="polite"></p>
+        <p id="storageSaveMessage" class="message" role="alert" aria-live="assertive"></p>
+      </div>
+      <div class="panel data-panel">
+        <h3>投稿済み候補の容量対策</h3>
+        <p class="small-note">投稿済みで履歴が確認できる候補だけを対象に、商品詳細と生成用プロンプトを削減します。未投稿候補・履歴・売上は変更しません。</p>
+        <div class="button-row">
+          <button id="previewPostedCandidateCleanup" class="secondary-button" type="button">軽量化をプレビュー</button>
+          <button id="executePostedCandidateCleanup" class="danger-button" type="button" disabled>軽量化を実行</button>
+        </div>
+        <pre id="postedCandidateCleanupPreview" class="data-preview" aria-live="polite">まず「軽量化をプレビュー」を実行してください。</pre>
       </div>
     </section>
   </main>
