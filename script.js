@@ -117,7 +117,63 @@ const defaultData = {
   eventSettings: { eventName: "", startDate: "", endDate: "", enabled: false }
 };
 
-const POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS = Object.freeze(["product", "introPrompt", "combinedPrompt"]);
+// 投稿済み候補は、再読み込み後の候補表示・重複判定・商品ページ遷移に
+// 必要な商品情報だけを残します。未投稿候補の商品データは変更しません。
+const POSTED_PRODUCT_RETAINED_FIELDS = Object.freeze([
+  "itemCode", "itemName", "itemUrl", "affiliateUrl", "itemPrice", "shopName", "shopUrl",
+  "imageUrl", "mediumImageUrls", "smallImageUrls", "genreId", "categoryId", "categoryName",
+  "reviewAverage", "reviewCount", "rank", "apiRank", "sourceRank", "matchedTrendKeywords",
+  "regularPrice", "salePrice", "originalPrice", "discountRate", "rateConfirmed", "discountRateType",
+  "discountType", "discountCondition", "confirmedDiscountLabel", "couponDeadline", "deadlineConfirmed",
+  "couponStart", "detectedDeadlineStart", "saleStatus", "discountStatus", "discountText", "couponCandidate",
+  "couponInfo", "saleAvailabilityStatus"
+]);
+const POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS = Object.freeze(["introPrompt", "combinedPrompt"]);
+
+function cloneLightweightProductValue(value) {
+  if (Array.isArray(value)) return value.map((entry) => (entry && typeof entry === "object" ? { ...entry } : entry));
+  return value;
+}
+
+function buildLightweightPostedProduct(candidate = {}) {
+  const source = candidate.product && typeof candidate.product === "object" ? candidate.product : null;
+  if (!source) return null;
+  const fallback = candidate || {};
+  const fallbackFields = {
+    itemCode: fallback.itemCode,
+    itemName: fallback.title,
+    itemUrl: fallback.itemUrl,
+    itemPrice: fallback.price,
+    shopName: fallback.shopName,
+    imageUrl: fallback.imageUrl,
+    genreId: fallback.genreId,
+    categoryId: fallback.categoryId,
+    categoryName: fallback.categoryName
+  };
+  const compacted = {};
+  POSTED_PRODUCT_RETAINED_FIELDS.forEach((field) => {
+    const value = source[field] !== undefined ? source[field] : fallbackFields[field];
+    if (value !== undefined && value !== null && value !== "") compacted[field] = cloneLightweightProductValue(value);
+  });
+  return compacted;
+}
+
+function hasSameJsonValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function getCandidateProductForDisplay(candidate = {}) {
+  if (candidate.product && typeof candidate.product === "object") return candidate.product;
+  // 旧形式の軽量化データでは product がありません。保存済みの候補項目だけを
+  // 一時的な表示用商品として使い、データ自体には書き戻しません。
+  return {
+    ...candidate,
+    itemName: candidate.itemName || candidate.title || "",
+    itemPrice: candidate.itemPrice ?? candidate.price,
+    itemUrl: candidate.itemUrl || "",
+    shopName: candidate.shopName || ""
+  };
+}
 
 function normalizeStoredData(saved) {
   return {
@@ -1639,7 +1695,10 @@ function openDetailByIndex(index) {
 
 function openDetailByCandidate(id) {
   const candidate = data.candidates.find((item) => item.id === id);
-  if (candidate?.product) openDetail(candidate.product, candidate);
+  if (!candidate) return;
+  const product = getCandidateProductForDisplay(candidate);
+  if (product.itemCode || product.itemName || candidate.title) openDetail(product, candidate);
+  else console.warn("候補の商品情報が不足しているため、詳細表示をスキップしました。", candidate.id);
 }
 
 function quickSaveByIndex(index, photoInputId = "") {
@@ -1943,9 +2002,9 @@ function renderAll() {
 function renderDashboard() {
   const today = new Date().toISOString().slice(0, 10);
   const month = today.slice(0, 7);
-  const duplicateCount = data.candidates.filter((candidate) => isRoomCandidate(candidate) && findDuplicate(candidate.product, candidate.id)).length;
+  const duplicateCount = data.candidates.filter((candidate) => isRoomCandidate(candidate) && findDuplicate(candidate.product || candidate, candidate.id)).length;
   const stats = [
-    ["今日の投稿候補数", data.candidates.filter((item) => isVisibleRoomCandidate(item) && item.savedAt.slice(0, 10) === today).length],
+    ["今日の投稿候補数", data.candidates.filter((item) => isVisibleRoomCandidate(item) && String(item.savedAt || "").slice(0, 10) === today).length],
     ["未投稿の商品数", data.candidates.filter((item) => isVisibleRoomCandidate(item) && item.status !== "投稿済み").length],
     ["今月の投稿数", data.history.filter((item) => item.postedAt.slice(0, 7) === month).length],
     ["重複候補数", duplicateCount]
@@ -3656,9 +3715,15 @@ function compactPostedCandidate(candidate, history = data.history) {
   if (!isPostedCandidateForCompaction(candidate, history)) return { changed: false, skipped: true, reason: "投稿済み履歴が確認できません" };
   const validation = validatePostedCandidateForCompaction(candidate);
   if (!validation.ok) return { changed: false, skipped: true, reason: `必須項目不足：${validation.missing.join("、")}` };
+  let productChanged = false;
+  if (candidate.product && typeof candidate.product === "object") {
+    const compactedProduct = buildLightweightPostedProduct(candidate);
+    productChanged = !hasSameJsonValue(candidate.product, compactedProduct);
+    if (productChanged) candidate.product = compactedProduct;
+  }
   const removedFields = POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.filter((field) => Object.prototype.hasOwnProperty.call(candidate, field));
   removedFields.forEach((field) => { delete candidate[field]; });
-  return { changed: removedFields.length > 0, removedFields, skipped: false };
+  return { changed: productChanged || removedFields.length > 0, productChanged, removedFields, skipped: false };
 }
 
 function buildPostedCandidateCompactionPreview(sourceData = data) {
@@ -3670,7 +3735,10 @@ function buildPostedCandidateCompactionPreview(sourceData = data) {
   const after = getSerializedDataSnapshot(compactedData);
   const changed = results.filter((result) => result.changed).length;
   const skipped = results.filter((result) => result.skipped).length;
-  const fields = Object.fromEntries(POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.map((field) => [field, results.filter((result) => result.removedFields?.includes(field)).length]));
+  const fields = {
+    product: results.filter((result) => result.productChanged).length,
+    ...Object.fromEntries(POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.map((field) => [field, results.filter((result) => result.removedFields?.includes(field)).length]))
+  };
   return {
     compactedData,
     beforeBytes: before.bytes,
@@ -3684,18 +3752,38 @@ function buildPostedCandidateCompactionPreview(sourceData = data) {
     candidateCountAfter: (compactedData.candidates || []).length,
     historyCountBefore: (sourceData.history || []).length,
     historyCountAfter: (compactedData.history || []).length,
+    salesCountBefore: (sourceData.sales || []).length,
+    salesCountAfter: (compactedData.sales || []).length,
     unpostedCountBefore: (sourceData.candidates || []).filter((candidate) => !isPostedCandidateForCompaction(candidate, sourceData.history || [])).length,
-    unpostedCountAfter: (compactedData.candidates || []).filter((candidate) => !isPostedCandidateForCompaction(candidate, compactedData.history || [])).length
+    unpostedCountAfter: (compactedData.candidates || []).filter((candidate) => !isPostedCandidateForCompaction(candidate, compactedData.history || [])).length,
+    productRequiredItemCodes: targetCandidates.filter((candidate) => candidate.product && typeof candidate.product === "object").map((candidate) => String(candidate.itemCode || candidate.product.itemCode || "")).filter(Boolean),
+    historySnapshot: JSON.stringify(sourceData.history || []),
+    salesSnapshot: JSON.stringify(sourceData.sales || []),
+    unpostedCandidateSnapshot: JSON.stringify((sourceData.candidates || []).filter((candidate) => !isPostedCandidateForCompaction(candidate, sourceData.history || [])))
   };
 }
 
 function validateCompactedDataSnapshot(savedData, preview) {
   if (!savedData || !Array.isArray(savedData.candidates) || !Array.isArray(savedData.history)) return false;
   if (savedData.candidates.length !== preview.candidateCountBefore || savedData.history.length !== preview.historyCountBefore) return false;
+  if (!Array.isArray(savedData.sales) || savedData.sales.length !== preview.salesCountBefore) return false;
+  if (preview.historySnapshot && JSON.stringify(savedData.history) !== preview.historySnapshot) return false;
+  if (preview.salesSnapshot && JSON.stringify(savedData.sales || []) !== preview.salesSnapshot) return false;
+  if (preview.unpostedCandidateSnapshot) {
+    const targetCodesForUnposted = new Set(preview.targetItemCodes || []);
+    const currentUnposted = savedData.candidates.filter((candidate) => !targetCodesForUnposted.has(String(candidate.itemCode || candidate.product?.itemCode || "")));
+    if (JSON.stringify(currentUnposted) !== preview.unpostedCandidateSnapshot) return false;
+  }
   const targetCodes = new Set(preview.targetItemCodes || []);
+  const productRequiredCodes = new Set(preview.productRequiredItemCodes || []);
   return savedData.candidates.filter((candidate) => targetCodes.has(String(candidate.itemCode || candidate.product?.itemCode || ""))).every((candidate) => {
     const fields = validatePostedCandidateForCompaction(candidate);
-    return fields.ok && POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.every((field) => !Object.prototype.hasOwnProperty.call(candidate, field));
+    const itemCode = String(candidate.itemCode || candidate.product?.itemCode || "");
+    const productIsValid = !productRequiredCodes.has(itemCode) || (
+      candidate.product && typeof candidate.product === "object" &&
+      hasSameJsonValue(candidate.product, buildLightweightPostedProduct(candidate))
+    );
+    return fields.ok && productIsValid && POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.every((field) => !Object.prototype.hasOwnProperty.call(candidate, field));
   });
 }
 
@@ -3706,7 +3794,7 @@ function formatCompactionPreview(preview) {
     `履歴件数：${preview.historyCountBefore}件 → ${preview.historyCountAfter}件\n` +
     `未投稿候補：${preview.unpostedCountBefore}件 → ${preview.unpostedCountAfter}件\n` +
     `保存サイズ：${formatStorageSize(preview.beforeBytes)} → ${formatStorageSize(preview.afterBytes)}（推定削減 ${formatStorageSize(reduction)}）\n` +
-    `削減候補：${POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.join(" / ")}`;
+    `削減内容：商品詳細を軽量化 / ${POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS.join(" / ")}`;
 }
 
 let postedCandidateCompactionPreview = null;
@@ -3949,13 +4037,18 @@ function markPosted(id) {
 
 function generateCandidatePrompt(id) {
   const candidate = data.candidates.find((item) => item.id === id);
-  if (!candidate?.product) return;
+  if (!candidate) return;
+  const product = getCandidateProductForDisplay(candidate);
+  if (!product.itemCode && !product.itemName && !candidate.title) {
+    console.warn("候補の商品情報が不足しているため、紹介文プロンプトを作成できません。", candidate.id);
+    return;
+  }
   applyCollectionMetadata(candidate);
   if (candidate.postType === "warning") {
     generateWarningPrompt(id);
     return;
   }
-  currentProduct = candidate.product;
+  currentProduct = product;
   openDetail(currentProduct);
   generatePrompt();
   candidate.introPrompt = $("#promptOutput").value;
@@ -4119,8 +4212,13 @@ async function startCodexPost(id) {
 
 function openCandidateForPaste(id) {
   const candidate = data.candidates.find((item) => item.id === id);
-  if (!candidate?.product) return;
-  currentProduct = candidate.product;
+  if (!candidate) return;
+  const product = getCandidateProductForDisplay(candidate);
+  if (!product.itemCode && !product.itemName && !candidate.title) {
+    console.warn("候補の商品情報が不足しているため、紹介文貼り付け画面を開けません。", candidate.id);
+    return;
+  }
+  currentProduct = product;
   openDetail(currentProduct);
   $("#promptOutput").value = candidate.introPrompt || "";
   $("#introText").value = candidate.introText || "";
