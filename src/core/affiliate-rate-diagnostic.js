@@ -27,10 +27,68 @@
     return SAFE_API_ERROR_CODES.has(value) ? value : null;
   }
 
+  function getResponseItems(payload) {
+    return Array.isArray(payload?.Items) ? payload.Items : Array.isArray(payload?.items) ? payload.items : [];
+  }
+
+  function getProductData(entry) {
+    return entry?.Item || entry?.item || entry || {};
+  }
+
+  function parseAffiliateRate(rawRate, hasRate) {
+    if (!hasRate || rawRate == null || (typeof rawRate === "string" && rawRate.trim() === "")) {
+      return { status: "unavailable", value: null };
+    }
+    let value;
+    if (typeof rawRate === "number") value = rawRate;
+    else if (typeof rawRate === "string" && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(rawRate.trim())) value = Number(rawRate.trim());
+    else return { status: "invalid", value: null };
+    if (!Number.isFinite(value) || value < 0 || value > 100) return { status: "invalid", value: null };
+    return { status: "valid", value };
+  }
+
+  function summarizeAffiliateRateDistribution(payload) {
+    const entries = getResponseItems(payload);
+    const buckets = { below1: 0, from1To2: 0, from2To3: 0, from3To4: 0, from4To5: 0, from5: 0, unavailable: 0, invalid: 0 };
+    const dataTypes = { number: 0, string: 0, null: 0, undefined: 0, boolean: 0, object: 0, other: 0 };
+    const validRates = [];
+    for (const entry of entries) {
+      const product = getProductData(entry);
+      const hasRate = Object.prototype.hasOwnProperty.call(product, "affiliateRate");
+      const rawRate = product.affiliateRate;
+      const type = rawRate === null ? "null" : rawRate === undefined ? "undefined" : typeof rawRate;
+      dataTypes[Object.hasOwn(dataTypes, type) ? type : "other"] += 1;
+      const parsed = parseAffiliateRate(rawRate, hasRate);
+      if (parsed.status === "unavailable") buckets.unavailable += 1;
+      else if (parsed.status === "invalid") buckets.invalid += 1;
+      else {
+        const rate = parsed.value;
+        validRates.push(rate);
+        if (rate < 1) buckets.below1 += 1;
+        else if (rate < 2) buckets.from1To2 += 1;
+        else if (rate < 3) buckets.from2To3 += 1;
+        else if (rate < 4) buckets.from3To4 += 1;
+        else if (rate < 5) buckets.from4To5 += 1;
+        else buckets.from5 += 1;
+      }
+    }
+    const sum = validRates.reduce((total, rate) => total + rate, 0);
+    return {
+      fetchedCount: entries.length,
+      classifiedCount: Object.values(buckets).reduce((total, count) => total + count, 0),
+      buckets,
+      dataTypes,
+      minimum: validRates.length ? Math.min(...validRates) : null,
+      maximum: validRates.length ? Math.max(...validRates) : null,
+      average: validRates.length ? sum / validRates.length : null,
+      validCount: validRates.length
+    };
+  }
+
   function summarizeResponse(status, payload, itemCode = ITEM_CODE) {
     const apiError = payload?.error || payload?.error_description || payload?.Error || null;
     const errorCode = getSafeApiErrorCode(payload);
-    const entries = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(payload?.items) ? payload.items : [];
+    const entries = getResponseItems(payload);
     const item = entries.find((entry) => entry?.itemCode === itemCode) || null;
     const rawRate = item?.affiliateRate;
     const count = payload?.count ?? payload?.Count;
@@ -82,7 +140,13 @@
         });
         let payload = {};
         try { payload = await response.json(); } catch { /* HTTP statusだけを返し、生レスポンスは露出しない */ }
-        return { conditionId, condition: condition.label, ...summarizeResponse(response.status, payload) };
+        const summary = summarizeResponse(response.status, payload);
+        return {
+          conditionId,
+          condition: condition.label,
+          ...summary,
+          ...(conditionId === "A" && summary.state !== "api_error" ? { rateDistribution: summarizeAffiliateRateDistribution(payload) } : {})
+        };
       } catch (error) {
         // Fetch例外の文面にはURL等が含まれる可能性があるため、詳細は表示・記録しない。
         return { conditionId, condition: condition.label, state: "api_error", httpStatus: null, apiCount: null, fetchedCount: 0, targetFound: false, affiliateRate: null, affiliateRateType: "unavailable", errorCode: null, errorType: error?.name === "TypeError" ? "network_error" : "request_error" };
@@ -93,5 +157,5 @@
     return pending;
   }
 
-  root.AffiliateRateDiagnostic = Object.freeze({ ITEM_CODE, CONDITIONS, summarizeResponse, buildDiagnosticParams, getSafeApiErrorCode, runDiagnosticCondition });
+  root.AffiliateRateDiagnostic = Object.freeze({ ITEM_CODE, CONDITIONS, summarizeResponse, summarizeAffiliateRateDistribution, buildDiagnosticParams, getSafeApiErrorCode, runDiagnosticCondition });
 })(typeof window !== "undefined" ? window : globalThis);

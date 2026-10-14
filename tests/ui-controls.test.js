@@ -15,6 +15,9 @@ if (!html.includes('id="apiRateDiagnostic"') || !script.includes('runApiRateDiag
 for (const condition of ["A", "B", "C", "D"]) if (!html.includes(`data-api-rate-condition="${condition}"`)) throw new Error(`API rate diagnostic condition ${condition} is missing`);
 if (!html.includes("対象itemCodeを照合します") || !script.includes("対象商品未発見")) throw new Error("diagnostic must distinguish a successful search from target item discovery");
 if (!script.includes('エラーコード：${result.errorCode || "詳細不明"}')) throw new Error("diagnostic UI must show only allowlisted error codes or an unknown-detail label");
+for (const label of ["API料率分布診断", "1%以上～2%未満", "2%以上～3%未満", "3%以上～4%未満", "4%以上～5%未満", "5%以上", "affiliateRate未取得", "affiliateRate不正値"]) {
+  if (!script.includes(label)) throw new Error(`A-only affiliate-rate distribution display is missing: ${label}`);
+}
 if (!script.includes('applyHighAffiliateRateParams(params, minimumRate)') || !script.includes('buildHighRateCandidateProduct(product)')) throw new Error("high affiliate-rate API filtering or candidate minimization is missing");
 if (!script.includes('affiliateRateSearchResults = [...products]') || !script.includes('processHighRateSearchResponses') || !script.includes('quickSaveAffiliateRateByIndex') || !script.includes('openAffiliateRateDetailByIndex')) throw new Error("high affiliate-rate results must use their own filtered processing and selection state");
 if (!script.includes('resetSearchModeState') || !html.includes('検索条件を設定して商品を検索してください。')) throw new Error("search mode switching must clear stale results and show the initial prompt");

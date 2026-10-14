@@ -819,6 +819,29 @@ async function runApiRateDiagnostic(conditionId, button) {
       `affiliateRateの型：${result.affiliateRateType}`
     ].join(" / ");
     section.append(title, details);
+    if (conditionId === "A" && result.rateDistribution) {
+      const distribution = result.rateDistribution;
+      const heading = document.createElement("h5");
+      heading.textContent = "API料率分布診断";
+      const overview = document.createElement("p");
+      overview.textContent = `検索キーワード：しそ餃子 / HTTP：${result.httpStatus ?? "未取得"} / API総件数：${result.apiCount ?? "未取得"} / 今回取得：${distribution.fetchedCount}件`;
+      const bucketLabels = [
+        ["from1To2", "1%以上～2%未満"], ["from2To3", "2%以上～3%未満"],
+        ["from3To4", "3%以上～4%未満"], ["from4To5", "4%以上～5%未満"],
+        ["from5", "5%以上"], ["below1", "1%未満"], ["unavailable", "affiliateRate未取得"], ["invalid", "affiliateRate不正値"]
+      ];
+      const bucketList = document.createElement("ul");
+      bucketLabels.forEach(([key, label]) => {
+        const item = document.createElement("li");
+        item.textContent = `${label}：${distribution.buckets[key]}件`;
+        bucketList.append(item);
+      });
+      const formatRate = (value) => value == null ? "算出不可" : `${Number(value.toFixed(4))}%`;
+      const types = Object.entries(distribution.dataTypes).filter(([, count]) => count > 0).map(([type, count]) => `${type}：${count}件`).join("、") || "データなし";
+      const stats = document.createElement("p");
+      stats.textContent = `最小料率：${formatRate(distribution.minimum)} / 最大料率：${formatRate(distribution.maximum)} / 平均料率：${formatRate(distribution.average)} / affiliateRateのデータ型：${types} / 分類件数：${distribution.classifiedCount}件`;
+      section.append(heading, overview, bucketList, stats);
+    }
     output.querySelectorAll(`[data-diagnostic-result="${conditionId}"]`).forEach((previous) => previous.remove());
     output.prepend(section);
   } catch (error) {
