@@ -6,7 +6,7 @@
 
 ## Current Status
 
-Maintenance。HTML/CSS/JavaScript、楽天API、localStorage、JSONバックアップ・復元。ROOM投稿は確認モードを既定にし、入力済み投稿画面で停止する。連続実投稿は現在のユーザー依頼に明示許可がある場合だけ行う。オリジナル写真投稿は完了前に利用者へ引き渡す。
+Maintenance。HTML/CSS/JavaScript、楽天API、localStorage、JSONバックアップ・復元。高料率商品検索をローカル実装し、楽天API参考料率を本人適用の確定料率と区別して表示する（未Commit・未Deploy）。ROOM投稿は確認モードを既定にし、入力済み投稿画面で停止する。連続実投稿は現在のユーザー依頼に明示許可がある場合だけ行う。オリジナル写真投稿は完了前に利用者へ引き渡す。
 
 ## Current Version
 

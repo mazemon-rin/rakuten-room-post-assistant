@@ -127,7 +127,7 @@ const POSTED_PRODUCT_RETAINED_FIELDS = Object.freeze([
   "regularPrice", "salePrice", "originalPrice", "discountRate", "rateConfirmed", "discountRateType",
   "discountType", "discountCondition", "confirmedDiscountLabel", "couponDeadline", "deadlineConfirmed",
   "couponStart", "detectedDeadlineStart", "saleStatus", "discountStatus", "discountText", "couponCandidate",
-  "couponInfo", "saleAvailabilityStatus"
+  "couponInfo", "saleAvailabilityStatus", "apiAffiliateRate", "apiAffiliateRateSource"
 ]);
 const POSTED_CANDIDATE_LIGHTWEIGHT_FIELDS = Object.freeze(["introPrompt", "combinedPrompt"]);
 
@@ -342,6 +342,7 @@ let data = loadData();
 let currentProduct = null;
 let currentRoomCopySession = { itemCode: "", candidateId: "", variants: [], mode: "" };
 let searchResults = [];
+let affiliateRateSearchResults = [];
 
 // SNSトレンド連携用の読み取り専用商品識別API。検索結果本体は公開しない。
 window.getSearchResultIdentityByIndex = function (index) {
@@ -568,6 +569,7 @@ function bindForms() {
   on("#reset-room-candidates", "click", resetRoomCandidates);
   $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
   on("#productSearchForm", "submit", (event) => { event.preventDefault(); searchUnifiedProducts(); });
+  on("#unifiedSearchMode", "change", updateAffiliateRateSearchVisibility);
   on("#clearSearchConditions", "click", clearSearchConditions);
   on("#openRaCoupon", "click", () => window.open("https://event.rakuten.co.jp/coupon/", "_blank", "noopener,noreferrer"));
   on("#apply-codex-result", "click", applyCodexResult);
@@ -588,6 +590,7 @@ function bindForms() {
   on("#exportCsv", "click", exportCsv);
   on("#exportSalesCsv", "click", exportSalesCsv);
   on("#affiliateCsvInput", "change", importAffiliateCsv);
+  updateAffiliateRateSearchVisibility();
   on("#saveAffiliateImport", "click", saveAffiliateImport);
   on("#cancelAffiliateImport", "click", closeAffiliateImport);
   on("#clearData", "click", clearData);
@@ -1077,12 +1080,16 @@ function clearSearchConditions() {
   setValue("unifiedProductKeyword", "");
   setValue("unifiedProductCount", "10");
   setValue("unifiedDiscountFilter", "");
+  setValue("unifiedSearchMode", "normal");
+  setValue("affiliateRateMinimum", "5");
+  updateAffiliateRateSearchVisibility();
   setValue("rankingGenreId", "");
   setValue("rankingRangeStart", "1");
   setValue("rankingRangeCount", "10");
   $$('input[name="unifiedCategory"]').forEach((input) => { input.checked = false; });
 
   searchResults = [];
+  affiliateRateSearchResults = [];
   couponSearchResults = [];
   couponVisibleCount = 30;
   couponSearchInputOverrides.clear();
@@ -1112,7 +1119,84 @@ async function searchUnifiedProducts() {
     renderCouponSearchResults([]);
     return;
   }
+  if (($("#unifiedSearchMode")?.value || "normal") === "high_affiliate_rate") {
+    await searchHighAffiliateRateProducts({ keyword, categories });
+    return;
+  }
   await searchCouponProducts({ keyword, categories, filters });
+}
+
+function updateAffiliateRateSearchVisibility() {
+  const enabled = $("#unifiedSearchMode")?.value === "high_affiliate_rate";
+  const filter = $("#affiliateRateFilterGroup");
+  const note = $("#affiliateRateSearchNote");
+  if (filter) filter.hidden = !enabled;
+  if (note) note.hidden = !enabled;
+}
+
+async function searchHighAffiliateRateProducts({ keyword = "", categories = [] } = {}) {
+  const message = $("#couponSearchMessage");
+  if (!hasRakutenCredentials()) {
+    message.textContent = "楽天API認証情報が未設定のため、高料率検索はできません。";
+    renderHighAffiliateRateSearchResults([]);
+    return;
+  }
+
+  const requestedCount = Math.min(20, Math.max(1, Number($("#unifiedProductCount")?.value || 10)));
+  const minimumRate = Number($("#affiliateRateMinimum")?.value || 5);
+  const categoryQueries = categories.length ? categories : [null];
+  const merged = new Map();
+  let failedQueries = 0;
+  message.textContent = "API参考料率の高い商品を検索しています...";
+
+  for (let index = 0; index < categoryQueries.length; index += 1) {
+    if (index) await sleep(RANKING_INTERVAL_SHORT_MS);
+    const params = new URLSearchParams({
+      format: "json",
+      applicationId: data.settings.applicationId,
+      accessKey: data.settings.accessKey,
+      hits: String(Math.min(30, requestedCount * 3)),
+      sort: "-affiliateRate"
+    });
+    addParam(params, "keyword", keyword);
+    window.AffiliateRateSearch.applyHighAffiliateRateParams(params, minimumRate);
+    addParam(params, "genreId", categoryQueries[index]?.id || "");
+    addAffiliateIdParam(params);
+    try {
+      const response = await fetch(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`);
+      if (!response.ok) throw new Error(await readRakutenApiError(response));
+      window.AffiliateRateSearch.mergeApiResultsByIdentity(merged, normalizeRakutenItems(await response.json()), rankingIdentity);
+    } catch (error) {
+      failedQueries += 1;
+      console.warn("高料率商品検索に失敗しました。認証情報を含むURLは出力しません。", hideCredentials(String(error?.message || "検索エラー")));
+    }
+  }
+
+  const products = window.AffiliateRateSearch.sortByApiAffiliateRate([...merged.values()])
+    .slice(0, requestedCount);
+  renderHighAffiliateRateSearchResults(products);
+  if (failedQueries === categoryQueries.length) {
+    message.textContent = "高料率検索に失敗しました。楽天APIの通信状態を確認してください。API参考料率は本人適用の確定料率ではありません。";
+    return;
+  }
+  const status = `${products.length}件をAPI参考料率の高い順で表示しました（下限 ${minimumRate}%以上）。`;
+  message.textContent = failedQueries
+    ? `${status} ${failedQueries}カテゴリーの検索に失敗しました。料率は本人適用の確定料率ではありません。`
+    : `${status} 本人に適用される特別料率や確定報酬を示すものではありません。`;
+}
+
+function renderHighAffiliateRateSearchResults(products = []) {
+  affiliateRateSearchResults = products.filter((product) => !isUnavailableProduct(product) && !postedHistoryMatch(product));
+  affiliateRateSearchResults.forEach((product) => {
+    product.sourceTypes = [...new Set([...(product.sourceTypes || []), "product"] )];
+    if (!product.trustStatus) Object.assign(product, checkProductTrust(product));
+    applyRoomProductEvaluation(product);
+  });
+  const container = $("#couponSearchResults");
+  if (!container) return;
+  container.innerHTML = affiliateRateSearchResults.length
+    ? affiliateRateSearchResults.map((product, index) => renderUnifiedProductCard(product, index, { mode: "high_rate" })).join("")
+    : `<p class="message">高料率検索に該当する商品はありません。検索語やカテゴリー、料率下限を見直してください。</p>`;
 }
 
 function getSelectedDealCondition() {
@@ -1237,6 +1321,7 @@ function getOriginalPhotoSelection(inputId) {
 
 function renderUnifiedProductCard(product, index, options = {}) {
   const isCoupon = options.mode === "coupon";
+  const isHighRate = options.mode === "high_rate";
   const rankText = options.rank != null ? `${options.rank}位 ` : product.rank ? `${product.rank}位 ` : "";
   const dealStatus = product.dealStatus || evaluateDealStatus(product, getSelectedDealCondition());
   const sourceTypes = [...new Set([...(product.sourceTypes || []), isCoupon ? "deal" : options.rank != null || product.rank ? "ranking" : "product"])];
@@ -1253,11 +1338,11 @@ function renderUnifiedProductCard(product, index, options = {}) {
     ? `<button class="primary-button" type="button" onclick="restoreRoomCandidateFromSearch(${JSON.stringify(product).replaceAll('"', '&quot;')})">✓ ROOM投稿候補に保存済み（再表示）</button>`
     : roomDuplicate
     ? `<button class="primary-button" type="button" disabled>✓ ROOM投稿候補に保存済み</button>`
-    : `<button class="primary-button" type="button" onclick="${isCoupon ? `saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}', '${photoInputId}')` : `quickSaveByIndex(${index}, '${photoInputId}')`}">投稿候補に保存</button>`;
-  const saveButtons = `${roomSaveButton}<button class="secondary-button" type="button" onclick="${isCoupon ? `saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : `threadsOnlySaveByIndex(${index})`}">Threads投稿</button>`;
+    : `<button class="primary-button" type="button" onclick="${isCoupon ? `saveCouponSearchRoomCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}', '${photoInputId}')` : isHighRate ? `quickSaveAffiliateRateByIndex(${index}, '${photoInputId}')` : `quickSaveByIndex(${index}, '${photoInputId}')`}">投稿候補に保存</button>`;
+  const saveButtons = `${roomSaveButton}<button class="secondary-button" type="button" onclick="${isCoupon ? `saveCouponSearchCandidate(${JSON.stringify(product).replaceAll('"', '&quot;')}, '${safeId}')` : isHighRate ? `threadsOnlySaveAffiliateRateByIndex(${index})` : `threadsOnlySaveByIndex(${index})`}">Threads投稿</button>`;
   const imageCandidates = escapeAttr(JSON.stringify(getImageCandidates(product)));
   const evaluationWarnings = product.warnings?.length ? `<p class="evaluation-warning">${escapeHtml(product.warnings.join(" / "))}</p>` : "";
-  return `<article class="product-card unified-product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}"><div class="coupon-image-wrap"><img src="${escapeAttr(getImage(product))}" data-image-candidates="${imageCandidates}" data-image-index="0" alt="" onerror="tryNextProductImage(this)"><span class="product-image-placeholder" hidden>画像なし</span></div><div class="product-body"><div class="product-title">${rankText}${escapeHtml(product.itemName || "商品名未設定")}</div><p class="price">${formatYen(product.itemPrice)}</p><p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="meta">取得元：${escapeHtml(sourceText)}</p><p class="coupon-status">${escapeHtml(dealStatus.label)}</p><p class="selection-score">選定スコア：${getEvaluationScoreLabel(product)}</p><p class="selection-score">今日の投稿優先度：${getPriorityScoreLabel(product)}</p>${evaluationWarnings}${alreadyPosted ? `<p class="ranking-post-status">投稿済み</p>` : ""}${controls}<div class="button-row"><button class="secondary-button" type="button" onclick="openDetailByIndex(${index})">詳細・紹介文</button>${saveButtons}${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="saveWarningCandidateByIndex(${index})">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="addFavoriteByIndex(${index})">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div><label class="original-photo-option"><input type="checkbox" id="${escapeAttr(photoInputId)}"> 📷 オリジナル写真で投稿</label></div></article>`;
+  return `<article class="product-card unified-product-card" data-ranking-item-code="${escapeAttr(product.itemCode || "")}"><div class="coupon-image-wrap"><img src="${escapeAttr(getImage(product))}" data-image-candidates="${imageCandidates}" data-image-index="0" alt="" onerror="tryNextProductImage(this)"><span class="product-image-placeholder" hidden>画像なし</span></div><div class="product-body"><div class="product-title">${rankText}${escapeHtml(product.itemName || "商品名未設定")}</div><p class="price">${formatYen(product.itemPrice)}</p>${isHighRate ? `<p class="meta">API参考料率：${product.apiAffiliateRate == null ? "未取得" : `${escapeHtml(String(product.apiAffiliateRate))}%`}</p>` : ""}<p class="meta">${escapeHtml(product.categoryName || "カテゴリー未設定")} / ${escapeHtml(product.shopName || "ショップ未設定")} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p><p class="meta">取得元：${escapeHtml(sourceText)}</p><p class="coupon-status">${escapeHtml(dealStatus.label)}</p><p class="selection-score">選定スコア：${getEvaluationScoreLabel(product)}</p><p class="selection-score">今日の投稿優先度：${getPriorityScoreLabel(product)}</p>${evaluationWarnings}${alreadyPosted ? `<p class="ranking-post-status">投稿済み</p>` : ""}${controls}<div class="button-row"><button class="secondary-button" type="button" onclick="${isHighRate ? `openAffiliateRateDetailByIndex(${index})` : `openDetailByIndex(${index})`}">詳細・紹介文</button>${saveButtons}${["要確認", "注意喚起候補"].includes(product.trustStatus) ? `<button class="secondary-button" type="button" onclick="${isHighRate ? `saveAffiliateRateWarningCandidateByIndex(${index})` : `saveWarningCandidateByIndex(${index})`}">注意喚起候補として保存</button>` : ""}<button class="secondary-button" type="button" onclick="${isHighRate ? `addAffiliateRateFavoriteByIndex(${index})` : `addFavoriteByIndex(${index})`}">お気に入り</button><a class="secondary-button" href="${escapeAttr(product.itemUrl || "#")}" target="_blank" rel="noopener noreferrer">楽天で見る</a></div><label class="original-photo-option"><input type="checkbox" id="${escapeAttr(photoInputId)}"> 📷 オリジナル写真で投稿</label></div></article>`;
 }
 
 function renderCouponSearchCard(product) {
@@ -2081,6 +2166,11 @@ function openDetailByIndex(index) {
   if (product) openDetail(product);
 }
 
+function openAffiliateRateDetailByIndex(index) {
+  const product = affiliateRateSearchResults[index];
+  if (product) openDetail(product);
+}
+
 function openDetailByCandidate(id) {
   const candidate = data.candidates.find((item) => item.id === id);
   if (!candidate) return;
@@ -2094,13 +2184,41 @@ function quickSaveByIndex(index, photoInputId = "") {
   if (product) quickSave(product, { originalPhotoEnabled: getOriginalPhotoSelection(photoInputId) });
 }
 
+function quickSaveAffiliateRateByIndex(index, photoInputId = "") {
+  const product = affiliateRateSearchResults[index];
+  if (product) quickSave(product, { originalPhotoEnabled: getOriginalPhotoSelection(photoInputId) });
+}
+
 function threadsOnlySaveByIndex(index) {
   const product = searchResults[index];
   if (product) quickSaveThreadsOnly(product);
 }
 
+function threadsOnlySaveAffiliateRateByIndex(index) {
+  const product = affiliateRateSearchResults[index];
+  if (product) quickSaveThreadsOnly(product);
+}
+
 function saveWarningCandidateByIndex(index) {
   const product = searchResults[index];
+  if (!product) return;
+  const trust = checkProductTrust(product);
+  if (!["要確認", "注意喚起候補"].includes(trust.trustStatus)) {
+    toast("この商品は注意喚起候補ではありません。");
+    return;
+  }
+  quickSave(product);
+  const candidate = data.candidates[0];
+  if (candidate && rankingIdentity(candidate.product || candidate) === rankingIdentity(product)) {
+    candidate.warningContentCandidate = true;
+    candidate.favoriteType = "注意喚起候補";
+    saveData();
+    toast("注意喚起候補として保存しました。");
+  }
+}
+
+function saveAffiliateRateWarningCandidateByIndex(index) {
+  const product = affiliateRateSearchResults[index];
   if (!product) return;
   const trust = checkProductTrust(product);
   if (!["要確認", "注意喚起候補"].includes(trust.trustStatus)) {
@@ -2299,9 +2417,16 @@ ${getSalePromptRule()}`;
   toast("プロンプトを作成しました。");
 }
 
+function getPersistableSearchProduct(product = {}) {
+  return product.apiAffiliateRateSource === "Rakuten Ichiba Item Search API"
+    ? window.AffiliateRateSearch.buildHighRateCandidateProduct(product)
+    : product;
+}
+
 function quickSave(product, options = {}) {
   const itemUrl = product.itemUrl || product.affiliateUrl || "";
-  const productWithUrl = product.itemUrl === itemUrl ? product : { ...product, itemUrl };
+  const candidateProduct = getPersistableSearchProduct(product);
+  const productWithUrl = candidateProduct.itemUrl === itemUrl ? candidateProduct : { ...candidateProduct, itemUrl };
   const sameProduct = currentProduct && (
     (currentProduct.itemCode && productWithUrl.itemCode && currentProduct.itemCode === productWithUrl.itemCode) ||
     (currentProduct.itemUrl && productWithUrl.itemUrl && currentProduct.itemUrl === productWithUrl.itemUrl) ||
@@ -2408,7 +2533,7 @@ function createThreadsOnlyCandidate(product, id = crypto.randomUUID()) {
 }
 
 function quickSaveThreadsOnly(product) {
-  const productWithUrl = { ...product, itemUrl: product.itemUrl || "", affiliateUrl: product.affiliateUrl || "" };
+  const productWithUrl = { ...getPersistableSearchProduct(product), itemUrl: product.itemUrl || "", affiliateUrl: product.affiliateUrl || "" };
   const existing = data.candidates.find((item) => isThreadsOnlyItem(item) && rankingIdentity(item.product || item) === rankingIdentity(productWithUrl));
   if (existing) {
     toast("この商品はThreads限定候補へ保存済みです。");
@@ -5003,8 +5128,14 @@ function addFavoriteByIndex(index) {
   if (product) addFavorite(product);
 }
 
+function addAffiliateRateFavoriteByIndex(index) {
+  const product = affiliateRateSearchResults[index];
+  if (product) addFavorite(product);
+}
+
 function addFavorite(product) {
   if (!product) return;
+  product = getPersistableSearchProduct(product);
   const exists = data.favorites.some((item) => item.itemCode === product.itemCode || item.itemUrl === product.itemUrl);
   if (exists) {
     toast("すでにお気に入りに登録されています。");

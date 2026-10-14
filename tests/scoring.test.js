@@ -697,7 +697,7 @@ const compactionHistory = [{ id: "posted-1", itemCode: "shop:posted-1", title: "
 const compactionPosted = {
   id: "posted-1", itemCode: "shop:posted-1", title: "投稿済み商品", shopName: "ショップ", itemUrl: "https://example.com/posted-1",
   introText: "紹介文", hashTags: "#商品", postStatus: "投稿済み", status: "投稿済み", postedAt: "2026-10-04T00:00:00.000Z",
-  product: { itemCode: "shop:posted-1", itemName: "投稿済み商品", itemCaption: "大きな商品情報" }, introPrompt: "大きな指示文", combinedPrompt: "大きな統合プロンプト"
+  product: { itemCode: "shop:posted-1", itemName: "投稿済み商品", itemCaption: "大きな商品情報", apiAffiliateRate: 15, apiAffiliateRateSource: "Rakuten Ichiba Item Search API" }, introPrompt: "大きな指示文", combinedPrompt: "大きな統合プロンプト"
 };
 const compactionUnposted = {
   id: "pending-1", itemCode: "shop:pending-1", title: "未投稿商品", shopName: "ショップ", itemUrl: "https://example.com/pending-1",
@@ -709,6 +709,7 @@ assert(compactionPreview.targetCount === 1 && compactionPreview.changedCount ===
 assert(compactionPreview.candidateCountBefore === 2 && compactionPreview.candidateCountAfter === 2, "Compaction B: candidate count is unchanged");
 assert(compactionPreview.historyCountBefore === 1 && compactionPreview.historyCountAfter === 1, "Compaction C: history count is unchanged");
 assert(compactionPreview.compactedData.candidates[0].product && compactionPreview.compactedData.candidates[0].product.itemCode === "shop:posted-1" && compactionPreview.compactedData.candidates[0].product.itemUrl === "https://example.com/posted-1" && !compactionPreview.compactedData.candidates[0].product.itemCaption, "Compaction D: posted product is reduced but identity and URL remain");
+assert(compactionPreview.compactedData.candidates[0].product.apiAffiliateRate === 15 && compactionPreview.compactedData.candidates[0].product.apiAffiliateRateSource === "Rakuten Ichiba Item Search API", "Compaction D3: minimal API reference rate metadata is retained");
 assert(!compactionPreview.compactedData.candidates[0].introPrompt && !compactionPreview.compactedData.candidates[0].combinedPrompt, "Compaction D2: heavy prompt fields are removed");
 assert(JSON.stringify(compactionPreview.compactedData.candidates[1]) === JSON.stringify(compactionUnposted), "Compaction E: unposted candidate is unchanged");
 assert(compactionPreview.compactedData.candidates[0].itemCode === "shop:posted-1" && compactionPreview.compactedData.candidates[0].introText === "紹介文", "Compaction F: posting identity and copy are retained");

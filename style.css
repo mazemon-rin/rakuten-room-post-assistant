@@ -499,6 +499,11 @@ label {
   font-size: 0.92rem;
 }
 
+#affiliateRateFilterGroup[hidden],
+#affiliateRateSearchNote[hidden] {
+  display: none !important;
+}
+
 input,
 select,
 textarea {
