@@ -35,6 +35,16 @@ assert.strictEqual(api.summarizeResponse(200, {}).state, "api_error");
 const failure = api.summarizeResponse(400, { error: "invalid_request", error_description: "sensitive details" });
 assert.strictEqual(failure.state, "api_error");
 assert.strictEqual(failure.httpStatus, 400);
+assert.strictEqual(failure.errorCode, null);
+const knownFailure = api.summarizeResponse(400, { error: "wrong_parameter", error_description: "applicationId=app-secret accessKey=access-secret" });
+assert.strictEqual(knownFailure.errorCode, "wrong_parameter");
+assert.strictEqual(JSON.stringify(knownFailure).includes("error_description"), false);
+assert.strictEqual(JSON.stringify(knownFailure).includes("app-secret"), false);
+assert.strictEqual(JSON.stringify(knownFailure).includes("access-secret"), false);
+const unknownFailure = api.summarizeResponse(400, { error: "unknown_api_error", error_description: "do not expose" });
+assert.strictEqual(unknownFailure.errorCode, null);
+assert.strictEqual(api.getSafeApiErrorCode({ error: "access-secret" }), null);
+assert.strictEqual(JSON.stringify(unknownFailure).includes("do not expose"), false);
 
 (async () => {
   const requests = [];
@@ -71,8 +81,24 @@ assert.strictEqual(failure.httpStatus, 400);
   });
   assert.strictEqual(apiError[0].state, "api_error");
   assert.strictEqual(apiError[0].httpStatus, 400);
+  assert.strictEqual(apiError[0].errorCode, null);
   assert.strictEqual(apiError[0].errorType, undefined);
   assert.strictEqual(JSON.stringify(apiError).includes("do not expose"), false);
+
+  const allowedApiError = await api.runDiagnostic({
+    applicationId: "app-secret", accessKey: "access-secret", wait: async () => {},
+    fetchImpl: async () => ({ status: 400, json: async () => ({ error: "wrong_parameter", error_description: "access-secret echoed in detail" }) })
+  });
+  assert.strictEqual(allowedApiError[0].errorCode, "wrong_parameter");
+  assert.strictEqual(JSON.stringify(allowedApiError).includes("access-secret"), false);
+  assert.strictEqual(JSON.stringify(allowedApiError).includes("echoed in detail"), false);
+
+  const noJsonError = await api.runDiagnostic({
+    applicationId: "app-secret", accessKey: "access-secret", wait: async () => {},
+    fetchImpl: async () => ({ status: 400, json: async () => { throw new Error("invalid json"); } })
+  });
+  assert.strictEqual(noJsonError[0].httpStatus, 400);
+  assert.strictEqual(noJsonError[0].errorCode, null);
 
   console.log("Affiliate rate diagnostic mock cases: passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

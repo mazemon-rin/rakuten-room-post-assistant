@@ -2,9 +2,25 @@
   "use strict";
 
   const ITEM_CODE = "sunshine-osaka:kuro50-siso50";
+  // 楽天公式ドキュメントに掲載されているコードだけを診断表示に使います。
+  const SAFE_API_ERROR_CODES = new Set([
+    "wrong_parameter",
+    "not_found",
+    "too_many_requests",
+    "system_error",
+    "service_unavailable"
+  ]);
+
+  function getSafeApiErrorCode(payload) {
+    const value = typeof payload?.error === "string" ? payload.error
+      : typeof payload?.Error === "string" ? payload.Error
+        : "";
+    return SAFE_API_ERROR_CODES.has(value) ? value : null;
+  }
 
   function summarizeResponse(status, payload, itemCode = ITEM_CODE) {
     const apiError = payload?.error || payload?.error_description || payload?.Error || null;
+    const errorCode = getSafeApiErrorCode(payload);
     const entries = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(payload?.items) ? payload.items : [];
     const item = entries.find((entry) => entry?.itemCode === itemCode) || null;
     const rawRate = item?.affiliateRate;
@@ -15,6 +31,7 @@
     return {
       state: apiError || malformed || status < 200 || status >= 300 ? "api_error" : normalZero ? "zero_results" : "success",
       httpStatus: Number.isFinite(Number(status)) ? Number(status) : null,
+      errorCode,
       apiCount: payload?.count ?? payload?.Count ?? null,
       fetchedCount: entries.length,
       targetFound: Boolean(item),
@@ -58,5 +75,5 @@
     return results;
   }
 
-  root.AffiliateRateDiagnostic = Object.freeze({ ITEM_CODE, summarizeResponse, buildDiagnosticParams, runDiagnostic });
+  root.AffiliateRateDiagnostic = Object.freeze({ ITEM_CODE, summarizeResponse, buildDiagnosticParams, getSafeApiErrorCode, runDiagnostic });
 })(typeof window !== "undefined" ? window : globalThis);

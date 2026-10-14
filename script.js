@@ -802,7 +802,7 @@ async function runApiRateDiagnostic() {
       const title = document.createElement("h4");
       title.textContent = result.condition;
       const details = document.createElement("p");
-      const state = result.state === "api_error" ? `APIエラー${result.httpStatus ? `（HTTP ${result.httpStatus}）` : "（HTTP status未取得）"}${result.errorType ? `：${result.errorType}` : ""}`
+      const state = result.state === "api_error" ? `APIエラー${result.httpStatus ? `（HTTP ${result.httpStatus}）` : "（HTTP status未取得）"} / エラーコード：${result.errorCode || "詳細不明"}${result.errorType ? ` / ${result.errorType}` : ""}`
         : result.state === "zero_results" ? "正常応答・0件" : "正常応答";
       details.textContent = [
         state,
