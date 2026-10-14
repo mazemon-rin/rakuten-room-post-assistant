@@ -1,8 +1,8 @@
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
-
 const source = fs.readFileSync(path.join(__dirname, "..", "script.js"), "utf8");
+
 const identitySource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "product-identity.js"), "utf8");
 const duplicateSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "duplicate-detection.js"), "utf8");
 const discountRulesSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "discount-rules.js"), "utf8");
@@ -46,6 +46,7 @@ vm.runInContext(productNormalizationSource, context);
 vm.runInContext(rankingRulesSource, context);
 vm.runInContext(trendRulesSource, context);
 vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, validateGeneratedCopy, buildLightweightPostedProduct, getCandidateProductForDisplay, candidateCard, data, ROOM_COPY_HOOKS, cleanRoomProductTitle, extractVerifiedRoomFeatures, buildRoomIntroVariants, chooseRoomIntroVariant, getSafeRoomCopyTags, openDetail, generatePrompt, generateRoomCopy, selectRoomCopyVariant, saveRoomCopyDraft, startCodexPost, getCurrentData: () => data, reloadData: () => { data = loadData(); return data; } };`, context);
+vm.runInContext("this.__roomPostTest = { cleanRoomCopySource, buildRoomIntroVariants, buildCodexPostInstructions };", context);
 
 const scoring = context.__scoring;
 scoring.compactPostedCandidate = context.compactPostedCandidate;
@@ -841,6 +842,51 @@ const noFeatureResult = scoring.buildRoomIntroVariants({ itemName: "通常の品
 assert(!noFeatureResult.ok && noFeatureResult.error.includes("特徴"), "Room copy safety C: featureless product is not fabricated");
 const noNameResult = scoring.buildRoomIntroVariants({ itemCaption: "軽量設計。" });
 assert(!noNameResult.ok && noNameResult.error.includes("商品名"), "Room copy safety C2: unidentified product reports missing identity");
+const babyProduct = {
+  itemCode: "hook-test:baby-bedding",
+  itemName: "抱っこ布団 ベビー用",
+  itemCaption: "サイズ41×65cm。カバー素材は綿100%。洗濯ネット使用で洗濯機洗い可能。対象月齢は新生児〜4か月ごろ。<!-- / イベント -->",
+  categoryName: "ベビー布団"
+};
+const babyVariants = context.__roomPostTest.buildRoomIntroVariants(babyProduct);
+assert(babyVariants.ok && babyVariants.variants.length === 5, "Room copy hooks: verified baby-product facts produce five variants");
+assert(babyVariants.variants[0].text.startsWith("ベビー用品選び、サイズや素材も見ておきたい。") && babyVariants.variants[0].text.includes("41×65cm") && babyVariants.variants[0].text.includes("綿100%"), "Room copy hooks: discovery hook reframes verified baby-product details");
+assert(babyVariants.variants[3].text.startsWith("「洗濯ネット使用で洗濯機洗い可能」") && babyVariants.variants[4].text.startsWith("小さな仕様も、選ぶ手がかりに。"), "Room copy hooks: benefit and short hooks lead with distinct, verified angles");
+assert(babyVariants.variants.every((variant) => !variant.text.includes("!-- / イベント") && !/(本日限定|今なら\d+%OFF|大人気|最安)/.test(variant.text)), "Room copy safety: HTML comments, unverified sales, and unsupported claims do not leak into variants");
+const genreCopyFixtures = [
+  { key: "appliance", product: { itemCode: "hook-test:appliance", itemName: "USB-C対応 卓上加湿器", itemCaption: "USB-C対応。タンク容量は300ml。", categoryName: "生活家電" }, audience: "家電の仕様を見比べている方", discovery: "家電選び、使う場面に合う仕様かも確認。", short: "選ぶ前に、仕様をひとつ確認。" },
+  { key: "food", product: { itemCode: "hook-test:food", itemName: "北海道産 鮭切り身 個包装", itemCaption: "北海道産。個包装で冷凍配送。", categoryName: "食品" }, audience: "産地や保存方法も見て選びたい方", discovery: "食品選び、産地や保存方法もチェック。", short: "食卓に迎える前に、仕様もチェック。" },
+  { key: "daily", product: { itemCode: "hook-test:daily", itemName: "フェイスタオル 3枚セット", itemCaption: "綿100%素材。3枚セット。洗濯ネット使用で洗濯機洗い可能。", categoryName: "日用品" }, audience: "日用品の素材や仕様を見直したい方", discovery: "日用品は、素材や手入れ方法もチェック。", short: "毎日のものこそ、仕様を確認。" },
+  { key: "fashion", product: { itemCode: "hook-test:fashion", itemName: "撥水ショルダーバッグ", itemCaption: "撥水加工。ショルダーベルトは長さ調整可能。", categoryName: "ファッション小物" }, audience: "服や小物を探している方", discovery: "服や小物、加工や素材にも注目。", short: "選ぶポイントは、ここにも。" },
+];
+genreCopyFixtures.forEach(({ key, product, audience, discovery, short }) => {
+  const result = context.__roomPostTest.buildRoomIntroVariants(product);
+  assert(result.ok && result.variants.length === 5, "Room copy genre " + key + ": all five styles generate from isolated verified fixture data");
+  assert(new Set(result.variants.map((variant) => variant.text)).size === 5, "Room copy genre " + key + ": the five outputs are not duplicates");
+  assert(result.variants[0].text.startsWith(discovery) && result.variants[1].text.includes(audience), "Room copy genre " + key + ": discovery and audience hooks use genre-appropriate language");
+  assert(result.variants[4].text.startsWith(short) && !result.variants[4].text.startsWith(result.title), "Room copy genre " + key + ": short hook is not a title/specification list");
+  assert(result.variants.every((variant) => variant.text.length <= 500), "Room copy genre " + key + ": all generated variants remain within the ROOM text limit");
+  assert(result.variants.every((variant) => result.features.some((verifiedFeature) => variant.text.includes(verifiedFeature.replace(/[。.!！?？]+$/g, "")))), "Room copy genre " + key + ": each style remains anchored to verified item information");
+  assert(result.variants.every((variant) => !/(大人気|最安|売り切れ必至|本日限定|今なら\d+%OFF|愛用しています|使ってみました)/.test(variant.text)), "Room copy genre " + key + ": unsupported popularity, urgency, discount, or experience claims are not generated");
+});
+const roomPostPromptCandidate = {
+  id: "hook-test:composer-confirmation",
+  itemCode: "hook-test:composer-confirmation",
+  title: "抱っこ布団 ベビー用",
+  itemUrl: "https://example.com/room-copy-confirmation",
+  shopName: "テストショップ",
+  introText: babyVariants.variants[0].text,
+  hashTags: "#抱っこ布団 #ベビー用品",
+  product: { ...babyProduct, itemUrl: "https://example.com/room-copy-confirmation", shopName: "テストショップ" }
+};
+const roomPostCard = scoring.candidateCard({ ...roomPostPromptCandidate, status: "文章作成済み", price: 1980 });
+assert(roomPostCard.includes("確認モードでROOM画面を準備") && roomPostCard.includes("連続実投稿用の指示を作成"), "ROOM post UI: confirmation and explicit continuous modes are both visible");
+const confirmationPrompt = context.__roomPostTest.buildCodexPostInstructions(roomPostPromptCandidate);
+const continuousPrompt = context.__roomPostTest.buildCodexPostInstructions(roomPostPromptCandidate, { mode: "continuous" });
+assert(confirmationPrompt.includes("確認モード") && confirmationPrompt.includes("ROOM投稿画面と入力済み") && confirmationPrompt.includes("「完了」はクリックしない"), "ROOM post mode: default confirmation instructions stop at the composer without publishing");
+assert(!confirmationPrompt.includes("60秒後にROOMの「完了」") && confirmationPrompt.includes("投稿済み記録を作らない"), "ROOM post mode: confirmation instructions do not schedule completion or app posting records");
+assert(continuousPrompt.includes("連続実投稿") && continuousPrompt.includes("現在のユーザー依頼にROOM外部公開の明示的な許可") && continuousPrompt.includes("完了"), "ROOM post mode: continuous instructions require explicit current-user publication authorization");
+assert(confirmationPrompt.includes("楽天イベントは開催状況・開催期間・当該商品の対象条件が確認できた場合だけ"), "ROOM copy safety: event timing and item eligibility must be verified before use");
 const discountVariants = scoring.buildRoomIntroVariants({
   ...roomCopyProduct,
   itemName: "アディダス ランニングシューズ UVカット",

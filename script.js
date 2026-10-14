@@ -580,6 +580,7 @@ function bindForms() {
   on("#rankingSortOrder", "change", () => renderRankingResults(searchResults));
   on("#queue-selected-ranking", "click", queueSelectedRanking);
   on("#start-sequential-processing", "click", startSequentialProcessing);
+  on("#start-sequential-posting", "click", () => startSequentialProcessing("continuous"));
   on("#retry-failed-ranking", "click", retryFailedRanking);
   $$("input[name='unifiedCategory']").forEach((input) => input.addEventListener("change", saveRankingCategorySelection));
   on("#exportJson", "click", exportJson);
@@ -1777,6 +1778,7 @@ const ROOM_COPY_HOOKS = Object.freeze([
 function cleanRoomCopySource(value = "") {
   return String(value || "")
     .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\/\s*\1\s*>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<\s*br\s*\/?>/gi, "\n")
     .replace(/<\s*\/(?:p|li|div|h[1-6])\s*>/gi, "\n")
     .replace(/<[^>]*>/g, " ")
@@ -1793,7 +1795,7 @@ function cleanRoomCopySource(value = "") {
 function extractVerifiedRoomFeatures(product = {}) {
   const title = cleanRoomCopySource(product.itemName || product.title || "");
   const caption = cleanRoomCopySource(product.itemCaption || product.description || "");
-  const featureCue = /(対応|収納|付属|素材|材質|容量|サイズ|冷凍|国産|日本製|個包装|セット|加工|搭載|防水|撥水|UVカット|洗える|丸洗い|折りたたみ|軽量|大容量|保温|保冷|耐水|USB|Bluetooth|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点))/i;
+  const featureCue = /(対応|収納|付属|素材|材質|容量|サイズ|冷凍|北海道産|国産|日本製|個包装|セット|加工|搭載|防水|撥水|UVカット|洗える|丸洗い|洗濯機|折りたたみ|軽量|大容量|保温|保冷|耐水|USB|Bluetooth|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点))/i;
   const unsafeFeature = /(\d{1,3}\s*[%％]\s*OFF|クーポン|セール|期間限定|最大\s*\d|最安|人気|ランキング|売り切れ|残りわずか|絶対|必ず|効果|口コミ|レビュー|買ってよかった|使ってみた|愛用)/i;
   const features = [];
   caption.split(/[\n。！？!?；;]+/).map((part) => part.trim()).filter(Boolean).forEach((part) => {
@@ -1802,7 +1804,13 @@ function extractVerifiedRoomFeatures(product = {}) {
   const titleFeaturePattern = /(?:USB[- ]?C(?:入出力)?対応|Bluetooth対応|A4(?:サイズ)?対応|A4収納|PC収納|UVカット|防水|撥水|丸洗い|洗える|折りたたみ|軽量|大容量|個包装|冷凍|国産|日本製|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点)(?:入り|セット|対応)?)/gi;
   let titleMatch;
   while ((titleMatch = titleFeaturePattern.exec(title)) !== null) features.push(titleMatch[0].trim());
-  return [...new Set(features)].filter((feature) => feature && !unsafeFeature.test(feature)).slice(0, 3);
+  const uniqueFeatures = [];
+  features.filter((feature) => feature && !unsafeFeature.test(feature)).forEach((feature) => {
+    const overlapIndex = uniqueFeatures.findIndex((existing) => existing.includes(feature) || feature.includes(existing));
+    if (overlapIndex < 0) uniqueFeatures.push(feature);
+    else if (feature.length > uniqueFeatures[overlapIndex].length) uniqueFeatures[overlapIndex] = feature;
+  });
+  return uniqueFeatures.slice(0, 3);
 }
 
 function cleanRoomProductTitle(product = {}) {
@@ -1820,14 +1828,41 @@ function buildRoomIntroVariants(product = {}) {
   if (!title) return { ok: false, error: "商品名を確認できないため、紹介文を作成できません。商品名を確認してください。", variants: [] };
   const features = extractVerifiedRoomFeatures(product);
   if (!features.length) return { ok: false, error: "確認済みの商品特徴がありません。商品説明や商品ページから、対応規格・素材・容量などの商品固有情報を1つ確認してください。", variants: [] };
-  const feature = features[0].replace(/[。.!！?？]+$/g, "");
-  const category = cleanRoomCopySource(product.categoryName || "") || "このカテゴリーの商品";
+  const category = cleanRoomCopySource(product.categoryName || "");
+  const titleFeatureTerms = ["USB-C対応", "Bluetooth対応", "A4対応", "A4収納", "PC収納", "個包装", "北海道産", "国産", "日本製", "撥水", "防水", "UVカット", "軽量", "大容量", "保温", "保冷"];
+  const removableTitleFeatures = [...titleFeatureTerms.filter((term) => title.includes(term) && features.some((value) => value.includes(term))),
+    ...features.filter((value) => /\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点)(?:入り|セット|対応)?/i.test(value) && title.includes(value))];
+  const copyTitle = removableTitleFeatures.reduce((value, term) => value.split(term).join(" ").replace(/\s{2,}/g, " ").trim(), title) || title;
+  const productText = `${title} ${features.join(" ")} ${cleanRoomCopySource(product.itemCaption || product.description || "")}`;
+  const genreSource = `${category} ${productText}`;
+  const genre = /(抱っこ|ベビー|新生児|赤ちゃん|マタニティ)/.test(genreSource) ? "baby"
+    : /(食品|食材|グルメ|菓子|スイーツ|米|肉|魚|海鮮|飲料|フード)/.test(genreSource) ? "food"
+      : /(家電|電化製品|加湿器|掃除機|炊飯器|トースター|電子レンジ|照明|ライト|モバイルバッテリー|充電器)/.test(genreSource) ? "appliance"
+        : /(ファッション|衣類|アパレル|服|シューズ|スニーカー|靴|バッグ|アウター|インナー|ウェア)/.test(genreSource) ? "fashion"
+          : /(日用品|生活雑貨|洗剤|タオル|収納|キッチン用品|掃除用品|消耗品)/.test(genreSource) ? "daily"
+            : "general";
+  const genreCopy = {
+    baby: { discovery: "ベビー用品選び、サイズや素材も見ておきたい。", audience: "ベビー用品を準備中の方", concern: "ベビー用品はサイズや素材も比べたいところ", short: "小さな仕様も、選ぶ手がかりに。" },
+    food: { discovery: "食品選び、産地や保存方法もチェック。", audience: "産地や保存方法も見て選びたい方", concern: "食べものを選ぶとき、産地や保存方法も気になりますよね", short: "食卓に迎える前に、仕様もチェック。" },
+    appliance: { discovery: "家電選び、使う場面に合う仕様かも確認。", audience: "家電の仕様を見比べている方", concern: "家電は置き場所や使い方に合うか迷うことも", short: "選ぶ前に、仕様をひとつ確認。" },
+    fashion: { discovery: "服や小物、加工や素材にも注目。", audience: "服や小物を探している方", concern: "服や小物は、見た目だけでなく仕様も比べたいですよね", short: "選ぶポイントは、ここにも。" },
+    daily: { discovery: "日用品は、素材や手入れ方法もチェック。", audience: "日用品の素材や仕様を見直したい方", concern: "毎日使うものは、素材や扱い方も気になるところ", short: "毎日のものこそ、仕様を確認。" },
+    general: { discovery: category ? `${category}選び、仕様から見てみる。` : "商品選び、仕様から見てみる。", audience: category ? `${category}を探している方` : "仕様を見て選びたい方", concern: category ? `${category}選び、どこを比べるか迷うことも` : "商品選びでは、仕様の違いも気になるところ", short: "選ぶポイントを、ひとつ確認。" }
+  }[genre];
+  const featureSentence = (value, includeSubject = true) => {
+    const property = value.match(/^(.+?)は(.+)$/);
+    return property ? `${includeSubject ? `${copyTitle}の` : ""}${property[1]}は${property[2]}。` : `${includeSubject ? `${copyTitle}は` : ""}${value}。`;
+  };
+  const featureSentences = features.map((value, index) => featureSentence(value, index === 0));
+  const audience = genreCopy.audience;
+  const benefitFeature = features.find((value) => /(洗える|丸洗い|洗濯機|対応|収納|付属|個包装|冷凍|折りたたみ|撥水|防水|UVカット|軽量|保温|保冷)/i.test(value)) || features[0];
+  const benefitLabel = benefitFeature.replace(/[。.!！?？]+$/g, "");
   const base = [
-    { ...ROOM_COPY_HOOKS[0], text: `商品情報で見つけたポイントは「${feature}」。${title}の特徴として確認できます。` },
-    { ...ROOM_COPY_HOOKS[1], text: `${category}を探している方へ。${title}は「${feature}」が特徴です。` },
-    { ...ROOM_COPY_HOOKS[2], text: `${category}選びで仕様に迷ったら、「${feature}」も確認ポイントに。${title}に記載された特徴です。` },
-    { ...ROOM_COPY_HOOKS[3], text: `「${feature}」が特徴の${title}。${category}を選ぶときの候補のひとつです。` },
-    { ...ROOM_COPY_HOOKS[4], text: `「${feature}」が特徴の${title}。` }
+    { ...ROOM_COPY_HOOKS[0], text: `${genreCopy.discovery}${featureSentences.join("")}` },
+    { ...ROOM_COPY_HOOKS[1], text: `${audience}へ。${featureSentences.join("")}` },
+    { ...ROOM_COPY_HOOKS[2], text: `${genreCopy.concern}。${featureSentences.join("")}` },
+    { ...ROOM_COPY_HOOKS[3], text: `「${benefitLabel}」を重視する方は要チェック。${copyTitle}の仕様を確認してみてください。${features.filter((value) => value !== benefitFeature).map((value) => featureSentence(value, false)).join("")}` },
+    { ...ROOM_COPY_HOOKS[4], text: `${genreCopy.short}${featureSentences[0]}` }
   ].map((variant) => ({ ...variant, text: finalizeRoomIntro(product, variant.text) }));
   return { ok: true, title, features, variants: base };
 }
@@ -2592,7 +2627,7 @@ function renderQueueProgress() {
     return;
   }
   if (!active) {
-    progress.textContent = `投稿待ち ${queue.filter((item) => item.postStatus === "投稿待ち").length}件。連続処理開始で先頭の商品を準備します。`;
+    progress.textContent = `投稿待ち ${queue.filter((item) => item.postStatus === "投稿待ち").length}件。確認モードで先頭の商品を準備できます。`;
     return;
   }
   const position = roomCandidates.findIndex((item) => item.id === active.id) + 1;
@@ -3011,7 +3046,8 @@ function candidateCard(item) {
         ${item.introText ? `<details class="candidate-intro"><summary>紹介文を確認</summary><p>${escapeHtml(item.introText)}</p><p>${escapeHtml(item.hashTags || "")}</p></details>` : ""}
         ${item.introPrompt ? `<details class="candidate-intro"><summary>Codex投稿指示文を確認</summary><textarea readonly>${escapeHtml(item.introPrompt)}</textarea><button class="secondary-button" type="button" onclick="copyCandidatePrompt('${item.id}')">指示文をコピー</button></details>` : ""}
         <div class="record-actions candidate-primary-actions">
-          <button class="primary-button codex-post-button" type="button" onclick="startCodexPost('${item.id}')">Codex投稿開始</button>
+          <button class="primary-button codex-post-button" type="button" onclick="startCodexPost('${item.id}', 'confirmation')">確認モードでROOM画面を準備</button>
+          <button class="secondary-button" type="button" onclick="startCodexPost('${item.id}', 'continuous')">連続実投稿用の指示を作成</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '要手動確認')">要手動確認にする</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
@@ -4020,11 +4056,11 @@ function getProcessingBlocker(excludeId = "") {
   return data.candidates.filter(isRoomCandidate).find((candidate) => candidate.id !== excludeId && ["Codex処理中", "確認待ち", "要手動確認"].includes(candidate.postStatus));
 }
 
-function startSequentialProcessing() {
+function startSequentialProcessing(mode = "confirmation") {
   const message = $("#codex-result-message");
   const blocker = getProcessingBlocker();
   if (blocker) {
-    const text = `別の商品「${blocker.title}」が${blocker.postStatus}です。ROOMの完了後に投稿済みへ変更してください。`;
+    const text = `別の商品「${blocker.title}」が${blocker.postStatus}です。現在のROOM画面・候補状態を確認してから次を開始してください。`;
     if (message) message.textContent = text;
     toast(text);
     return;
@@ -4036,7 +4072,7 @@ function startSequentialProcessing() {
     toast(text);
     return;
   }
-  startCodexPost(next.id);
+  startCodexPost(next.id, mode === "continuous" ? "continuous" : "confirmation");
 }
 
 function startNextCandidate(id) {
@@ -4451,13 +4487,13 @@ function generateCandidatePrompt(id) {
   toast("紹介文プロンプトを作成しました。");
 }
 
-function buildCodexPostInstructions(candidate) {
+function buildCodexPostInstructions(candidate, { mode = "confirmation" } = {}) {
   ensureOriginalPhotoContent(candidate);
   const product = candidate.product || candidate;
   const itemUrl = candidate.itemUrl || product.itemUrl || product.affiliateUrl || "";
   const context = buildGenerationContext(product, "不明");
   return [
-    "楽天ROOM投稿準備をしてください。",
+    `楽天ROOM投稿${mode === "continuous" ? "（連続実投稿）" : "確認モード"}をしてください。`,
     "",
     "【商品情報】",
     `商品名：${candidate.title || product.itemName || ""}`,
@@ -4482,7 +4518,7 @@ function buildCodexPostInstructions(candidate) {
     "",
     "【手順】",
     "1. 商品情報を確認する",
-    "2. 商品情報だけを使い、対象者・悩みを冒頭40〜50文字に含め、悩み→特徴・メリット→利用場面→選ぶ理由→必要ならセール情報→自然なCTAの順で楽天ROOM向け紹介文とハッシュタグを作成する",
+    "2. 保存済み紹介文・タグがあればそのまま使う。文章が必要な場合は商品情報だけから、次の5つのフック型（驚き・発見／対象者への呼びかけ／悩みへの共感／確認済みメリット／短い一言）のうち商品に合うものを選ぶ。冒頭フック→商品の魅力→確認済み特徴→自然な締めの順で、冒頭にスペックを並べず自然な日本語にする。毎回同じ型に固定しない",
     `3. #codex-result-inputでitemCode「${candidate.itemCode || product.itemCode || ""}」に一致する商品カードを1件だけ特定する`,
     `4. itemUrl「${itemUrl}」も照合し、商品名だけで判定しない`,
     "5. 作成した紹介文・ハッシュタグをアプリへ先に保存し、結果を反映する",
@@ -4496,7 +4532,7 @@ function buildCodexPostInstructions(candidate) {
     "12. 開いた楽天商品ページの商品名・ショップ名などが対象商品と一致することを確認する。不一致ならROOM操作へ進まず停止する",
     "13. 商品ページ上の「ROOMに投稿」リンクを通常のChrome操作で認識する（aria-label、リンク文字、role=link、アクセシビリティ上の操作可能リンクの順）",
     "14. 認識した実在の「ROOMに投稿」リンクを直接クリックする。JavaScript実行は必須にせず、商品番号・itemCode・商品URLからROOM URLを推測生成しない",
-    "14a. クリック後にroom.rakuten.co.jpのROOM投稿画面へ遷移したか確認する。遷移しなければ同じ商品ページで実在する「ROOMに投稿」要素を再取得し、短く待ってから最大2回まで通常クリックを再試行する",
+    "14a. クリック後に画面遷移を待ち、現在の画面状態を確認する。遷移していない場合だけ実在する「ROOMに投稿」要素を再取得し、短く待って1回クリックしてから再確認する。合計最大3回まで。連打せず、ROOM画面への遷移を確認したら追加クリックしない",
     "14b. 再試行でも遷移しない場合はリンクやURLを推測せず、『ROOM投稿画面へ遷移できませんでした。商品ページの「ROOMに投稿」リンクを手動で確認してください。』と表示し、アプリの投稿状態を「要手動確認」へ変更して停止する",
     "14c. 利用者が手動でROOM投稿画面を開いた後は、対象商品一致、#collect-content、保存済み文章、完了ボタンを確認してから処理を再開する",
     "15. 既存のGoogle Chrome楽天ROOM固定タブを優先して再利用する。商品ページ上のリンクが同一タブ遷移しかできない場合は、そのタブ内でクリックしてよい。ROOM用の新規タブは作成しない",
@@ -4505,26 +4541,33 @@ function buildCodexPostInstructions(candidate) {
     "18. 保存済みの紹介文とハッシュタグを#collect-contentへ入力する",
     "19. 商品、文章、ハッシュタグ、500文字以内を確認する",
     "20. 対象商品、#collect-content、保存済み紹介文、保存済みハッシュタグ、500文字以内、エラーなしを最終確認する",
-    ...(isOriginalPhotoCandidate(candidate)
+    ...(mode === "confirmation"
+      ? [
+        "21. これは確認モード。ROOM投稿画面と入力済みの紹介文・タグを表示したまま、ユーザーが確認できる状態で停止する",
+        "22. 「完了」はクリックしない。投稿画面を閉じない。ブラウザを終了しない。ページを再読み込みしない。前の画面へ戻らない。別ページへ移動しない。次の商品へ進まない。投稿済み記録を作らない",
+        "23. 画面をこの実行環境で維持できない場合、回避操作をせず、ブラウザー制約を報告して、ROOM画面を手動で開いたままにする案内をする"
+      ]
+      : isOriginalPhotoCandidate(candidate)
       ? [
         "21. ROOM投稿編集画面を開いた状態のまま維持し、前のページへ戻らず、別ページへ移動せず、タブや画面を閉じない",
         "22. 「オリジナル写真追加・編集」は操作せず、「完了」も押さず、写真追加前の画面を利用者へ引き渡す",
         "23. 『📷 オリジナル写真を追加してください。写真を確認後、ROOMの「完了」を手動で押してください。』と表示して停止する"
       ]
       : [
-        "21. 操作可能な「完了」ボタンを確認する。投稿開始の指示には、商品確認からROOMの「完了」クリックまでがすでに含まれている。追加の許可、承認、質問、返信要求は行わない。『投稿準備が完了しました。60秒後にROOMの「完了」ボタンを押します。』と表示し、その時点から60秒待機する",
-        "21a. 60秒待機中から完了クリックまでROOM投稿編集画面を開いたまま維持し、アプリへ戻らず、別ページへ移動せず、戻る操作・タブ切替・タブ閉鎖・ブラウザ操作終了を行わない",
-        "22. 待機中に利用者がROOMの「完了」を押して投稿完了したことを確認できた場合は、Codexは完了を追加クリックせず、投稿完了確認へ進む",
-        "23. 利用者が先に完了していない場合、60秒後にROOM投稿画面、対象商品、#collect-content、紹介文・ハッシュタグ、500文字以内、操作可能な完了ボタン、エラーなしを画面上だけで再確認する。この再確認は利用者への確認・承認要求ではない",
-        "24. 画面上の再確認がすべて正常な場合は追加質問をせず、そのまま実在するROOMの「完了」ボタンを通常のGoogle Chrome操作で1回クリックする。JavaScript疑似クリック、URL推測、投稿URL生成は使用しない",
-        "25. 60秒後の再確認で異常がある場合は完了をクリックせず停止し、ROOM投稿完了確認前に投稿済み記録へ進まない"
+        "21. この連続実投稿モードは、現在のユーザー依頼にROOM外部公開の明示的な許可がある場合に限り完了操作へ進む。モード選択や保存済みプロンプトだけを投稿許可と解釈しない。明示許可がない場合はROOM画面で入力後に停止し、完了を押さない",
+        "22. 明示許可がある場合だけ操作可能な「完了」ボタンを確認する。投稿開始の指示には、商品確認からROOMの「完了」クリックまでが含まれる。追加の許可、承認、質問、返信要求は行わない（この手順は現在の依頼で明示許可が確認できる場合だけ適用）。『投稿準備が完了しました。60秒後にROOMの「完了」ボタンを押します。』と表示し、その時点から60秒待機する",
+        "22a. 60秒待機中から完了クリックまでROOM投稿編集画面を開いたまま維持し、アプリへ戻らず、別ページへ移動せず、戻る操作・タブ切替・タブ閉鎖・ブラウザ操作終了を行わない",
+        "23. 利用者が先に完了した場合は追加クリックせず、ROOMの投稿完了を確認する",
+        "24. 利用者が先に完了していない場合、60秒後にROOM投稿画面、対象商品、#collect-content、紹介文・ハッシュタグ、500文字以内、操作可能な完了ボタン、エラーなしを画面上だけで再確認する。この再確認は利用者への確認・承認要求ではない",
+        "25. 画面上の再確認がすべて正常な場合は追加質問なしで、そのまま実在するROOMの「完了」ボタンを通常のGoogle Chrome操作で1回クリックする。JavaScript疑似クリック、URL推測、投稿URL生成は使用しない",
+        "26. 60秒後の再確認で異常がある場合はクリックせず停止し、ROOM投稿完了確認前に投稿済み記録へ進まない"
       ]),
     "",
     "【紹介文条件】",
-    "楽天ROOM向け、親しみやすく、確認できる商品情報だけを使用する。100〜180文字程度、絵文字少なめ、ハッシュタグ5〜8個、全体500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項がある場合は紹介文へ反映する。確認済みのクーポン最終有効日は、紹介文の冒頭付近へ優先して自然に入力する。商品タイトルからの検出だけでは確認済みにせず、確認前は断定しない。",
+    "楽天ROOM向けに親しみやすく、確認済みの商品情報だけを使用する。冒頭は商品に合う具体的なフックとし、商品名の長い繰り返し・SEO語の羅列・冒頭の仕様羅列・機械的な定型文を避ける。通常紹介文は100〜180文字程度、絵文字は適度、ハッシュタグ5〜8個、全体500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項だけを反映する。楽天イベントは開催状況・開催期間・当該商品の対象条件が確認できた場合だけ自然に触れる。開始前・開催中・終了間近を日付から推測せず、確認できない場合は通常の商品紹介にする。商品タイトルからの検出だけで割引を現在有効と判断しない。",
     "割引確認状態がconfirmedで確認済みヘッダーがある場合だけ、50%OFFや半額などの確認済み表現を目立つ位置へ使用してよい。candidateやunknownは割引候補として扱い、50%OFFや半額と断定しない。警告対象と選定理由は内部情報であり、未確認情報を商品事実として文章化しない。",
     "未使用または状態不明の商品は、使用体験を書かず『便利そう』『候補に入れてもよさそう』などの表現にする。レビューは取得できた情報だけを使う。",
-    "生成後に、冒頭の具体性、商品固有性、使用状況、効果・レビュー・価格・クーポン・期限の事実性、煽り表現を自己点検し、条件を満たさなければ書き直す。",
+    "生成後に、フックの自然さ、冒頭の具体性、商品固有性、使用状況、効果・レビュー・価格・クーポン・期限・イベント開催状況と対象条件の事実性、過度な煽りを自己点検し、条件を満たさなければ書き直す。未確認の割引・セール・イベントを理由に文章全体を止めず、その記述だけを省く。",
     "出力は『紹介文:』『短い紹介文:』『ハッシュタグ:』『セール情報:（ある場合のみ）』『状態:確認待ち』の見出しを使う。",
     "「絶対」「必ず」「最安」「No.1」など根拠のない断定や効果保証は禁止。",
     "Safari、Codex内蔵ブラウザ、agent-browser、Playwrightは使用しない。Google Chromeだけを使用する。ROOMの自動いいね、フォロー、コメントは実行しない。",
@@ -4541,12 +4584,12 @@ function buildCodexPostInstructions(candidate) {
   ].join("\n");
 }
 
-async function startCodexPost(id) {
+async function startCodexPost(id, mode = "confirmation") {
   const candidate = data.candidates.find((item) => item.id === id);
   if (!candidate) return;
   const active = getProcessingBlocker(id);
   if (active) {
-    toast(`別の商品「${active.title}」が${active.postStatus}です。先にROOM投稿を完了して投稿済みにしてください。`);
+    toast(`別の商品「${active.title}」が${active.postStatus}です。先に現在のROOM画面と候補状態を確認してください。`);
     return;
   }
   if (["Codex処理中", "確認待ち", "投稿済み", "スキップ"].includes(candidate.postStatus)) {
@@ -4587,7 +4630,8 @@ async function startCodexPost(id) {
     return;
   }
   saveData();
-  const instructions = buildCodexPostInstructions(candidate);
+  const postMode = mode === "continuous" ? "continuous" : "confirmation";
+  const instructions = buildCodexPostInstructions(candidate, { mode: postMode });
   data.pendingRoomPost = {
     candidateId: candidate.id,
     itemCode,
@@ -4597,12 +4641,14 @@ async function startCodexPost(id) {
     startedAt: new Date().toISOString()
   };
   candidate.introPrompt = instructions;
-  candidate.postStatus = "Codex処理中";
+  candidate.postStatus = postMode === "confirmation" ? "確認待ち" : "Codex処理中";
   candidate.status = "投稿待ち";
   saveData();
   const copied = await copyText(instructions, { silent: true });
   if (copied) {
-    toast("Codex投稿指示文をコピーしました。状態を「Codex処理中」にしました。");
+    toast(postMode === "confirmation"
+      ? "確認モードの指示文をコピーしました。ROOM画面入力後は完了前で停止します。"
+      : "連続実投稿用の指示文をコピーしました。ユーザーの明示許可がある場合だけ完了へ進めます。");
   } else {
     toast("コピーに失敗しました。カード内の指示文を手動でコピーしてください。");
     openCandidateForPaste(id);
@@ -4666,10 +4712,8 @@ function prepareCandidatePost(id) {
         "8. これは正常な人間操作待ちであり、Codexは「完了」も写真追加・編集もクリックしない"
       ]
       : [
-        "6. 投稿開始の指示にはROOMの「完了」クリックまでが含まれており、すでに承認済みとして扱う。追加の許可、承認、質問、返信要求は行わず、『投稿準備が完了しました。60秒後にROOMの「完了」ボタンを押します。』と表示して60秒待機する",
-        "6a. 60秒待機中から完了クリックまでROOM投稿編集画面を開いたまま維持し、アプリへ戻らず、別ページへ移動せず、戻る操作・タブ切替・タブ閉鎖・ブラウザ操作終了を行わない",
-        "7. 利用者が先に完了した場合は追加クリックせず、先に完了していない場合だけ60秒後にROOM画面の状態を再確認する。この再確認は利用者への確認ではなく、正常なら追加質問なしで実在する完了ボタンを通常操作で1回クリックする",
-        "8. 再確認で異常がある場合はクリックせず停止し、投稿完了確認前に投稿済み記録を行わない"
+        "6. これは確認モード。ROOM投稿画面と入力済みの紹介文・タグをユーザーが確認できる状態で停止する",
+        "7. 「完了」は押さない。投稿画面を閉じない。ブラウザを終了しない。再読み込み・戻る・別ページ移動・次商品への移動・投稿済み記録を行わない"
       ])
   ].join("\n");
   candidate.introText = candidate.introText.trim();
