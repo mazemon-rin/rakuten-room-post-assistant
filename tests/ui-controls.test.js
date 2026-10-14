@@ -11,7 +11,9 @@ if (!html.includes('id="clearSearchConditions"') || !html.includes('id="clearSea
 if (!html.includes('id="unifiedSearchMode"') || !html.includes('value="high_affiliate_rate">高料率検索')) throw new Error("high affiliate-rate search mode is missing");
 for (const rate of [5, 10, 15, 20]) if (!html.includes(`value="${rate}">${rate}%以上`)) throw new Error(`affiliate-rate threshold ${rate}% is missing`);
 if (!html.includes('API参考料率') || !script.includes('searchHighAffiliateRateProducts') || !script.includes('updateAffiliateRateSearchVisibility')) throw new Error("high affiliate-rate UI flow is missing");
-if (!html.includes('id="apiRateDiagnostic"') || !html.includes('id="runApiRateDiagnostic"') || !script.includes('runApiRateDiagnostic')) throw new Error("developer API rate diagnostic UI flow is missing");
+if (!html.includes('id="apiRateDiagnostic"') || !script.includes('runApiRateDiagnostic')) throw new Error("developer API rate diagnostic UI flow is missing");
+for (const condition of ["A", "B", "C", "D"]) if (!html.includes(`data-api-rate-condition="${condition}"`)) throw new Error(`API rate diagnostic condition ${condition} is missing`);
+if (!html.includes("対象itemCodeを照合します") || !script.includes("対象商品未発見")) throw new Error("diagnostic must distinguish a successful search from target item discovery");
 if (!script.includes('エラーコード：${result.errorCode || "詳細不明"}')) throw new Error("diagnostic UI must show only allowlisted error codes or an unknown-detail label");
 if (!script.includes('applyHighAffiliateRateParams(params, minimumRate)') || !script.includes('buildHighRateCandidateProduct(product)')) throw new Error("high affiliate-rate API filtering or candidate minimization is missing");
 if (!script.includes('affiliateRateSearchResults = [...products]') || !script.includes('processHighRateSearchResponses') || !script.includes('quickSaveAffiliateRateByIndex') || !script.includes('openAffiliateRateDetailByIndex')) throw new Error("high affiliate-rate results must use their own filtered processing and selection state");

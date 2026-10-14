@@ -569,7 +569,7 @@ function bindForms() {
   on("#reset-room-candidates", "click", resetRoomCandidates);
   $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
   on("#productSearchForm", "submit", (event) => { event.preventDefault(); searchUnifiedProducts(); });
-  on("#runApiRateDiagnostic", "click", runApiRateDiagnostic);
+  $$("[data-api-rate-condition]").forEach((button) => button.addEventListener("click", () => runApiRateDiagnostic(button.dataset.apiRateCondition, button)));
   on("#unifiedSearchMode", "change", () => {
     updateAffiliateRateSearchVisibility();
     const resetState = window.AffiliateRateSearch.resetSearchModeState($("#couponSearchResults"), $("#couponSearchMessage"));
@@ -781,44 +781,52 @@ async function requestRakutenItemSearch(keyword, options = {}) {
 
 window.RoomRakutenApi = { requestItemSearch: requestRakutenItemSearch, hasCredentials: hasRakutenCredentials };
 
-async function runApiRateDiagnostic() {
-  const button = $("#runApiRateDiagnostic");
+async function runApiRateDiagnostic(conditionId, button) {
   const output = $("#apiRateDiagnosticResults");
   if (!output || !button) return;
   if (!hasRakutenCredentials()) {
-    output.textContent = "楽天API認証情報が未設定のため診断できません。";
+    const notice = document.createElement("p");
+    notice.textContent = "楽天API認証情報が未設定のため診断できません。";
+    output.prepend(notice);
     return;
   }
   button.disabled = true;
-  output.textContent = "診断中です。2条件を順に照会します…";
+  const progress = document.createElement("p");
+  progress.textContent = `条件${conditionId}を診断中です…`;
+  output.prepend(progress);
   try {
-    const results = await window.AffiliateRateDiagnostic.runDiagnostic({
+    const result = await window.AffiliateRateDiagnostic.runDiagnosticCondition({
       applicationId: data.settings.applicationId,
       accessKey: data.settings.accessKey,
+      conditionId,
       fetchImpl: window.fetch.bind(window)
     });
-    output.replaceChildren(...results.map((result) => {
-      const section = document.createElement("section");
-      const title = document.createElement("h4");
-      title.textContent = result.condition;
-      const details = document.createElement("p");
-      const state = result.state === "api_error" ? `APIエラー${result.httpStatus ? `（HTTP ${result.httpStatus}）` : "（HTTP status未取得）"} / エラーコード：${result.errorCode || "詳細不明"}${result.errorType ? ` / ${result.errorType}` : ""}`
-        : result.state === "zero_results" ? "正常応答・0件" : "正常応答";
-      details.textContent = [
-        state,
-        `HTTPステータス：${result.httpStatus == null ? "未取得" : result.httpStatus}`,
-        `API count：${result.apiCount == null ? "未取得" : String(result.apiCount)}`,
-        `取得件数：${result.fetchedCount}`,
-        `対象商品の有無：${result.targetFound ? "あり" : "なし"}`,
-        `affiliateRate：${result.targetFound ? String(result.affiliateRate) : "未取得"}`,
-        `affiliateRateの型：${result.affiliateRateType}`
-      ].join(" / ");
-      section.append(title, details);
-      return section;
-    }));
+    const section = document.createElement("section");
+    section.dataset.diagnosticResult = conditionId;
+    const title = document.createElement("h4");
+    title.textContent = result.condition;
+    const details = document.createElement("p");
+    const state = result.state === "api_error" ? `APIエラー${result.httpStatus ? `（HTTP ${result.httpStatus}）` : "（HTTP status未取得）"} / エラーコード：${result.errorCode || "詳細不明"}${result.errorType ? ` / ${result.errorType}` : ""}`
+      : result.state === "zero_results" ? "API正常応答・検索結果0件"
+        : result.targetFound ? "API正常応答・対象商品発見" : "API正常応答・対象商品未発見";
+    details.textContent = [
+      state,
+      `HTTPステータス：${result.httpStatus == null ? "未取得" : result.httpStatus}`,
+      `API count：${result.apiCount == null ? "未取得" : String(result.apiCount)}`,
+      `取得件数：${result.fetchedCount}`,
+      `対象商品：${result.targetFound ? "発見" : "対象商品未発見"}`,
+      `対象商品のaffiliateRate：${result.targetFound && result.affiliateRate != null ? String(result.affiliateRate) : "未取得"}`,
+      `affiliateRateの型：${result.affiliateRateType}`
+    ].join(" / ");
+    section.append(title, details);
+    output.querySelectorAll(`[data-diagnostic-result="${conditionId}"]`).forEach((previous) => previous.remove());
+    output.prepend(section);
   } catch (error) {
-    output.textContent = error?.message === "楽天API認証情報が未設定です。" ? error.message : "診断を開始できませんでした。詳細情報は安全のため表示していません。";
+    const notice = document.createElement("p");
+    notice.textContent = error?.message === "楽天API認証情報が未設定です。" ? error.message : "診断を開始できませんでした。詳細情報は安全のため表示していません。";
+    output.prepend(notice);
   } finally {
+    progress.remove();
     button.disabled = false;
   }
 }

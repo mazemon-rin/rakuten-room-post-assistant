@@ -2,6 +2,15 @@
   "use strict";
 
   const ITEM_CODE = "sunshine-osaka:kuro50-siso50";
+  const CONDITIONS = Object.freeze([
+    Object.freeze({ id: "A", label: "A：keyword=しそ餃子 / 料率指定なし", searchType: "keyword", keyword: "しそ餃子", minAffiliateRate: null, hits: 30 }),
+    Object.freeze({ id: "B", label: "B：対象itemCode / 料率指定なし", searchType: "itemCode", keyword: "", minAffiliateRate: null, hits: 1 }),
+    Object.freeze({ id: "C", label: "C：keyword=しそ餃子 / minAffiliateRate=5", searchType: "keyword", keyword: "しそ餃子", minAffiliateRate: 5, hits: 30 }),
+    Object.freeze({ id: "D", label: "D：対象itemCode / minAffiliateRate=5", searchType: "itemCode", keyword: "", minAffiliateRate: 5, hits: 1 })
+  ]);
+  const MIN_REQUEST_INTERVAL_MS = 1200;
+  let requestQueue = Promise.resolve();
+  let lastRequestStartedAt = 0;
   // 楽天公式ドキュメントに掲載されているコードだけを診断表示に使います。
   const SAFE_API_ERROR_CODES = new Set([
     "wrong_parameter",
@@ -40,41 +49,49 @@
     };
   }
 
-  function buildDiagnosticParams(applicationId, accessKey, minAffiliateRate) {
+  function buildDiagnosticParams(applicationId, accessKey, conditionId) {
+    const condition = CONDITIONS.find((item) => item.id === conditionId);
+    if (!condition) throw new Error("診断条件が不正です。");
     const params = new URLSearchParams({
       format: "json",
       applicationId,
       accessKey,
-      itemCode: ITEM_CODE,
-      hits: "1"
+      hits: String(condition.hits)
     });
-    if (minAffiliateRate != null) params.set("minAffiliateRate", String(minAffiliateRate));
+    if (condition.searchType === "keyword") params.set("keyword", condition.keyword);
+    else params.set("itemCode", ITEM_CODE);
+    if (condition.minAffiliateRate != null) params.set("minAffiliateRate", String(condition.minAffiliateRate));
     return params;
   }
 
-  async function runDiagnostic({ applicationId, accessKey, fetchImpl, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+  async function runDiagnosticCondition({ applicationId, accessKey, conditionId, fetchImpl, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = () => Date.now() }) {
     if (!applicationId || !accessKey) throw new Error("楽天API認証情報が未設定です。");
     if (typeof fetchImpl !== "function") throw new Error("API通信機能を利用できません。");
-
-    const results = [];
-    for (const minimum of [null, 5]) {
-      if (results.length) await wait(1200);
+    const condition = CONDITIONS.find((item) => item.id === conditionId);
+    if (!condition) throw new Error("診断条件が不正です。");
+    const execute = async () => {
+      while (lastRequestStartedAt && now() - lastRequestStartedAt < MIN_REQUEST_INTERVAL_MS) {
+        await wait(MIN_REQUEST_INTERVAL_MS - (now() - lastRequestStartedAt));
+      }
+      lastRequestStartedAt = now();
       try {
-        const params = buildDiagnosticParams(applicationId, accessKey, minimum);
+        const params = buildDiagnosticParams(applicationId, accessKey, conditionId);
         const response = await fetchImpl(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`, {
           method: "GET",
           headers: { Accept: "application/json" }
         });
         let payload = {};
-        try { payload = await response.json(); } catch { /* HTTP statusだけを表示し、生レスポンスは露出しない */ }
-        results.push({ condition: minimum == null ? "minAffiliateRate指定なし" : "minAffiliateRate=5", ...summarizeResponse(response.status, payload) });
+        try { payload = await response.json(); } catch { /* HTTP statusだけを返し、生レスポンスは露出しない */ }
+        return { conditionId, condition: condition.label, ...summarizeResponse(response.status, payload) };
       } catch (error) {
         // Fetch例外の文面にはURL等が含まれる可能性があるため、詳細は表示・記録しない。
-        results.push({ condition: minimum == null ? "minAffiliateRate指定なし" : "minAffiliateRate=5", state: "api_error", httpStatus: null, apiCount: null, fetchedCount: 0, targetFound: false, affiliateRate: null, affiliateRateType: "unavailable", errorType: error?.name === "TypeError" ? "network_error" : "request_error" });
+        return { conditionId, condition: condition.label, state: "api_error", httpStatus: null, apiCount: null, fetchedCount: 0, targetFound: false, affiliateRate: null, affiliateRateType: "unavailable", errorCode: null, errorType: error?.name === "TypeError" ? "network_error" : "request_error" };
       }
-    }
-    return results;
+    };
+    const pending = requestQueue.then(execute, execute);
+    requestQueue = pending.then(() => undefined, () => undefined);
+    return pending;
   }
 
-  root.AffiliateRateDiagnostic = Object.freeze({ ITEM_CODE, summarizeResponse, buildDiagnosticParams, getSafeApiErrorCode, runDiagnostic });
+  root.AffiliateRateDiagnostic = Object.freeze({ ITEM_CODE, CONDITIONS, summarizeResponse, buildDiagnosticParams, getSafeApiErrorCode, runDiagnosticCondition });
 })(typeof window !== "undefined" ? window : globalThis);
