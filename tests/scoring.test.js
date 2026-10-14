@@ -853,6 +853,15 @@ assert(babyVariants.ok && babyVariants.variants.length === 5, "Room copy hooks: 
 assert(babyVariants.variants[0].text.startsWith("ベビー用品選び、サイズや素材も見ておきたい。") && babyVariants.variants[0].text.includes("41×65cm") && babyVariants.variants[0].text.includes("綿100%"), "Room copy hooks: discovery hook reframes verified baby-product details");
 assert(babyVariants.variants[3].text.startsWith("「洗濯ネット使用で洗濯機洗い可能」") && babyVariants.variants[4].text.startsWith("小さな仕様も、選ぶ手がかりに。"), "Room copy hooks: benefit and short hooks lead with distinct, verified angles");
 assert(babyVariants.variants.every((variant) => !variant.text.includes("!-- / イベント") && !/(本日限定|今なら\d+%OFF|大人気|最安)/.test(variant.text)), "Room copy safety: HTML comments, unverified sales, and unsupported claims do not leak into variants");
+const longBabyTitle = {
+  itemCode: "hook-test:long-baby-title",
+  itemName: "【最大20%OFFクーポン】 抱っこ布団 メッシュマット 綿100%カバー 通気性 洗える ベビー 新生児 出産祝い ギフト",
+  itemCaption: "サイズ・素材 サイズ：41×65cm 素材：カバー 綿100% お取り扱い 洗濯機で洗濯可（ネット使用） ご使用上の注意 ・必ず保護者のもとでご使用ください。",
+  categoryName: "ベビー用品"
+};
+const longBabyResult = scoring.buildRoomIntroVariants(longBabyTitle);
+assert(longBabyResult.ok && longBabyResult.features.includes("サイズは41×65cm") && longBabyResult.features.includes("カバーは綿100%") && longBabyResult.features.includes("洗濯機で洗濯可（ネット使用）"), "Room copy live-format regression: verified short facts survive a long caution-filled caption");
+assert(longBabyResult.variants.length === 5 && longBabyResult.variants.every((variant) => variant.text.length < 180 && variant.text.includes("抱っこ布団") && !variant.text.includes("出産祝い ギフト") && !/20%OFF|最大20/.test(variant.text)), "Room copy live-format regression: five concise hooks avoid long SEO titles and unconfirmed discounts");
 const genreCopyFixtures = [
   { key: "appliance", product: { itemCode: "hook-test:appliance", itemName: "USB-C対応 卓上加湿器", itemCaption: "USB-C対応。タンク容量は300ml。", categoryName: "生活家電" }, audience: "家電の仕様を見比べている方", discovery: "家電選び、使う場面に合う仕様かも確認。", short: "選ぶ前に、仕様をひとつ確認。" },
   { key: "food", product: { itemCode: "hook-test:food", itemName: "北海道産 鮭切り身 個包装", itemCaption: "北海道産。個包装で冷凍配送。", categoryName: "食品" }, audience: "産地や保存方法も見て選びたい方", discovery: "食品選び、産地や保存方法もチェック。", short: "食卓に迎える前に、仕様もチェック。" },

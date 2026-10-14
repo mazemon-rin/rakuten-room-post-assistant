@@ -1798,6 +1798,11 @@ function extractVerifiedRoomFeatures(product = {}) {
   const featureCue = /(対応|収納|付属|素材|材質|容量|サイズ|冷凍|北海道産|国産|日本製|個包装|セット|加工|搭載|防水|撥水|UVカット|洗える|丸洗い|洗濯機|折りたたみ|軽量|大容量|保温|保冷|耐水|USB|Bluetooth|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点))/i;
   const unsafeFeature = /(\d{1,3}\s*[%％]\s*OFF|クーポン|セール|期間限定|最大\s*\d|最安|人気|ランキング|売り切れ|残りわずか|絶対|必ず|効果|口コミ|レビュー|買ってよかった|使ってみた|愛用)/i;
   const features = [];
+  // 長い商品説明に注意書きが混在しても、明示された短い仕様だけを抽出する。
+  const size = caption.match(/サイズ\s*[:：]\s*(\d+(?:\.\d+)?\s*[×xX]\s*\d+(?:\.\d+)?\s*cm)/i);
+  if (size) features.push(`サイズは${size[1]}`);
+  if (/カバー\s*[:：]?\s*綿\s*100\s*[%％]/i.test(caption)) features.push("カバーは綿100%");
+  if (/洗濯機で洗濯可\s*（ネット使用）/.test(caption)) features.push("洗濯機で洗濯可（ネット使用）");
   caption.split(/[\n。！？!?；;]+/).map((part) => part.trim()).filter(Boolean).forEach((part) => {
     if (featureCue.test(part) && !unsafeFeature.test(part)) features.push(part.replace(/[、,]+$/g, "").trim());
   });
@@ -1832,7 +1837,10 @@ function buildRoomIntroVariants(product = {}) {
   const titleFeatureTerms = ["USB-C対応", "Bluetooth対応", "A4対応", "A4収納", "PC収納", "個包装", "北海道産", "国産", "日本製", "撥水", "防水", "UVカット", "軽量", "大容量", "保温", "保冷"];
   const removableTitleFeatures = [...titleFeatureTerms.filter((term) => title.includes(term) && features.some((value) => value.includes(term))),
     ...features.filter((value) => /\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点)(?:入り|セット|対応)?/i.test(value) && title.includes(value))];
-  const copyTitle = removableTitleFeatures.reduce((value, term) => value.split(term).join(" ").replace(/\s{2,}/g, " ").trim(), title) || title;
+  const fullCopyTitle = removableTitleFeatures.reduce((value, term) => value.split(term).join(" ").replace(/\s{2,}/g, " ").trim(), title) || title;
+  // SEO語が長く続く場合だけ、先頭の具体的な商品タイプを本文で使う。
+  const copyTitle = fullCopyTitle.length > 36 && fullCopyTitle.includes(" ")
+    ? fullCopyTitle.split(/\s+/).slice(0, 2).join(" ") : fullCopyTitle;
   const productText = `${title} ${features.join(" ")} ${cleanRoomCopySource(product.itemCaption || product.description || "")}`;
   const genreSource = `${category} ${productText}`;
   const genre = /(抱っこ|ベビー|新生児|赤ちゃん|マタニティ)/.test(genreSource) ? "baby"

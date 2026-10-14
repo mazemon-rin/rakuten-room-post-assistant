@@ -18,7 +18,7 @@
     </div>
     <div class="header-note">
       <strong>安心運用</strong>
-      <span>ROOMへの自動投稿・自動ログイン・自動いいねは行いません。</span>
+      <span>明示的な実投稿依頼がない限りROOMの「完了」は押しません。自動ログイン・自動いいねは行いません。</span>
     </div>
   </header>
 
@@ -122,7 +122,7 @@
     <section id="candidates" class="tab-panel">
       <div class="section-heading">
         <h2>投稿キュー</h2>
-        <p>採用商品を1件ずつ投稿準備します。ROOMの「完了」は手動で行います。</p>
+        <p>採用商品を1件ずつ準備します。確認モードは完了前に停止し、連続実投稿は現在の依頼で明示許可された場合だけ行います。</p>
       </div>
       <div class="candidate-view-tabs" role="tablist" aria-label="候補の種類">
         <button class="candidate-view-tab active" id="candidate-room-tab" type="button" role="tab" aria-selected="true" aria-controls="candidate-room-view" data-candidate-view="room">投稿候補 (<span id="roomCandidateCount">0</span>)</button>
@@ -466,7 +466,7 @@
   <script src="src/core/product-normalization.js"></script>
   <script src="src/core/ranking-rules.js"></script>
   <script src="src/core/trend-rules.js"></script>
-  <script src="script.js?v=room-copy-confirmation-20261014"></script>
+  <script src="script.js?v=room-copy-confirmation-20261014-r1"></script>
   <script src="src/sns-trend.js"></script>
   <script src="src/sns-trend-discovery.js?v=adoption-feedback-20260929"></script>
 </body>
