@@ -40,10 +40,11 @@
     };
   }
 
-  function buildDiagnosticParams(applicationId, minAffiliateRate) {
+  function buildDiagnosticParams(applicationId, accessKey, minAffiliateRate) {
     const params = new URLSearchParams({
       format: "json",
       applicationId,
+      accessKey,
       itemCode: ITEM_CODE,
       hits: "1"
     });
@@ -59,10 +60,10 @@
     for (const minimum of [null, 5]) {
       if (results.length) await wait(1200);
       try {
-        const params = buildDiagnosticParams(applicationId, minimum);
+        const params = buildDiagnosticParams(applicationId, accessKey, minimum);
         const response = await fetchImpl(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`, {
           method: "GET",
-          headers: { Accept: "application/json", accessKey }
+          headers: { Accept: "application/json" }
         });
         let payload = {};
         try { payload = await response.json(); } catch { /* HTTP statusだけを表示し、生レスポンスは露出しない */ }

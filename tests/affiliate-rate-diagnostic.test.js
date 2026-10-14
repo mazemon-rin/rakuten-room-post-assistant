@@ -10,12 +10,13 @@ vm.runInNewContext(source, context);
 const api = context.AffiliateRateDiagnostic;
 const itemCode = api.ITEM_CODE;
 
-const noFilter = api.buildDiagnosticParams("app-secret", null);
+const noFilter = api.buildDiagnosticParams("app-secret", "access-secret", null);
+assert.strictEqual(noFilter.get("applicationId") === "app-secret", true);
+assert.strictEqual(noFilter.get("accessKey") === "access-secret", true);
 assert.strictEqual(noFilter.get("itemCode"), itemCode);
 assert.strictEqual(noFilter.has("minAffiliateRate"), false);
-assert.strictEqual(noFilter.has("accessKey"), false);
 assert.strictEqual(noFilter.has("sort"), false);
-const filtered = api.buildDiagnosticParams("app-secret", 5);
+const filtered = api.buildDiagnosticParams("app-secret", "access-secret", 5);
 assert.strictEqual(filtered.get("minAffiliateRate"), "5");
 assert.strictEqual(filtered.get("itemCode"), itemCode);
 
@@ -59,15 +60,17 @@ assert.strictEqual(JSON.stringify(unknownFailure).includes("do not expose"), fal
     fetchImpl: async (url, options) => {
       requests.push(new URL(url));
       requestOptions.push(options);
-      assert.strictEqual(url.includes("access-secret"), false);
       const payload = payloads.shift();
       return { status: 200, json: async () => payload };
     }
   });
   assert.strictEqual(requests.length, 2);
+  assert.strictEqual(requests[0].searchParams.get("applicationId") === "app-secret", true);
+  assert.strictEqual(requests[0].searchParams.get("accessKey") === "access-secret", true);
+  assert.strictEqual(Object.hasOwn(requestOptions[0].headers, "accessKey"), false);
   assert.strictEqual(requests[0].searchParams.has("minAffiliateRate"), false);
   assert.strictEqual(requests[1].searchParams.get("minAffiliateRate"), "5");
-  assert.strictEqual(requestOptions[0].headers.accessKey, "access-secret");
+  assert.strictEqual(Object.hasOwn(requestOptions[0].headers, "accessKey"), false);
   assert.deepStrictEqual(waits, [1200]);
   assert.strictEqual(results[0].targetFound, true);
   assert.strictEqual(results[1].state, "zero_results");
