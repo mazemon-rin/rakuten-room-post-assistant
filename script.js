@@ -569,7 +569,12 @@ function bindForms() {
   on("#reset-room-candidates", "click", resetRoomCandidates);
   $$(".candidate-view-tab").forEach((button) => button.addEventListener("click", () => setCandidateView(button.dataset.candidateView)));
   on("#productSearchForm", "submit", (event) => { event.preventDefault(); searchUnifiedProducts(); });
-  on("#unifiedSearchMode", "change", updateAffiliateRateSearchVisibility);
+  on("#unifiedSearchMode", "change", () => {
+    updateAffiliateRateSearchVisibility();
+    const resetState = window.AffiliateRateSearch.resetSearchModeState($("#couponSearchResults"), $("#couponSearchMessage"));
+    affiliateRateSearchResults = resetState.highRateResults;
+    couponSearchResults = resetState.normalResults;
+  });
   on("#clearSearchConditions", "click", clearSearchConditions);
   on("#openRaCoupon", "click", () => window.open("https://event.rakuten.co.jp/coupon/", "_blank", "noopener,noreferrer"));
   on("#apply-codex-result", "click", applyCodexResult);
@@ -892,6 +897,23 @@ function hideCredentials(text) {
     .replaceAll(data.settings.affiliateId || "no-affiliate-id", "[affiliateId]");
 }
 
+async function readHighAffiliateRateApiError(response) {
+  const errorInfo = { status: response.status, type: "http_error", detail: "" };
+  let raw = "";
+  try { raw = await response.text(); } catch { return errorInfo; }
+  if (!raw) return errorInfo;
+  try {
+    const body = JSON.parse(raw);
+    errorInfo.type = hideCredentials(String(body.error || body.code || "http_error"));
+    errorInfo.detail = hideCredentials(String(body.error_description || body.message || ""));
+  } catch {
+    errorInfo.detail = hideCredentials(raw.slice(0, 240));
+  }
+  errorInfo.type = window.AffiliateRateSearch.redactSensitiveText(errorInfo.type);
+  errorInfo.detail = window.AffiliateRateSearch.redactSensitiveText(errorInfo.detail);
+  return errorInfo;
+}
+
 function normalizeRakutenItems(json) {
   return window.RoomProductNormalization.normalizeRakutenItems(json);
 }
@@ -1136,6 +1158,8 @@ function updateAffiliateRateSearchVisibility() {
 
 async function searchHighAffiliateRateProducts({ keyword = "", categories = [] } = {}) {
   const message = $("#couponSearchMessage");
+  affiliateRateSearchResults = [];
+  if ($("#couponSearchResults")) $("#couponSearchResults").innerHTML = "";
   if (!hasRakutenCredentials()) {
     message.textContent = "楽天API認証情報が未設定のため、高料率検索はできません。";
     renderHighAffiliateRateSearchResults([]);
@@ -1145,8 +1169,8 @@ async function searchHighAffiliateRateProducts({ keyword = "", categories = [] }
   const requestedCount = Math.min(20, Math.max(1, Number($("#unifiedProductCount")?.value || 10)));
   const minimumRate = Number($("#affiliateRateMinimum")?.value || 5);
   const categoryQueries = categories.length ? categories : [null];
-  const merged = new Map();
-  let failedQueries = 0;
+  const successfulResponses = [];
+  const failedQueries = [];
   message.textContent = "API参考料率の高い商品を検索しています...";
 
   for (let index = 0; index < categoryQueries.length; index += 1) {
@@ -1164,29 +1188,47 @@ async function searchHighAffiliateRateProducts({ keyword = "", categories = [] }
     addAffiliateIdParam(params);
     try {
       const response = await fetch(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`);
-      if (!response.ok) throw new Error(await readRakutenApiError(response));
-      window.AffiliateRateSearch.mergeApiResultsByIdentity(merged, normalizeRakutenItems(await response.json()), rankingIdentity);
+      if (!response.ok) {
+        failedQueries.push({ category: categoryQueries[index]?.name || "全カテゴリー", ...(await readHighAffiliateRateApiError(response)) });
+        continue;
+      }
+      const json = await response.json();
+      successfulResponses.push({
+        count: json?.count ?? json?.Count,
+        items: normalizeRakutenItems(json)
+      });
     } catch (error) {
-      failedQueries += 1;
-      console.warn("高料率商品検索に失敗しました。認証情報を含むURLは出力しません。", hideCredentials(String(error?.message || "検索エラー")));
+      failedQueries.push({
+        category: categoryQueries[index]?.name || "全カテゴリー",
+        status: null,
+        type: window.AffiliateRateSearch.redactSensitiveText(error?.name || "network_error"),
+        detail: window.AffiliateRateSearch.redactSensitiveText(hideCredentials(String(error?.message || "通信に失敗しました。")))
+      });
     }
   }
 
-  const products = window.AffiliateRateSearch.sortByApiAffiliateRate([...merged.values()])
-    .slice(0, requestedCount);
-  renderHighAffiliateRateSearchResults(products);
-  if (failedQueries === categoryQueries.length) {
-    message.textContent = "高料率検索に失敗しました。楽天APIの通信状態を確認してください。API参考料率は本人適用の確定料率ではありません。";
-    return;
-  }
-  const status = `${products.length}件をAPI参考料率の高い順で表示しました（下限 ${minimumRate}%以上）。`;
-  message.textContent = failedQueries
-    ? `${status} ${failedQueries}カテゴリーの検索に失敗しました。料率は本人適用の確定料率ではありません。`
-    : `${status} 本人に適用される特別料率や確定報酬を示すものではありません。`;
+  const diagnostics = window.AffiliateRateSearch.processHighRateSearchResponses(successfulResponses, {
+    requestedCount,
+    getIdentity: rankingIdentity,
+    isUnavailable: isUnavailableProduct,
+    isPosted: postedHistoryMatch
+  });
+  renderHighAffiliateRateSearchResults(diagnostics.products);
+  const errorsText = window.AffiliateRateSearch.formatHighRateApiErrors(failedQueries);
+  const resultState = window.AffiliateRateSearch.getHighRateSearchState(diagnostics, successfulResponses.length, minimumRate);
+  const partialFailure = failedQueries.length && successfulResponses.length ? "一部カテゴリーのAPI検索に失敗しました。" : "";
+  const disclaimer = "API参考料率は本人に適用される確定料率・報酬を示すものではありません。";
+  message.textContent = [
+    resultState,
+    window.AffiliateRateSearch.formatHighRateSearchDiagnostics(diagnostics),
+    errorsText ? `APIエラー:\n${errorsText}` : "",
+    partialFailure,
+    disclaimer
+  ].filter(Boolean).join("\n");
 }
 
 function renderHighAffiliateRateSearchResults(products = []) {
-  affiliateRateSearchResults = products.filter((product) => !isUnavailableProduct(product) && !postedHistoryMatch(product));
+  affiliateRateSearchResults = [...products];
   affiliateRateSearchResults.forEach((product) => {
     product.sourceTypes = [...new Set([...(product.sourceTypes || []), "product"] )];
     if (!product.trustStatus) Object.assign(product, checkProductTrust(product));
