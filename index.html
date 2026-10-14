@@ -356,6 +356,13 @@
         </form>
         <p id="couponSearchMessage" class="message" role="status" aria-live="polite" style="white-space: pre-line">検索条件を設定して商品を検索してください。</p>
         <div id="couponSearchResults" class="coupon-results-grid"></div>
+        <details class="panel api-rate-diagnostic" id="apiRateDiagnostic">
+          <summary>開発者向け：API料率診断</summary>
+          <p class="small-note">固定対象商品のAPI参考料率を、minAffiliateRate指定なし／5%で各1回照会します。実行時のみAPI通信し、認証情報やレスポンス全文は表示・保存しません。</p>
+          <p>対象 itemCode：<code>sunshine-osaka:kuro50-siso50</code></p>
+          <button id="runApiRateDiagnostic" class="secondary-button" type="button">API料率診断を実行</button>
+          <div id="apiRateDiagnosticResults" role="status" aria-live="polite"></div>
+        </details>
       </section>
       <form id="rankingForm" class="search-form">
         <label>ジャンルID<input id="rankingGenreId" type="text" placeholder="空欄で総合"></label>
@@ -468,6 +475,7 @@
   <script src="src/core/affiliate-sales.js"></script>
   <script src="src/core/product-normalization.js"></script>
   <script src="src/core/affiliate-rate-search.js"></script>
+  <script src="src/core/affiliate-rate-diagnostic.js"></script>
   <script src="src/core/ranking-rules.js"></script>
   <script src="src/core/trend-rules.js"></script>
   <script src="script.js?v=affiliate-rate-search-20261014-r1"></script>
