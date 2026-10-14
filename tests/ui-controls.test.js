@@ -12,9 +12,10 @@ if (!html.includes('id="unifiedSearchMode"') || !html.includes('value="high_affi
 for (const rate of [5, 10, 15, 20]) if (!html.includes(`value="${rate}">${rate}%以上`)) throw new Error(`affiliate-rate threshold ${rate}% is missing`);
 if (!html.includes('API参考料率') || !script.includes('searchHighAffiliateRateProducts') || !script.includes('updateAffiliateRateSearchVisibility')) throw new Error("high affiliate-rate UI flow is missing");
 if (!html.includes('id="apiRateDiagnostic"') || !script.includes('runApiRateDiagnostic')) throw new Error("developer API rate diagnostic UI flow is missing");
-for (const condition of ["A", "B", "C", "D"]) if (!html.includes(`data-api-rate-condition="${condition}"`)) throw new Error(`API rate diagnostic condition ${condition} is missing`);
-if (!html.includes("対象itemCodeを照合します") || !script.includes("対象商品未発見")) throw new Error("diagnostic must distinguish a successful search from target item discovery");
+for (const condition of ["A", "B", "C", "D", "E"]) if (!html.includes(`data-api-rate-condition="${condition}"`)) throw new Error(`API rate diagnostic condition ${condition} is missing`);
+if (!html.includes("shopCode検索も最大30件") || !script.includes("対象商品未発見")) throw new Error("diagnostic must distinguish a successful search from target item discovery");
 if (!script.includes('エラーコード：${result.errorCode || "詳細不明"}')) throw new Error("diagnostic UI must show only allowlisted error codes or an unknown-detail label");
+if (!script.includes("安全なエラー理由：${result.safeErrorReason}")) throw new Error("diagnostic UI must display only a sanitized API error reason");
 for (const label of ["API料率分布診断", "1%以上～2%未満", "2%以上～3%未満", "3%以上～4%未満", "4%以上～5%未満", "5%以上", "affiliateRate未取得", "affiliateRate不正値"]) {
   if (!script.includes(label)) throw new Error(`A-only affiliate-rate distribution display is missing: ${label}`);
 }

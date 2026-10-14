@@ -6,7 +6,8 @@
     Object.freeze({ id: "A", label: "A：keyword=しそ餃子 / 料率指定なし", searchType: "keyword", keyword: "しそ餃子", minAffiliateRate: null, hits: 30 }),
     Object.freeze({ id: "B", label: "B：対象itemCode / 料率指定なし", searchType: "itemCode", keyword: "", minAffiliateRate: null, hits: 1 }),
     Object.freeze({ id: "C", label: "C：keyword=しそ餃子 / minAffiliateRate=5", searchType: "keyword", keyword: "しそ餃子", minAffiliateRate: 5, hits: 30 }),
-    Object.freeze({ id: "D", label: "D：対象itemCode / minAffiliateRate=5", searchType: "itemCode", keyword: "", minAffiliateRate: 5, hits: 1 })
+    Object.freeze({ id: "D", label: "D：対象itemCode / minAffiliateRate=5", searchType: "itemCode", keyword: "", minAffiliateRate: 5, hits: 1 }),
+    Object.freeze({ id: "E", label: "E：対象shopCode / hits=30", searchType: "shopCode", shopCode: "sunshine-osaka", minAffiliateRate: null, hits: 30 })
   ]);
   const MIN_REQUEST_INTERVAL_MS = 1200;
   let requestQueue = Promise.resolve();
@@ -25,6 +26,32 @@
       : typeof payload?.Error === "string" ? payload.Error
         : "";
     return SAFE_API_ERROR_CODES.has(value) ? value : null;
+  }
+
+  function getSafeApiErrorReason(payload) {
+    const description = typeof payload?.error_description === "string" ? payload.error_description : "";
+    const parameterLabels = {
+      applicationId: "applicationId", accessKey: "Access Key", keyword: "keyword",
+      itemCode: "itemCode", shopCode: "shopCode", genreId: "genreId", hits: "hits",
+      page: "page", sort: "sort", minAffiliateRate: "minAffiliateRate", format: "format", affiliateId: "affiliateId"
+    };
+    const parameterNames = Object.keys(parameterLabels).join("|");
+    let match = description.match(new RegExp(`^\\s*(${parameterNames})\\s+parameter\\s+is\\s+not\\s+valid\\b`, "i"));
+    if (match) {
+      const key = Object.keys(parameterLabels).find((name) => name.toLowerCase() === match[1].toLowerCase());
+      return `${parameterLabels[key]}パラメータが無効です。`;
+    }
+    match = description.match(new RegExp(`^\\s*specify\\s+valid\\s+(${parameterNames})\\b`, "i"));
+    if (match) {
+      const key = Object.keys(parameterLabels).find((name) => name.toLowerCase() === match[1].toLowerCase());
+      return `${parameterLabels[key]}が有効ではありません。`;
+    }
+    match = description.match(new RegExp(`^\\s*(${parameterNames})\\s+must\\s+be\\s+(?:a\\s+)?number\\b`, "i"));
+    if (match) {
+      const key = Object.keys(parameterLabels).find((name) => name.toLowerCase() === match[1].toLowerCase());
+      return `${parameterLabels[key]}は数値で指定してください。`;
+    }
+    return "詳細不明（APIのパラメータエラー）";
   }
 
   function getResponseItems(payload) {
@@ -89,7 +116,7 @@
     const apiError = payload?.error || payload?.error_description || payload?.Error || null;
     const errorCode = getSafeApiErrorCode(payload);
     const entries = getResponseItems(payload);
-    const item = entries.find((entry) => entry?.itemCode === itemCode) || null;
+    const item = entries.map(getProductData).find((product) => product?.itemCode === itemCode) || null;
     const rawRate = item?.affiliateRate;
     const count = payload?.count ?? payload?.Count;
     const hasCount = count != null && String(count).trim() !== "" && Number.isFinite(Number(count));
@@ -103,7 +130,15 @@
       fetchedCount: entries.length,
       targetFound: Boolean(item),
       affiliateRate: item ? (rawRate ?? null) : null,
-      affiliateRateType: item && rawRate != null ? typeof rawRate : "unavailable"
+      affiliateRateType: item && rawRate != null ? typeof rawRate : "unavailable",
+      product: item ? {
+        itemCode: item.itemCode,
+        itemName: typeof item.itemName === "string" ? item.itemName : "",
+        itemPrice: Number.isFinite(Number(item.itemPrice)) ? Number(item.itemPrice) : null,
+        itemUrl: typeof item.itemUrl === "string" ? item.itemUrl : "",
+        shopName: typeof item.shopName === "string" ? item.shopName : "",
+        hasMediumImageUrl: Array.isArray(item.mediumImageUrls) && item.mediumImageUrls.some((image) => typeof image?.imageUrl === "string" && image.imageUrl.length > 0)
+      } : null
     };
   }
 
@@ -117,6 +152,7 @@
       hits: String(condition.hits)
     });
     if (condition.searchType === "keyword") params.set("keyword", condition.keyword);
+    else if (condition.searchType === "shopCode") params.set("shopCode", condition.shopCode);
     else params.set("itemCode", ITEM_CODE);
     if (condition.minAffiliateRate != null) params.set("minAffiliateRate", String(condition.minAffiliateRate));
     return params;
@@ -145,6 +181,7 @@
           conditionId,
           condition: condition.label,
           ...summary,
+          ...(summary.state === "api_error" ? { safeErrorReason: getSafeApiErrorReason(payload) } : {}),
           ...(conditionId === "A" && summary.state !== "api_error" ? { rateDistribution: summarizeAffiliateRateDistribution(payload) } : {})
         };
       } catch (error) {
@@ -157,5 +194,5 @@
     return pending;
   }
 
-  root.AffiliateRateDiagnostic = Object.freeze({ ITEM_CODE, CONDITIONS, summarizeResponse, summarizeAffiliateRateDistribution, buildDiagnosticParams, getSafeApiErrorCode, runDiagnosticCondition });
+  root.AffiliateRateDiagnostic = Object.freeze({ ITEM_CODE, CONDITIONS, summarizeResponse, summarizeAffiliateRateDistribution, buildDiagnosticParams, getSafeApiErrorCode, getSafeApiErrorReason, runDiagnosticCondition });
 })(typeof window !== "undefined" ? window : globalThis);

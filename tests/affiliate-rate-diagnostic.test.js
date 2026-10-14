@@ -12,7 +12,7 @@ const itemCode = api.ITEM_CODE;
 const appId = "app-secret";
 const accessKey = "access-secret";
 
-assert.deepStrictEqual(Array.from(api.CONDITIONS, ({ id }) => id), ["A", "B", "C", "D"]);
+assert.deepStrictEqual(Array.from(api.CONDITIONS, ({ id }) => id), ["A", "B", "C", "D", "E"]);
 const expected = {
   A: { keyword: "しそ餃子", itemCode: null, hits: "30", minimum: null },
   B: { keyword: null, itemCode, hits: "1", minimum: null },
@@ -29,6 +29,12 @@ for (const [id, values] of Object.entries(expected)) {
   assert.strictEqual(params.get("hits"), values.hits);
   assert.strictEqual(params.get("minAffiliateRate"), values.minimum);
 }
+const shopCodeParams = api.buildDiagnosticParams(appId, accessKey, "E");
+assert.strictEqual(shopCodeParams.get("shopCode"), "sunshine-osaka");
+assert.strictEqual(shopCodeParams.get("itemCode"), null);
+assert.strictEqual(shopCodeParams.get("keyword"), null);
+assert.strictEqual(shopCodeParams.get("hits"), "30");
+assert.strictEqual(shopCodeParams.get("format"), "json");
 assert.throws(() => api.buildDiagnosticParams(appId, accessKey, "X"), /診断条件が不正/);
 
 const success = api.summarizeResponse(200, { count: 2, Items: [
@@ -42,6 +48,16 @@ assert.strictEqual(success.fetchedCount, 2);
 assert.strictEqual(success.targetFound, true);
 assert.strictEqual(success.affiliateRate, "20");
 assert.strictEqual(success.affiliateRateType, "string");
+const nestedProduct = api.summarizeResponse(200, { count: 1, items: [{ item: {
+  itemCode, itemName: "対象商品", itemPrice: 2980, itemUrl: "https://item.rakuten.co.jp/sunshine-osaka/kuro50-siso50/",
+  shopName: "一龍堂", mediumImageUrls: [{ imageUrl: "https://example.test/item.jpg" }]
+} }] });
+assert.strictEqual(nestedProduct.targetFound, true);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(nestedProduct.product)), {
+  itemCode, itemName: "対象商品", itemPrice: 2980,
+  itemUrl: "https://item.rakuten.co.jp/sunshine-osaka/kuro50-siso50/",
+  shopName: "一龍堂", hasMediumImageUrl: true
+});
 
 const noTarget = api.summarizeResponse(200, { count: 2, Items: [
   { itemCode: "shop:one", affiliateRate: 1 }, { itemCode: "shop:two", affiliateRate: 3 }
@@ -99,6 +115,10 @@ assert.strictEqual(JSON.stringify(failure).includes(appId), false);
 assert.strictEqual(JSON.stringify(failure).includes(accessKey), false);
 assert.strictEqual(JSON.stringify(failure).includes("error_description"), false);
 assert.strictEqual(api.summarizeResponse(400, { error: "unrecognized-secret", error_description: "sensitive details" }).errorCode, null);
+assert.strictEqual(api.getSafeApiErrorReason({ error_description: "itemCode parameter is not valid" }), "itemCodeパラメータが無効です。");
+assert.strictEqual(api.getSafeApiErrorReason({ error_description: "page must be a number; accessKey=do-not-show" }), "pageは数値で指定してください。");
+assert.strictEqual(api.getSafeApiErrorReason({ error_description: `itemCode parameter is not valid ${appId} ${accessKey}` }), "itemCodeパラメータが無効です。");
+assert.strictEqual(api.getSafeApiErrorReason({ error_description: "sensitive unknown description" }), "詳細不明（APIのパラメータエラー）");
 
 (async () => {
   let fakeNow = 10000;
@@ -129,6 +149,29 @@ assert.strictEqual(api.summarizeResponse(400, { error: "unrecognized-secret", er
   assert.strictEqual(JSON.stringify(result).includes(appId), false);
   assert.strictEqual(JSON.stringify(result).includes(accessKey), false);
   assert.strictEqual(JSON.stringify(result).includes("openapi.rakuten"), false);
+
+  const shopResponse = await api.runDiagnosticCondition({
+    applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      assert.strictEqual(parsed.searchParams.get("shopCode"), "sunshine-osaka");
+      assert.strictEqual(parsed.searchParams.get("hits"), "30");
+      assert.strictEqual(parsed.searchParams.get("itemCode"), null);
+      assert.strictEqual(parsed.searchParams.get("keyword"), null);
+      return { status: 200, json: async () => ({ count: 33, Items: [
+        { Item: { itemCode, itemName: "一龍堂 しそ餃子", itemPrice: 3980, itemUrl: "https://item.rakuten.co.jp/sunshine-osaka/kuro50-siso50/", shopName: "一龍堂", mediumImageUrls: [{ imageUrl: "https://example.test/item.jpg" }] } },
+        { Item: { itemCode: "sunshine-osaka:other", itemName: "別商品" } }
+      ] }) };
+    }
+  });
+  assert.strictEqual(shopResponse.state, "success");
+  assert.strictEqual(shopResponse.apiCount, 33);
+  assert.strictEqual(shopResponse.fetchedCount, 2);
+  assert.strictEqual(shopResponse.targetFound, true);
+  assert.strictEqual(shopResponse.product.itemName, "一龍堂 しそ餃子");
+  assert.strictEqual(shopResponse.product.hasMediumImageUrl, true);
+  assert.strictEqual(JSON.stringify(shopResponse).includes(appId), false);
+  assert.strictEqual(JSON.stringify(shopResponse).includes(accessKey), false);
 
   let aRequestCount = 0;
   const thirtyItemsA = await api.runDiagnosticCondition({
@@ -205,7 +248,22 @@ assert.strictEqual(api.summarizeResponse(400, { error: "unrecognized-secret", er
   assert.strictEqual(targetRateMissing.affiliateRate, null);
   assert.strictEqual(targetRateMissing.affiliateRateType, "unavailable");
   assert.strictEqual(targetRateMissing.rateDistribution, undefined, "condition B behavior must not be extended with A distribution");
-  assert.deepStrictEqual(waits, [1200, 1200, 1200, 1200, 1200, 1200, 1200]);
+  const noShopTarget = await api.runDiagnosticCondition({
+    applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
+    fetchImpl: async () => ({ status: 200, json: async () => ({ count: 30, Items: [{ Item: { itemCode: "sunshine-osaka:other" } }] }) })
+  });
+  assert.strictEqual(noShopTarget.state, "success");
+  assert.strictEqual(noShopTarget.fetchedCount, 1);
+  assert.strictEqual(noShopTarget.targetFound, false);
+  assert.strictEqual(noShopTarget.product, null);
+  const emptyShop = await api.runDiagnosticCondition({
+    applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
+    fetchImpl: async () => ({ status: 200, json: async () => ({ count: 0, Items: [] }) })
+  });
+  assert.strictEqual(emptyShop.state, "zero_results");
+  const missingImage = api.summarizeResponse(200, { count: 1, Items: [{ Item: { itemCode, itemName: "商品" } }] });
+  assert.strictEqual(missingImage.product.hasMediumImageUrl, false);
+  assert.deepStrictEqual(waits, [1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200]);
 
   console.log("Affiliate rate diagnostic mock cases: passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

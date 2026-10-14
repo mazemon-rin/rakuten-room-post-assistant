@@ -811,12 +811,14 @@ async function runApiRateDiagnostic(conditionId, button) {
         : result.targetFound ? "API正常応答・対象商品発見" : "API正常応答・対象商品未発見";
     details.textContent = [
       state,
+      ...(result.safeErrorReason ? [`安全なエラー理由：${result.safeErrorReason}`] : []),
       `HTTPステータス：${result.httpStatus == null ? "未取得" : result.httpStatus}`,
       `API count：${result.apiCount == null ? "未取得" : String(result.apiCount)}`,
       `取得件数：${result.fetchedCount}`,
       `対象商品：${result.targetFound ? "発見" : "対象商品未発見"}`,
       `対象商品のaffiliateRate：${result.targetFound && result.affiliateRate != null ? String(result.affiliateRate) : "未取得"}`,
-      `affiliateRateの型：${result.affiliateRateType}`
+      `affiliateRateの型：${result.affiliateRateType}`,
+      ...(result.product ? [`商品名：${result.product.itemName || "未取得"}`, `価格：${result.product.itemPrice == null ? "未取得" : formatYen(result.product.itemPrice)}`, `商品URL：${result.product.itemUrl ? "取得済み" : "未取得"}`, `ショップ名：${result.product.shopName || "未取得"}`, `商品画像URL：${result.product.hasMediumImageUrl ? "あり" : "なし"}`] : [])
     ].join(" / ");
     section.append(title, details);
     if (conditionId === "A" && result.rateDistribution) {
