@@ -1,4 +1,5 @@
 const STORAGE_KEY = "roomAssistantDataV1";
+const ROOM_COPY_SANDBOX_STORAGE_KEY = "roomAssistantCopySandboxV1";
 const RANKING_INTERVAL_SHORT_MS = 1200;
 const RANKING_INTERVAL_LONG_MS = 1800;
 const RANKING_RETRY_SAFETY_MARGIN_MS = 200;
@@ -339,6 +340,7 @@ function isRoomCandidate(item = {}) {
 
 let data = loadData();
 let currentProduct = null;
+let currentRoomCopySession = { itemCode: "", candidateId: "", variants: [], mode: "" };
 let searchResults = [];
 
 // SNSトレンド連携用の読み取り専用商品識別API。検索結果本体は公開しない。
@@ -361,10 +363,92 @@ const codexPasteErrors = new Map();
 let affiliateImportDraft = [];
 let salesDashboardView = "all";
 
+function isRoomCopySandboxMode() {
+  if (typeof location === "undefined") return false;
+  const localHost = ["localhost", "127.0.0.1"].includes(location.hostname);
+  return localHost && new URLSearchParams(location.search || "").get("room-copy-test") === "1";
+}
+
+function readRoomCopySandboxDraft(itemCode) {
+  if (!isRoomCopySandboxMode() || !itemCode) return null;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(ROOM_COPY_SANDBOX_STORAGE_KEY) || "null");
+    return saved?.schemaVersion === 1 && saved.itemCode === String(itemCode) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveRoomCopySandboxDraft(product, introText, hashTags) {
+  const itemCode = String(product?.itemCode || product?.product?.itemCode || "");
+  const source = product?.product || product || {};
+  const record = {
+    schemaVersion: 1,
+    savedAt: new Date().toISOString(),
+    itemCode,
+    product: Object.fromEntries(["itemCode", "itemName", "itemCaption", "itemPrice", "shopName", "categoryName", "itemUrl", "reviewAverage", "reviewCount"].filter((key) => source[key] !== undefined).map((key) => [key, source[key]])),
+    introText,
+    hashTags
+  };
+  try {
+    const serialized = JSON.stringify(record);
+    sessionStorage.setItem(ROOM_COPY_SANDBOX_STORAGE_KEY, serialized);
+    const verified = JSON.parse(sessionStorage.getItem(ROOM_COPY_SANDBOX_STORAGE_KEY) || "null");
+    return verified?.schemaVersion === 1 && verified.itemCode === itemCode && verified.introText === introText && verified.hashTags === hashTags;
+  } catch {
+    return false;
+  }
+}
+
+function renderRoomCopySandboxHome() {
+  const choices = data.candidates.filter(isRoomCandidate).map((candidate) => ({ candidate, product: getCandidateProductForDisplay(candidate) }))
+    .filter(({ candidate, product }) => {
+      const code = String(candidate.itemCode || product.itemCode || "");
+      const url = String(product.itemUrl || candidate.itemUrl || "");
+      return code && !code.startsWith("sample-shop:") && product.itemName && /item\.rakuten\.co\.jp|hb\.afl\.rakuten\.co\.jp/i.test(url);
+    });
+  // Keep the app DOM intact; only hide its shell while the isolated test route is active.
+  document.body.classList.add("room-copy-sandbox-mode");
+  $("#detailArea")?.remove();
+  const root = document.createElement("main");
+  root.id = "roomCopySandboxRoot";
+  root.className = "app-main room-copy-sandbox";
+  root.innerHTML = `
+      <header class="app-header room-copy-sandbox-header"><h1>ROOM文章生成・実商品テスト</h1><p>ローカル保存候補の商品情報だけを読み取り、生成結果はこのタブのsessionStorageだけに保存します。</p><a class="secondary-button" href="${escapeAttr(location.pathname + location.hash)}">通常アプリへ戻る</a></header>
+      <aside class="message" role="note"><strong>隔離テストモード</strong><br>楽天API通信なし。roomAssistantDataV1、投稿履歴、重複状態、本番サイトの保存領域は変更しません。保存結果はこのタブのsessionStorage（${ROOM_COPY_SANDBOX_STORAGE_KEY}）だけに記録します。ROOM投稿開始・SNS操作はできません。</aside>
+      <section id="detailArea" aria-live="polite"></section>
+      <section class="panel">
+        <h2>実商品を選択</h2>
+        <p>サンプル商品と商品URLが汎用トップページの候補は表示しません。商品詳細を開き、5パターン生成・編集・隔離保存を確認してください。</p>
+        ${choices.length ? `<ul class="room-copy-sandbox-list">${choices.map(({ candidate, product }) => `<li><strong>${escapeHtml(product.itemName)}</strong><span>${escapeHtml(product.shopName || "ショップ名未設定")} / ${formatYen(product.itemPrice)}</span><button class="primary-button" type="button" data-room-copy-candidate-id="${escapeAttr(candidate.id)}">この実商品でテスト</button></li>`).join("")}</ul>` : `<p class="message">対象となる保存済み実商品候補がありません。商品検索結果のサンプルではなく、itemCodeと楽天商品ページURLがある候補を保存してから開いてください。</p>`}
+      </section>
+      <div id="toast" role="status" aria-live="polite"></div>`;
+  document.body.append(root);
+  root.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-room-copy-candidate-id]");
+    if (button) openRoomCopySandboxProduct(button.dataset.roomCopyCandidateId);
+  });
+}
+
+function openRoomCopySandboxProduct(candidateId) {
+  if (!isRoomCopySandboxMode()) return;
+  const candidate = data.candidates.find((item) => item.id === candidateId && isRoomCandidate(item));
+  if (!candidate) return;
+  const product = getCandidateProductForDisplay(candidate);
+  const itemCode = String(candidate.itemCode || product.itemCode || "");
+  if (!itemCode || (product.itemCode && itemCode !== String(product.itemCode))) return;
+  openDetail(product, candidate);
+  $("#room-copy-builder")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 document.addEventListener("DOMContentLoaded", () => {
+  if (isRoomCopySandboxMode()) {
+    renderRoomCopySandboxHome();
+    return;
+  }
   bindTabs();
   bindForms();
   fillSettings();
@@ -437,6 +521,9 @@ function notifyStorageSaveFailure(error, bytes = 0) {
 }
 
 function saveData(nextData = data, { render = true } = {}) {
+  if (isRoomCopySandboxMode()) {
+    return { ok: false, error: new Error("隔離テスト中は通常アプリデータを保存できません。"), bytes: 0 };
+  }
   let snapshot;
   try {
     snapshot = getSerializedDataSnapshot(nextData);
@@ -1670,11 +1757,269 @@ function validateGeneratedCopy(introText, product = {}) {
   const text = String(introText || "");
   const forbidden = /(絶対お得|最安値|必ず効果|買わないと損|売り切れる前に|残りわずか)/;
   if (forbidden.test(text)) return "確認できない煽り表現が含まれています。";
+  const unsupportedMarketClaim = /(最安(?:値)?|(?:一番|大)?人気(?:商品)?|売れている|売り切れ必至|No\.?\s*1)/i;
+  if (unsupportedMarketClaim.test(text)) return "根拠を確認できない最安・人気・販売実績の断定は保存できません。";
   const experienceForbidden = /(買ってみた|買ってよかった|届いた|届きました|使った|使いました|使っています|使ってみた|使ってよかった|愛用中|愛用しています|リピート|リピ買い|我が家では|食べた|食べました|飲んだ|飲みました|実際に使うと|使いやすかった|おいしかった|飲みやすかった|満足した|悩みが解決)/;
   if (experienceForbidden.test(text) && product.usageStatus !== "used") {
     return "使用状況が未確認のため、使用体験の表現は保存できません。";
   }
   return "";
+}
+
+const ROOM_COPY_HOOKS = Object.freeze([
+  { id: "discovery", label: "驚き・ニュース型" },
+  { id: "audience", label: "対象者呼びかけ型" },
+  { id: "empathy", label: "悩み・共感型" },
+  { id: "benefit", label: "メリット先出し型" },
+  { id: "short", label: "短い一言型" }
+]);
+
+function cleanRoomCopySource(value = "") {
+  return String(value || "")
+    .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\/\s*\1\s*>/gi, " ")
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\s*\/(?:p|li|div|h[1-6])\s*>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/[\t\f\v ]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
+
+function extractVerifiedRoomFeatures(product = {}) {
+  const title = cleanRoomCopySource(product.itemName || product.title || "");
+  const caption = cleanRoomCopySource(product.itemCaption || product.description || "");
+  const featureCue = /(対応|収納|付属|素材|材質|容量|サイズ|冷凍|国産|日本製|個包装|セット|加工|搭載|防水|撥水|UVカット|洗える|丸洗い|折りたたみ|軽量|大容量|保温|保冷|耐水|USB|Bluetooth|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点))/i;
+  const unsafeFeature = /(\d{1,3}\s*[%％]\s*OFF|クーポン|セール|期間限定|最大\s*\d|最安|人気|ランキング|売り切れ|残りわずか|絶対|必ず|効果|口コミ|レビュー|買ってよかった|使ってみた|愛用)/i;
+  const features = [];
+  caption.split(/[\n。！？!?；;]+/).map((part) => part.trim()).filter(Boolean).forEach((part) => {
+    if (featureCue.test(part) && !unsafeFeature.test(part)) features.push(part.replace(/[、,]+$/g, "").trim());
+  });
+  const titleFeaturePattern = /(?:USB[- ]?C(?:入出力)?対応|Bluetooth対応|A4(?:サイズ)?対応|A4収納|PC収納|UVカット|防水|撥水|丸洗い|洗える|折りたたみ|軽量|大容量|個包装|冷凍|国産|日本製|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点)(?:入り|セット|対応)?)/gi;
+  let titleMatch;
+  while ((titleMatch = titleFeaturePattern.exec(title)) !== null) features.push(titleMatch[0].trim());
+  return [...new Set(features)].filter((feature) => feature && !unsafeFeature.test(feature)).slice(0, 3);
+}
+
+function cleanRoomProductTitle(product = {}) {
+  return cleanRoomCopySource(product.itemName || product.title || "")
+    .replace(/^[【《「『\[(（]([^】》」』\])）]*)[】》」』\])）]\s*/, (match, content) => /(\d{1,3}\s*[%％]\s*OFF|クーポン|セール|期間限定|最大\s*\d)/i.test(content) ? "" : match)
+    .replace(/(?:期間限定|最大)?\s*\d{1,3}\s*[%％]\s*OFF/gi, "")
+    .replace(/\d[\d,]*\s*円\s*(?:→|⇒|➡)\s*\d[\d,]*\s*円/g, "")
+    .replace(/^[\s・:：|｜]+|[\s・:：|｜]+$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function buildRoomIntroVariants(product = {}) {
+  const title = cleanRoomProductTitle(product);
+  if (!title) return { ok: false, error: "商品名を確認できないため、紹介文を作成できません。商品名を確認してください。", variants: [] };
+  const features = extractVerifiedRoomFeatures(product);
+  if (!features.length) return { ok: false, error: "確認済みの商品特徴がありません。商品説明や商品ページから、対応規格・素材・容量などの商品固有情報を1つ確認してください。", variants: [] };
+  const feature = features[0].replace(/[。.!！?？]+$/g, "");
+  const category = cleanRoomCopySource(product.categoryName || "") || "このカテゴリーの商品";
+  const base = [
+    { ...ROOM_COPY_HOOKS[0], text: `商品情報で見つけたポイントは「${feature}」。${title}の特徴として確認できます。` },
+    { ...ROOM_COPY_HOOKS[1], text: `${category}を探している方へ。${title}は「${feature}」が特徴です。` },
+    { ...ROOM_COPY_HOOKS[2], text: `${category}選びで仕様に迷ったら、「${feature}」も確認ポイントに。${title}に記載された特徴です。` },
+    { ...ROOM_COPY_HOOKS[3], text: `「${feature}」が特徴の${title}。${category}を選ぶときの候補のひとつです。` },
+    { ...ROOM_COPY_HOOKS[4], text: `「${feature}」が特徴の${title}。` }
+  ].map((variant) => ({ ...variant, text: finalizeRoomIntro(product, variant.text) }));
+  return { ok: true, title, features, variants: base };
+}
+
+function chooseRoomIntroVariant(product = {}, variants = []) {
+  if (!variants.length) return null;
+  const confirmedDiscount = getRoomDiscountPromptContext(product).confirmed;
+  if (confirmedDiscount) return variants.find((variant) => variant.id === "benefit") || variants[0];
+  // 同じ商品では選択が安定し、商品ごとには型が偏りにくいよう識別情報から選びます。
+  const seed = String(product.itemCode || product.itemName || product.title || "");
+  const index = [...seed].reduce((total, character) => total + character.codePointAt(0), 0) % variants.length;
+  return variants[index];
+}
+
+function getSafeRoomCopyTags(product = {}) {
+  const count = Math.max(1, Number(data.settings.defaultTagCount) || 8);
+  const confirmedDiscount = getRoomDiscountPromptContext(product).confirmed;
+  return makeTags(product, count)
+    .filter((tag) => confirmedDiscount || !/(?:セール|クーポン|割引|半額|\d+\s*%?OFF|ポイント|お得)/i.test(tag))
+    .slice(0, count)
+    .join(" ");
+}
+
+function renderRoomCopyVariants(variants, selectedIndex = -1) {
+  const target = $("#roomCopyResults");
+  if (!target) return;
+  target.innerHTML = variants.map((variant, index) => `
+    <button class="room-copy-variant ${index === selectedIndex ? "selected" : ""}" type="button" aria-pressed="${index === selectedIndex}" onclick="selectRoomCopyVariant(${index})">
+      <strong>${escapeHtml(variant.label)}</strong><span>${escapeHtml(variant.text)}</span>
+    </button>`).join("");
+}
+
+function selectRoomCopyVariant(index) {
+  if (!currentProduct || currentRoomCopySession.itemCode !== String(currentProduct.itemCode || currentProduct.product?.itemCode || "")) {
+    toast("商品が切り替わっています。現在の商品を選び直してから生成してください。");
+    return;
+  }
+  const variant = currentRoomCopySession.variants[index];
+  if (!variant) return;
+  const intro = $("#introText");
+  if (!intro || $("#room-copy-builder")?.dataset.itemCode !== currentRoomCopySession.itemCode) return;
+  intro.value = variant.text;
+  renderRoomCopyVariants(currentRoomCopySession.variants, index);
+  const status = $("#roomCopyStatus");
+  if (status) status.textContent = `${variant.label}を選択しました。必要に応じて編集して保存してください。`;
+}
+
+function generateRoomCopy(mode = "auto") {
+  if (!currentProduct) return;
+  const style = $("#roomCopyStyle");
+  if (style) style.value = mode;
+  const itemCode = String(currentProduct.itemCode || currentProduct.product?.itemCode || "");
+  if (currentRoomCopySession.itemCode !== itemCode || $("#room-copy-builder")?.dataset.itemCode !== itemCode) {
+    const status = $("#roomCopyStatus");
+    if (status) status.textContent = "商品を一意に照合できません。商品詳細を開き直し、itemCodeを確認してください。";
+    return;
+  }
+  if (mode === "classic") {
+    generatePrompt();
+    const status = $("#roomCopyStatus");
+    if (status) status.textContent = "従来型プロンプトを作成しました。確認済みの商品情報だけで生成し、割引未確認だけを理由に通常文を省略しないでください。";
+    return;
+  }
+  const result = buildRoomIntroVariants(currentProduct);
+  const status = $("#roomCopyStatus");
+  if (!result.ok) {
+    currentRoomCopySession.variants = [];
+    if (status) status.textContent = result.error;
+    renderRoomCopyVariants([]);
+    return;
+  }
+  const variants = mode === "auto" ? [chooseRoomIntroVariant(currentProduct, result.variants)].filter(Boolean) : result.variants;
+  currentRoomCopySession.variants = variants;
+  currentRoomCopySession.mode = mode;
+  const tags = $("#hashTags");
+  if (tags && !tags.value.trim()) tags.value = getSafeRoomCopyTags(currentProduct);
+  renderRoomCopyVariants(variants, mode === "auto" ? 0 : -1);
+  if (mode === "auto") selectRoomCopyVariant(0);
+  else if (status) status.textContent = "5種類の案を作成しました。文章を選び、必要なら編集して保存してください。";
+}
+
+function saveRoomCopyDraft({ startAfterSave = false } = {}) {
+  const product = currentProduct;
+  const itemCode = String(product?.itemCode || product?.product?.itemCode || "");
+  if (!product || !itemCode || currentRoomCopySession.itemCode !== itemCode || $("#room-copy-builder")?.dataset.itemCode !== itemCode) {
+    toast("商品を一意に照合できません。商品詳細を開き直してから保存してください。");
+    return false;
+  }
+  if (!isRoomCopySandboxMode() && postedHistoryMatch(product)) {
+    toast("この商品は投稿履歴にあります。紹介文を新しい投稿候補として保存できません。");
+    return false;
+  }
+  const introInput = $("#introText");
+  const tagInput = $("#hashTags");
+  const status = $("#roomCopyStatus");
+  let introText = String(introInput?.value || "").trim();
+  const hashTags = String(tagInput?.value || "").trim() || getSafeRoomCopyTags(product);
+  if (!introText) {
+    if (status) status.textContent = "紹介文が空です。おまかせ生成・5パターン比較・従来型から作成してください。";
+    return false;
+  }
+  const copyError = validateGeneratedCopy(introText, product);
+  if (copyError) {
+    if (status) status.textContent = copyError;
+    return false;
+  }
+  introText = finalizeRoomIntro(product, introText);
+  if (`${introText}\n${hashTags}`.length > 500) {
+    if (status) status.textContent = "紹介文とハッシュタグの合計が500文字を超えています。編集してから保存してください。";
+    return false;
+  }
+  if (isRoomCopySandboxMode()) {
+    if (startAfterSave) {
+      if (status) status.textContent = "隔離テストモードでは投稿開始できません。文章の保存テストだけ実行できます。";
+      return false;
+    }
+    const verified = saveRoomCopySandboxDraft(product, introText, hashTags);
+    if (!verified) {
+      if (status) status.textContent = "隔離テスト保存を確認できませんでした。通常データは変更していません。";
+      return false;
+    }
+    if (introInput) introInput.value = introText;
+    if (tagInput) tagInput.value = hashTags;
+    if (status) status.textContent = `itemCode ${itemCode} の文章を、このタブ専用の隔離保存領域へ保存し、再読込照合しました。通常候補・履歴は変更していません。`;
+    return true;
+  }
+  let candidate = currentRoomCopySession.candidateId
+    ? data.candidates.find((entry) => entry.id === currentRoomCopySession.candidateId)
+    : findRoomCandidate(product);
+  if (candidate) {
+    const candidateCode = String(candidate.itemCode || candidate.product?.itemCode || "");
+    if (candidateCode !== itemCode) {
+      toast("保存先候補のitemCodeが一致しません。誤保存を防ぐため保存を停止しました。");
+      return false;
+    }
+    if (["投稿済み", "スキップ"].includes(candidate.postStatus) || candidate.postedAt) {
+      toast("投稿済みまたは対象外の候補は編集保存できません。");
+      return false;
+    }
+    candidate.introText = introText;
+    candidate.hashTags = hashTags;
+    candidate.title = candidate.title || product.itemName || "";
+    if (candidate.status === "未作成") candidate.status = "文章作成済み";
+    if (candidate.postStatus === "紹介文未作成") candidate.postStatus = "投稿待ち";
+  } else {
+    if (!canSaveRoomCandidate(product)) {
+      toast("同一商品が投稿候補または履歴にありますが、安全に編集対象を照合できませんでした。");
+      return false;
+    }
+    candidate = buildQueueCandidate(product);
+    candidate.introText = introText;
+    candidate.hashTags = hashTags;
+    candidate.status = "文章作成済み";
+    candidate.postStatus = "投稿待ち";
+    data.candidates.unshift(candidate);
+  }
+  const candidateId = candidate.id;
+  const saved = saveData(data, { render: false });
+  const persistedCandidate = data.candidates.find((entry) => entry.id === candidateId);
+  const verified = saved.ok && persistedCandidate
+    && String(persistedCandidate.itemCode || persistedCandidate.product?.itemCode || "") === itemCode
+    && persistedCandidate.introText === introText
+    && persistedCandidate.hashTags === hashTags;
+  if (!verified) {
+    if (status) status.textContent = "保存を確認できませんでした。投稿開始はできません。既存データは保持されています。";
+    return false;
+  }
+  currentRoomCopySession.candidateId = candidateId;
+  if (introInput) introInput.value = introText;
+  if (tagInput) tagInput.value = hashTags;
+  if ($("#candidateList")) renderCandidates();
+  if ($("#statsGrid")) renderDashboard();
+  renderStorageStatus();
+  if (status) status.textContent = `itemCode ${itemCode} の候補へ保存し、保存内容を再確認しました。ROOM投稿前の下書きです。`;
+  if (startAfterSave) startRoomPostFromDetail();
+  return true;
+}
+
+function startRoomPostFromDetail() {
+  const id = currentRoomCopySession.candidateId;
+  const candidate = data.candidates.find((entry) => entry.id === id);
+  const itemCode = String(currentProduct?.itemCode || currentProduct?.product?.itemCode || "");
+  if (!candidate || !itemCode || String(candidate.itemCode || candidate.product?.itemCode || "") !== itemCode) {
+    toast("保存済みの同一商品候補を確認できません。投稿開始を停止しました。");
+    return false;
+  }
+  if (!candidate.introText || `${candidate.introText}\n${candidate.hashTags || ""}`.length > 500) {
+    toast("紹介文・ハッシュタグの保存確認が必要です。500文字以内で保存してから投稿を開始してください。");
+    return false;
+  }
+  startCodexPost(candidate.id);
+  return true;
 }
 
 function filterAvailableProducts(products) {
@@ -1731,9 +2076,19 @@ function saveWarningCandidateByIndex(index) {
 
 function openDetail(product, draft = {}) {
   currentProduct = product;
+  const linkedCandidate = draft.id ? draft : findRoomCandidate(product);
+  const productItemCode = String(product.itemCode || product.product?.itemCode || "");
+  const linkedItemCode = String(linkedCandidate?.itemCode || linkedCandidate?.product?.itemCode || "");
+  currentRoomCopySession = {
+    itemCode: productItemCode,
+    candidateId: linkedCandidate && linkedItemCode === productItemCode ? linkedCandidate.id : "",
+    variants: [],
+    mode: ""
+  };
   const duplicate = findDuplicate(product);
-  const savedIntroText = draft.introText || "";
-  const savedHashTags = draft.hashTags || "";
+  const sandboxDraft = readRoomCopySandboxDraft(productItemCode);
+  const savedIntroText = sandboxDraft?.introText || linkedCandidate?.introText || draft.introText || "";
+  const savedHashTags = sandboxDraft?.hashTags || linkedCandidate?.hashTags || draft.hashTags || getSafeRoomCopyTags(product);
   $("#detailArea").innerHTML = `
     <div class="detail-layout">
       <div>
@@ -1755,16 +2110,40 @@ function openDetail(product, draft = {}) {
           <label class="wide">強調したい特徴<input id="focusPoint" placeholder="例：軽い、持ち歩きやすい、ギフト向け"></label>
           <label class="wide">注意事項<input id="caution" placeholder="例：使っていないので使用感は書かない"></label>
         </div>
-        <div class="button-row">
+        <section id="room-copy-builder" class="room-copy-builder" data-item-code="${escapeAttr(productItemCode)}" aria-labelledby="room-copy-builder-title">
+          <h3 id="room-copy-builder-title">ROOM紹介文を作成</h3>
+          <p>商品名と商品情報で確認できる特徴を使います。割引が未確認でも通常文を作成し、確認できない割引表現だけを省きます。生成後に編集できます。</p>
+          <label>投稿文スタイル
+            <select id="roomCopyStyle">
+              <option value="auto">おまかせ生成</option>
+              <option value="compare">5パターン比較</option>
+              <option value="classic">従来型（プロンプト）</option>
+            </select>
+          </label>
+          <div class="button-row room-copy-actions">
+            <button class="primary-button" type="button" onclick="generateRoomCopy('auto')">おまかせ生成</button>
+            <button class="secondary-button" type="button" onclick="generateRoomCopy('compare')">5パターン比較生成</button>
+            <button class="secondary-button" type="button" onclick="generateRoomCopy('classic')">従来型プロンプト</button>
+          </div>
+          <div id="roomCopyResults" class="room-copy-results" aria-live="polite"></div>
+          <p id="roomCopyStatus" class="message" role="status" aria-live="polite"></p>
+        </section>
+        ${isRoomCopySandboxMode() ? `<p class="message" role="note">隔離テスト中：商品情報は保存候補から読み取り、テスト文面のみこのタブのsessionStorageへ保存します。投稿操作は無効です。</p>` : ""}
+        ${isRoomCopySandboxMode() ? "" : `<div class="button-row">
           <button class="primary-button" type="button" onclick="generatePrompt()">紹介文プロンプトを作る</button>
           <button class="secondary-button" type="button" onclick="quickSave(currentProduct, { originalPhotoEnabled: document.getElementById('detail-original-photo')?.checked === true })">投稿候補に保存</button>
           <button class="secondary-button" type="button" onclick="quickSaveThreadsOnly(currentProduct)">Threads投稿</button>
           <button class="secondary-button" type="button" onclick="addFavorite(currentProduct)">お気に入り</button>
           <button class="secondary-button" type="button" onclick="openChatGPT()">ChatGPTで開く</button>
-        </div>
+        </div>`}
         <label>ChatGPTへ渡すプロンプト<textarea id="promptOutput"></textarea></label>
         <label>紹介文<textarea id="introText" placeholder="ChatGPTで作った文章、または自分で書いた紹介文を貼り付けます。">${escapeHtml(savedIntroText)}</textarea></label>
         <label>ハッシュタグ<textarea id="hashTags" placeholder="#楽天ROOM #買ってよかった など">${escapeHtml(savedHashTags)}</textarea></label>
+        <p class="meta">選んだ文章は編集できます。紹介文とハッシュタグの合計を500文字以内にしてから保存してください。</p>
+        <div class="button-row">
+          <button class="primary-button" type="button" onclick="saveRoomCopyDraft()">${isRoomCopySandboxMode() ? "テスト文面を隔離保存" : "紹介文・ハッシュタグを保存"}</button>
+          ${isRoomCopySandboxMode() ? "" : currentRoomCopySession.candidateId ? `<button class="secondary-button" type="button" onclick="startRoomPostFromDetail()">Codex投稿開始</button>` : `<button class="secondary-button" type="button" onclick="saveRoomCopyDraft({ startAfterSave: true })">保存してCodex投稿開始</button>`}
+        </div>
         <label class="original-photo-option"><input type="checkbox" id="detail-original-photo"> 📷 オリジナル写真で投稿</label>
         <div class="button-row">
           <button class="secondary-button" type="button" onclick="copyValue('promptOutput')">プロンプトをコピー</button>
@@ -1789,6 +2168,18 @@ function openDetail(product, draft = {}) {
 
 function generatePrompt() {
   if (!currentProduct) return;
+  const title = cleanRoomProductTitle(currentProduct);
+  if (!title) {
+    toast("商品名を確認できないため、紹介文を作成できません。");
+    return;
+  }
+  const features = extractVerifiedRoomFeatures(currentProduct);
+  if (!features.length) {
+    const status = $("#roomCopyStatus");
+    if (status) status.textContent = "確認済みの商品特徴がありません。商品説明または商品ページから商品固有の特徴を1つ確認してください。";
+    toast("確認済みの商品特徴がないため、従来型プロンプトを作成できません。");
+    return;
+  }
   const tagCount = Number(data.settings.defaultTagCount) || 8;
   const context = buildGenerationContext(currentProduct, $("#postType").value);
   const discountContext = getRoomDiscountPromptContext(currentProduct);
@@ -1852,6 +2243,8 @@ ${getRoomIntroDeadlineRule(currentProduct)}
 見出しは「紹介文:」「短い紹介文:」「ハッシュタグ:」「セール情報:」「状態:確認待ち」を使用してください。
 
 【必ず守ること】
+商品名と確認済みの商品固有特徴が1つ以上あれば、通常の紹介文とハッシュタグを完成させてください。対象者・悩み・用途が明確でない場合は、それらを推測せず、確認できる特徴を中心に書いてください。
+割引率、クーポン、セール期間が未確認なら該当表現だけを省いて通常文を作成してください。未確認の割引だけを理由に、文章全体の作成を中止・保留しないでください。
 商品ページにない内容を勝手に追加しないでください。
 実際に使っていない場合は「使いました」と書かないでください。
 効果、最安値、在庫、セール期限を断定しないでください。
@@ -1859,7 +2252,7 @@ ${getRoomIntroDeadlineRule(currentProduct)}
 割引確認状態がconfirmedで確認済みヘッダーがある場合だけ、50%OFFや半額などの確認済み表現を目立つ位置へ使用してよい。candidateやunknownは割引候補として扱い、50%OFFや半額と断定しない。警告対象と選定理由は内部情報であり、未確認情報を商品事実として文章化しない。
 ${getSalePromptRule()}`;
   $("#promptOutput").value = prompt;
-  $("#hashTags").value = makeTags(currentProduct, tagCount).join(" ");
+  $("#hashTags").value = getSafeRoomCopyTags(currentProduct) || makeTags(currentProduct, tagCount).join(" ");
   toast("プロンプトを作成しました。");
 }
 
@@ -4049,7 +4442,7 @@ function generateCandidatePrompt(id) {
     return;
   }
   currentProduct = product;
-  openDetail(currentProduct);
+  openDetail(currentProduct, candidate);
   generatePrompt();
   candidate.introPrompt = $("#promptOutput").value;
   candidate.hashTags = $("#hashTags").value;
@@ -4169,15 +4562,21 @@ async function startCodexPost(id) {
     toast("ITEM_CODEがないため、Codex投稿準備を開始できません。商品検索から候補を保存し直してください。");
     return;
   }
-  if (!itemUrl) {
-    setPostStatus(id, "エラー");
-    toast("商品URLがないため、Codex投稿準備を開始できません。");
-    return;
-  }
   const payload = validateRoomPostingPayload(candidate, candidate.introText);
   if (!payload.ok) {
     toast(payload.error);
-    if (!payload.introText) openDetailByCandidate(id);
+    if (!payload.introText) {
+      openDetailByCandidate(id);
+      const status = $("#roomCopyStatus");
+      if (status) status.textContent = "紹介文が未作成です。確認済みの商品特徴から生成し、候補へ保存してからCodex投稿を開始してください。";
+      const builder = $("#room-copy-builder");
+      builder?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    }
+    return;
+  }
+  if (!itemUrl) {
+    setPostStatus(id, "エラー");
+    toast("紹介文は確認できましたが、商品URLがないためROOM投稿準備を開始できません。");
     return;
   }
   const introText = payload.introText;
@@ -4219,7 +4618,7 @@ function openCandidateForPaste(id) {
     return;
   }
   currentProduct = product;
-  openDetail(currentProduct);
+  openDetail(currentProduct, candidate);
   $("#promptOutput").value = candidate.introPrompt || "";
   $("#introText").value = candidate.introText || "";
   $("#hashTags").value = candidate.hashTags || "";

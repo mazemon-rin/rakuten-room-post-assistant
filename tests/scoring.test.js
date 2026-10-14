@@ -45,7 +45,7 @@ vm.runInContext(affiliateSalesSource, context);
 vm.runInContext(productNormalizationSource, context);
 vm.runInContext(rankingRulesSource, context);
 vm.runInContext(trendRulesSource, context);
-vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, getPerformanceBenefitLine, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, validateGeneratedCopy, buildLightweightPostedProduct, getCandidateProductForDisplay, candidateCard, data };`, context);
+vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, validateGeneratedCopy, buildLightweightPostedProduct, getCandidateProductForDisplay, candidateCard, data, ROOM_COPY_HOOKS, cleanRoomProductTitle, extractVerifiedRoomFeatures, buildRoomIntroVariants, chooseRoomIntroVariant, getSafeRoomCopyTags, openDetail, generatePrompt, generateRoomCopy, selectRoomCopyVariant, saveRoomCopyDraft, startCodexPost, getCurrentData: () => data, reloadData: () => { data = loadData(); return data; } };`, context);
 
 const scoring = context.__scoring;
 scoring.compactPostedCandidate = context.compactPostedCandidate;
@@ -114,6 +114,8 @@ forbiddenExperiencePhrases.forEach((phrase) => {
   assert(scoring.validateGeneratedCopy(`商品情報。${phrase}です。`, { usageStatus: "unknown", originalPhoto: { enabled: true } }), `original photo alone must not allow experience: ${phrase}`);
 });
 assert(!scoring.validateGeneratedCopy("商品ページに明記された特徴で、取り入れやすそうです。", { usageStatus: "unknown" }), "unused speculative wording remains allowed");
+assert(scoring.validateGeneratedCopy("大人気で売れています。", { usageStatus: "unknown" }).includes("人気"), "unsupported popularity and sales claims are blocked");
+assert(scoring.validateGeneratedCopy("楽天最安の商品です。", { usageStatus: "unknown" }).includes("最安"), "unsupported lowest-price claims are blocked");
 scoring.data.eventSettings = {};
 const rankedEvaluation = scoring.evaluateRoomProduct({ itemCode: "ranked", itemName: "ランキング商品", itemPrice: 1980, categoryName: "家電", reviewAverage: 4.5, reviewCount: 1200, rank: 4, sourceRank: 4 }, { postedIdentities: new Set(), queuedIdentities: new Set(), eventSettings: {} });
 assert(rankedEvaluation.selectionScoreTotal > 0 && rankedEvaluation.priorityReasons.length > 0, "Unified evaluation A: ranked products use the common evaluator");
@@ -738,6 +740,158 @@ context.localStorage.fail = false;
 assert(failedSave && failedSave.ok === false, "Compaction I: quota failure is not reported as success");
 assert(context.localStorage.value === previousStoredJson, "Compaction J: existing localStorage is preserved on quota failure");
 context.localStorage.value = previousStoredJson;
+
+// ROOM文案生成→選択・編集→保存→再読込と、未作成時の投稿開始案内を検証する。
+const roomCopyElements = {};
+context.document.querySelector = (selector) => roomCopyElements[selector] || null;
+context.setTimeout = () => 0;
+roomCopyElements["#toast"] = { textContent: "", classList: { add() {}, remove() {} } };
+roomCopyElements["#detailArea"] = {
+  set innerHTML(value) {
+    this.html = value;
+    const itemCode = value.match(/data-item-code="([^"]*)"/)?.[1] || "";
+    roomCopyElements["#room-copy-builder"] = { dataset: { itemCode }, scrollIntoView() {} };
+  }
+};
+["#roomCopyStyle", "#roomCopyResults", "#roomCopyStatus", "#introText", "#hashTags", "#promptOutput", "#postType", "#reader", "#tone", "#length", "#emoji", "#focusPoint", "#caution"].forEach((selector) => {
+  roomCopyElements[selector] = { value: "", textContent: "", innerHTML: "" };
+});
+roomCopyElements["#postType"].value = "欲しい商品";
+roomCopyElements["#reader"].value = "楽天ROOMを見ている人";
+roomCopyElements["#tone"].value = "親しみやすい";
+roomCopyElements["#length"].value = "標準";
+roomCopyElements["#emoji"].value = "あり";
+const roomCopyData = scoring.getCurrentData();
+roomCopyData.candidates = [];
+roomCopyData.history = [];
+roomCopyData.pendingRoomPost = null;
+const roomCopyProduct = {
+  itemCode: "hook-test:umbrella-1",
+  itemName: "折りたたみ傘 UVカット 軽量",
+  itemCaption: "UVカット加工。軽量設計。",
+  itemPrice: 2480,
+  shopName: "テストショップ",
+  categoryName: "傘",
+  itemUrl: "https://example.com/hook-test-umbrella"
+};
+scoring.openDetail(roomCopyProduct);
+assert(roomCopyElements["#detailArea"].html.includes("5パターン比較生成") && roomCopyElements["#detailArea"].html.includes("保存してCodex投稿開始"), "Room copy UI A: generation modes and save/start action are present");
+scoring.generateRoomCopy("compare");
+assert(roomCopyElements["#roomCopyResults"].innerHTML.includes("驚き・ニュース型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("対象者呼びかけ型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("悩み・共感型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("メリット先出し型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("短い一言型"), "Room copy UI B: five hook variants render");
+assert(!roomCopyElements["#roomCopyResults"].innerHTML.includes("50%OFF") && !roomCopyElements["#roomCopyResults"].innerHTML.includes("使ってみました"), "Room copy safety A: unconfirmed discounts and fake usage are omitted");
+scoring.selectRoomCopyVariant(3);
+assert(roomCopyElements["#introText"].value.includes("UVカット") && roomCopyElements["#introText"].value.includes("折りたたみ傘"), "Room copy UI C: selected variant uses product name and verified feature");
+scoring.generateRoomCopy("auto");
+assert(roomCopyElements["#introText"].value.includes("UVカット") && roomCopyElements["#roomCopyStyle"].value === "auto", "Room copy UI D: auto mode selects and fills one safe product-specific draft");
+const autoHookChoices = ["0", "1", "2", "3", "4"].map((suffix) => scoring.chooseRoomIntroVariant({ ...roomCopyProduct, itemCode: `hook-test:seed${suffix}` }, scoring.buildRoomIntroVariants(roomCopyProduct).variants).id);
+assert(new Set(autoHookChoices).size === 5, "Room copy UX: auto mode distributes hook styles across different item identities");
+roomCopyElements["#introText"].value += "編集済み。";
+assert(scoring.saveRoomCopyDraft(), "Room copy workflow A: edited copy saves");
+let savedRoomCopy = scoring.getCurrentData().candidates.find((candidate) => candidate.itemCode === roomCopyProduct.itemCode);
+assert(savedRoomCopy && savedRoomCopy.introText.endsWith("編集済み。") && savedRoomCopy.hashTags && savedRoomCopy.product.itemCode === roomCopyProduct.itemCode, "Room copy workflow B: exact itemCode, edited intro, tags, and product are saved together");
+assert(`${savedRoomCopy.introText}\n${savedRoomCopy.hashTags}`.length <= 500, "Room copy workflow C: combined ROOM text stays within 500 characters");
+const candidateCountBeforeReload = scoring.getCurrentData().candidates.length;
+const reloadedRoomCopyData = scoring.reloadData();
+savedRoomCopy = reloadedRoomCopyData.candidates.find((candidate) => candidate.itemCode === roomCopyProduct.itemCode);
+assert(savedRoomCopy && savedRoomCopy.introText.endsWith("編集済み。") && savedRoomCopy.hashTags && reloadedRoomCopyData.candidates.length === candidateCountBeforeReload, "Room copy workflow D: saved copy and candidate count survive reload without duplication");
+scoring.openDetail(roomCopyProduct, savedRoomCopy);
+assert(scoring.saveRoomCopyDraft() && scoring.getCurrentData().candidates.filter((candidate) => candidate.itemCode === roomCopyProduct.itemCode).length === 1, "Room copy workflow E: editing after reload updates the matching candidate");
+const sandboxProduct = {
+  itemCode: "actual-product-test:001",
+  itemName: "ステンレスボトル 500ml 保温保冷対応",
+  itemCaption: "容量500ml。保温・保冷に対応。",
+  itemPrice: 2680,
+  shopName: "実商品データテスト用ショップ",
+  categoryName: "水筒・マグボトル",
+  itemUrl: "https://item.rakuten.co.jp/example/item-001/"
+};
+const localStorageBeforeSandbox = context.localStorage.value;
+const candidatesBeforeSandbox = scoring.getCurrentData().candidates.length;
+const historyBeforeSandbox = scoring.getCurrentData().history.length;
+const originalLocalSetItem = context.localStorage.setItem;
+context.location = { hostname: "127.0.0.1", search: "?room-copy-test=1" };
+context.sessionStorage = { value: null, getItem() { return this.value; }, setItem(key, value) { this.value = value; } };
+context.localStorage.setItem = () => { throw new Error("sandbox must not write localStorage"); };
+scoring.openDetail(sandboxProduct);
+scoring.generateRoomCopy("compare");
+scoring.selectRoomCopyVariant(3);
+roomCopyElements["#introText"].value += "編集確認済み。";
+assert(scoring.saveRoomCopyDraft(), "Room copy sandbox A: edited actual-product copy saves to isolated session storage");
+const sandboxSaved = JSON.parse(context.sessionStorage.value || "null");
+assert(sandboxSaved?.schemaVersion === 1 && sandboxSaved.itemCode === sandboxProduct.itemCode && sandboxSaved.introText.endsWith("編集確認済み。"), "Room copy sandbox B: session record is itemCode-bound and retains edits");
+assert(Object.keys(sandboxSaved.product).every((key) => ["itemCode", "itemName", "itemCaption", "itemPrice", "shopName", "categoryName", "itemUrl", "reviewAverage", "reviewCount"].includes(key)), "Room copy sandbox C: only the product allowlist is stored");
+assert(context.localStorage.value === localStorageBeforeSandbox && scoring.getCurrentData().candidates.length === candidatesBeforeSandbox && scoring.getCurrentData().history.length === historyBeforeSandbox, "Room copy sandbox D: localStorage, candidates, and history are unchanged");
+scoring.openDetail(sandboxProduct);
+assert(roomCopyElements["#introText"].value.endsWith("編集確認済み。"), "Room copy sandbox E: same-item draft restores from session storage without API");
+context.localStorage.setItem = originalLocalSetItem;
+delete context.location;
+delete context.sessionStorage;
+const countBeforeMismatch = scoring.getCurrentData().candidates.length;
+roomCopyElements["#room-copy-builder"].dataset.itemCode = "hook-test:wrong-item";
+assert(!scoring.saveRoomCopyDraft() && scoring.getCurrentData().candidates.length === countBeforeMismatch, "Room copy safety E: itemCode mismatch blocks save without changing candidates");
+scoring.openDetail({ ...roomCopyProduct, itemCode: "hook-test:too-long", itemName: "折りたたみ傘 UVカット", itemUrl: "https://example.com/hook-test-too-long" });
+roomCopyElements["#introText"].value = "あ".repeat(495);
+roomCopyElements["#hashTags"].value = "#傘 #UVカット";
+const countBeforeLengthCheck = scoring.getCurrentData().candidates.length;
+assert(!scoring.saveRoomCopyDraft() && scoring.getCurrentData().candidates.length === countBeforeLengthCheck, "Room copy safety F: combined text over 500 characters is not saved");
+scoring.openDetail({ ...roomCopyProduct, itemCode: "hook-test:featureless", itemName: "通常の品名", itemCaption: "商品説明はありません。", itemUrl: "https://example.com/hook-test-featureless" });
+scoring.generateRoomCopy("auto");
+assert(roomCopyElements["#roomCopyStatus"].textContent.includes("確認済みの商品特徴がありません"), "Room copy safety B: missing feature reports the specific blocker");
+const noFeatureResult = scoring.buildRoomIntroVariants({ itemName: "通常の品名", itemCaption: "特徴記載なし" });
+assert(!noFeatureResult.ok && noFeatureResult.error.includes("特徴"), "Room copy safety C: featureless product is not fabricated");
+const noNameResult = scoring.buildRoomIntroVariants({ itemCaption: "軽量設計。" });
+assert(!noNameResult.ok && noNameResult.error.includes("商品名"), "Room copy safety C2: unidentified product reports missing identity");
+const discountVariants = scoring.buildRoomIntroVariants({
+  ...roomCopyProduct,
+  itemName: "アディダス ランニングシューズ UVカット",
+  regularPrice: 11000,
+  salePrice: 5500,
+  itemPrice: 5500,
+  discountRate: 50,
+  rateConfirmed: true,
+  discountRateType: "exact",
+  confirmedDiscountLabel: "50%OFF",
+  discountStatus: "confirmed",
+  discountText: "50%OFF確認済み"
+});
+const confirmedHookHeader = scoring.buildRoomFinalDiscountHeader({
+  ...roomCopyProduct,
+  regularPrice: 11000,
+  salePrice: 5500,
+  itemPrice: 5500,
+  discountRate: 50,
+  rateConfirmed: true,
+  discountRateType: "exact",
+  confirmedDiscountLabel: "50%OFF",
+  discountStatus: "confirmed",
+  discountText: "50%OFF確認済み"
+});
+assert(discountVariants.ok && confirmedHookHeader && discountVariants.variants.every((variant) => variant.text.startsWith(confirmedHookHeader)), "Room copy safety D: confirmed discount remains first in all hook variants");
+const roomCopyPromptElements = roomCopyElements;
+scoring.openDetail(roomCopyProduct);
+scoring.generateRoomCopy("classic");
+assert(roomCopyPromptElements["#promptOutput"].value.includes("未確認の割引だけを理由に") && roomCopyPromptElements["#hashTags"].value, "Room copy classic mode: legacy prompt and tags remain available");
+const blankIntroCandidate = {
+  id: "hook-test:missing-intro",
+  itemCode: "hook-test:missing-intro",
+  itemUrl: "https://example.com/hook-test-missing-intro",
+  title: "USB-C対応ライト",
+  product: { itemCode: "hook-test:missing-intro", itemName: "USB-C対応ライト", itemCaption: "USB-C対応。", itemUrl: "https://example.com/hook-test-missing-intro" },
+  introText: "",
+  hashTags: "",
+  postStatus: "投稿待ち",
+  destination: "room"
+};
+scoring.getCurrentData().candidates.unshift(blankIntroCandidate);
+scoring.startCodexPost(blankIntroCandidate.id).then(() => {
+  assert(roomCopyElements["#roomCopyStatus"].textContent.includes("紹介文が未作成です"), "Room post flow: missing intro routes to generation instead of starting an external post");
+  assert(!scoring.getCurrentData().pendingRoomPost, "Room post safety: no pending external post is created before the user saves a draft");
+  context.localStorage.value = previousStoredJson;
+  console.log("ROOM copy generation and save/reload workflow cases: passed");
+}).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
 
 console.log(JSON.stringify({
   caseA: { trendFit: caseA.selectionScore.trendFit, opportunity: caseA.selectionScore.opportunity, total: caseA.selectionScore.total },

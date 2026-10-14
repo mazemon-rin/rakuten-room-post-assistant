@@ -1064,6 +1064,118 @@ textarea {
   margin-top: 16px;
 }
 
+.room-copy-builder {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.room-copy-builder h3,
+.room-copy-builder p {
+  margin: 0;
+}
+
+.room-copy-results {
+  display: grid;
+  gap: 8px;
+}
+
+.room-copy-variant {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.room-copy-variant.selected {
+  border-color: var(--green);
+  background: #edf6f2;
+  box-shadow: 0 0 0 1px var(--green);
+}
+
+.room-copy-variant span {
+  line-height: 1.55;
+}
+
+.room-copy-sandbox {
+  display: grid;
+  gap: 18px;
+  width: min(1100px, calc(100% - 32px));
+  margin: 24px auto;
+}
+
+body.room-copy-sandbox-mode > header:not(.room-copy-sandbox-header),
+body.room-copy-sandbox-mode > nav,
+body.room-copy-sandbox-mode > main:not(#roomCopySandboxRoot),
+body.room-copy-sandbox-mode > footer {
+  display: none !important;
+}
+
+.room-copy-sandbox-header {
+  display: grid;
+  gap: 8px;
+  padding: 18px 22px;
+  border-radius: 12px;
+}
+
+.room-copy-sandbox-header h1,
+.room-copy-sandbox-header p {
+  margin: 0;
+}
+
+.room-copy-sandbox-header a {
+  justify-self: start;
+}
+
+.room-copy-sandbox #room-copy-builder {
+  scroll-margin-top: 16px;
+}
+
+.room-copy-sandbox-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.room-copy-sandbox-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.room-copy-sandbox-list span {
+  color: var(--muted);
+}
+
+@media (max-width: 700px) {
+  .room-copy-sandbox-list li {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .room-copy-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 900px) {
   .calendar-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
