@@ -154,6 +154,9 @@
           <strong>Chrome固定タブ運用</strong>
           <p>開始前に、同じChromeプロフィールで楽天ROOMタブを1枚開いてください。ROOM用の新規タブは作成しません。</p>
         </div>
+        <label for="sequential-processing-count">今回処理する件数
+          <input id="sequential-processing-count" type="number" min="1" step="1" value="1" inputmode="numeric">
+        </label>
         <button id="start-sequential-processing" class="primary-button" type="button">確認モードで次の候補を準備</button>
         <button id="start-sequential-posting" class="secondary-button" type="button">連続実投稿モードで開始</button>
         <p id="queue-progress" class="queue-progress" role="status" aria-live="polite"></p>

@@ -163,6 +163,17 @@ h1 {
   color: var(--muted);
 }
 
+.queue-control-panel label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.queue-control-panel input[type="number"] {
+  width: 5.5rem;
+}
+
 .queue-progress {
   min-width: 260px;
   font-weight: 700;
@@ -205,6 +216,10 @@ h1 {
   .queue-control-panel {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .queue-control-panel label {
+    justify-content: space-between;
   }
 
   .queue-progress {

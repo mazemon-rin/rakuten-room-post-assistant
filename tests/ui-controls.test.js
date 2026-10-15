@@ -1,6 +1,7 @@
 const fs = require("fs");
 const html = fs.readFileSync("index.html", "utf8");
 const script = fs.readFileSync("script.js", "utf8");
+const roomQueue = fs.readFileSync("src/core/room-sequential-queue.js", "utf8");
 const discovery = fs.readFileSync("src/sns-trend-discovery.js", "utf8");
 const css = fs.readFileSync("src/sns-trend.css", "utf8");
 const appCss = fs.readFileSync("style.css", "utf8");
@@ -39,14 +40,16 @@ if (!script.includes('安全確認できないためリンクなし') || !script
 if (!script.includes('id="room-copy-builder"') || !script.includes('id="roomCopyResults"') || !script.includes('onclick="saveRoomCopyDraft()"') || !script.includes('id="startRoomPostFromDetail"') || !script.includes('disabled') || script.includes('saveRoomCopyDraft({ startAfterSave: true })')) throw new Error("ROOM copy save and separate post-start UI is missing or combined");
 if (!script.includes('保存済み情報から文章を準備')) throw new Error("Candidate copy preparation must clearly use saved information without requiring a product-page visit");
 if (!script.includes("ROOM_COPY_HOOKS") || !script.includes("確認済みの商品特徴がありません")) throw new Error("ROOM copy hook definitions or minimum-evidence guidance are missing");
-if (!html.includes('id="start-sequential-processing"') || !html.includes("確認モードで次の候補を準備") || !html.includes('id="start-sequential-posting"') || !script.includes('startSequentialProcessing("continuous")')) throw new Error("ROOM confirmation and explicitly selected continuous modes are missing");
+if (!html.includes('id="start-sequential-processing"') || !html.includes("確認モードで次の候補を準備") || !html.includes('id="start-sequential-posting"') || !html.includes('id="sequential-processing-count"') || !script.includes('startSequentialProcessing("continuous", getRequestedRoomQueueCount())')) throw new Error("ROOM modes must use the explicitly requested bounded item count");
 if (!html.includes('id="room-processing-diagnostics"') || !html.includes('src/core/room-processing-state.js')) throw new Error("ROOM processing-state diagnostics panel or core module is missing");
 if (!script.includes("renderRoomProcessingDiagnostics()") || !script.includes("pendingRoomPostとの関連") || !script.includes("投稿履歴との一致")) throw new Error("hidden processing blockers must expose their status, history, and pending relation");
 if (!script.includes("resolveBlockedRoomCandidate") || !script.includes("window.confirm(`ROOM側で") || !script.includes("resolveOrphanPendingAsUnposted")) throw new Error("processing-state resolution must require explicit user confirmation");
 if (!script.includes("if (data.pendingRoomPost)")) throw new Error("an unresolved pendingRoomPost must block starting another ROOM post");
 if (!script.includes("pendingRoomPostに紐付いているため削除できません")) throw new Error("deleting a candidate linked to pendingRoomPost must be prevented");
 if (!script.includes("getRoomProcessingDiagnostics().issues.find") || !script.includes("function getRoomProcessingStopMessage") || !script.includes("function getPendingRoomPostStopMessage")) throw new Error("post-start blocking and diagnostics must use the same issue source and actionable stop messages");
-if (!html.includes('src/core/room-sequential-queue.js') || !script.includes('function getDisplayedRoomCandidates()') || !script.includes('buildRoomSequentialQueue(getDisplayedRoomCandidates())')) throw new Error("continuous queue must snapshot the actual displayed candidate order");
+if (!html.includes('src/core/room-sequential-queue.js') || !script.includes('function getDisplayedRoomCandidates()') || !script.includes('buildRoomSequentialQueue(getDisplayedRoomCandidates(), requestedCount)')) throw new Error("continuous queue must snapshot the displayed candidate order and requested count");
+if (!script.includes('formatRoomSequentialProgress(active, activeRoomPostQueue)') || !roomQueue.includes('function formatRoomSequentialProgress(candidate, queueState)') || script.includes('(${position} / ${roomCandidates.length}件)')) throw new Error("queue progress must use the bounded queue, never the full saved candidate count");
+if (!script.includes('prepareRoomCopyForPosting(candidate)') || !script.includes('const selected = chooseRoomIntroVariant(product, result.variants)') || !script.includes('紹介文の保存を確認できなかったため')) throw new Error("a missing ROOM introduction must be generated from verified features and saved before posting");
 if (!script.includes('let activeRoomPostMode = "confirmation"') || !script.includes('let activeRoomPostQueue = null') || !script.includes('function startNextCandidate(id, mode = activeRoomPostMode)') || !script.includes('advanceRoomSequentialQueue(') || !script.includes('startCodexPost(result.entry.candidateId, nextMode, result.entry.itemCode)')) throw new Error("continuous mode must advance by candidate ID and exact itemCode");
 if (!script.includes('連続キューの候補をすべて処理しました。次の商品には進みません。') || !script.includes('void startNextCandidate(item.id, activeRoomPostQueue.mode)')) throw new Error("continuous queue must advance only after saved completion and stop at its end");
 if (!script.includes('pending.candidateId ? candidate.id === pending.candidateId') || !script.includes('pendingRoomPostの候補IDとitemCodeが一致しません')) throw new Error("pending completion must match both candidate ID and itemCode");
@@ -59,7 +62,7 @@ const resolutionSource = script.slice(script.indexOf("function resolveBlockedRoo
 if (resolutionSource.indexOf("window.confirm(") < 0 || resolutionSource.indexOf("window.confirm(") > resolutionSource.indexOf('candidate.postStatus = "投稿待ち"')) throw new Error("blocked candidate status must not change before explicit user confirmation");
 if (!resolutionSource.includes("findPostedHistoryRecord(candidate)") || !resolutionSource.includes("投稿結果が不明ならキャンセル")) throw new Error("manual state resolution must preserve posted-history protection and unknown outcomes");
 if (!appCss.includes("@media (max-width: 600px)") || !appCss.includes(".room-processing-issue dl { grid-template-columns: 1fr;")) throw new Error("ROOM processing diagnostics must collapse to a single column on mobile widths");
-if (!script.includes('openDetailByCandidate(id);') || !script.includes('紹介文が未作成です。確認済みの商品特徴から生成')) throw new Error("Missing ROOM intro does not route the user to copy generation");
+if (!script.includes('prepareRoomCopyForPosting(candidate)') || !script.includes('buildRoomIntroVariants(product)') || !script.includes('同じitemCodeの投稿履歴があるため、再投稿を停止しました。')) throw new Error("Missing ROOM intro must use the existing safe generator and duplicate-history guard inline");
 if (!script.includes('get("room-copy-test") === "1"') || !script.includes('sessionStorage.setItem(ROOM_COPY_SANDBOX_STORAGE_KEY, serialized)')) throw new Error("Local-only isolated product-copy test mode is missing");
 if (!script.includes('if (isRoomCopySandboxMode()) {\n    return { ok: false') || !script.includes('テスト文面を隔離保存')) throw new Error("Sandbox mode does not block normal data writes or expose isolated save UI");
 if (!script.includes('document.body.classList.add("room-copy-sandbox-mode")') || script.includes("document.body.innerHTML = `")) throw new Error("Sandbox mode must preserve the normal app DOM");

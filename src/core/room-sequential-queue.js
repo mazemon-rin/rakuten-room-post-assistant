@@ -3,12 +3,18 @@
     return String(candidate.itemCode || candidate.product?.itemCode || "").trim();
   }
 
-  function buildRoomSequentialQueue(displayedCandidates = []) {
+  function buildRoomSequentialQueue(displayedCandidates = [], requestedCount) {
+    if (!Number.isInteger(requestedCount) || requestedCount < 1) {
+      return { ok: false, error: "処理件数は1以上の整数で指定してください。" };
+    }
+    const eligible = displayedCandidates.filter((candidate) => candidate.postStatus === "投稿待ち");
+    if (eligible.length < requestedCount) {
+      return { ok: false, error: `指定件数 ${requestedCount}件に対して、表示中の投稿待ちは${eligible.length}件です。件数を調整してください。` };
+    }
     const entries = [];
     const ids = new Set();
     const itemCodes = new Set();
-    for (const candidate of displayedCandidates) {
-      if (candidate.postStatus !== "投稿待ち") continue;
+    for (const candidate of eligible.slice(0, requestedCount)) {
       const id = String(candidate.id || "").trim();
       const itemCode = getItemCode(candidate);
       if (!id || !itemCode) return { ok: false, error: "候補IDまたはitemCodeがない候補があるため連続処理を開始できません。" };
@@ -54,5 +60,14 @@
     return { ok: true, done: false, nextIndex, entry: nextEntry, candidate: nextResult.candidate };
   }
 
-  root.RoomSequentialQueue = Object.freeze({ buildRoomSequentialQueue, resolveRoomQueueCandidate, advanceRoomSequentialQueue });
+  function formatRoomSequentialProgress(candidate, queueState) {
+    if (!candidate) return "処理対象の商品はありません。";
+    const entry = queueState?.entries?.[queueState.currentIndex];
+    if (entry?.candidateId === candidate.id && entry.itemCode === getItemCode(candidate)) {
+      return `現在の処理商品：${candidate.title || candidate.product?.itemName || "商品名未確認"}（${queueState.currentIndex + 1} / ${queueState.entries.length}件） / 状態：${candidate.postStatus || "未確認"}`;
+    }
+    return `現在の処理商品：${candidate.title || candidate.product?.itemName || "商品名未確認"} / 状態：${candidate.postStatus || "未確認"}（開始時のキュー件数は復元できません）`;
+  }
+
+  root.RoomSequentialQueue = Object.freeze({ buildRoomSequentialQueue, resolveRoomQueueCandidate, advanceRoomSequentialQueue, formatRoomSequentialProgress });
 })(typeof window !== "undefined" ? window : globalThis);

@@ -590,8 +590,8 @@ function bindForms() {
   on("#trendSearchForm", "submit", (event) => { event.preventDefault(); searchTrendProducts(); });
   on("#rankingSortOrder", "change", () => renderRankingResults(searchResults));
   on("#queue-selected-ranking", "click", queueSelectedRanking);
-  on("#start-sequential-processing", "click", startSequentialProcessing);
-  on("#start-sequential-posting", "click", () => startSequentialProcessing("continuous"));
+  on("#start-sequential-processing", "click", () => startSequentialProcessing("confirmation", getRequestedRoomQueueCount()));
+  on("#start-sequential-posting", "click", () => startSequentialProcessing("continuous", getRequestedRoomQueueCount()));
   on("#retry-failed-ranking", "click", retryFailedRanking);
   $$("input[name='unifiedCategory']").forEach((input) => input.addEventListener("change", saveRankingCategorySelection));
   on("#exportJson", "click", exportJson);
@@ -2104,6 +2104,44 @@ function getSafeRoomCopyTags(product = {}) {
     .join(" ");
 }
 
+function prepareRoomCopyForPosting(candidate) {
+  const product = getCandidateProductForDisplay(candidate);
+  const itemCode = String(candidate.itemCode || product.itemCode || "").trim();
+  const productCode = String(product.itemCode || candidate.itemCode || "").trim();
+  if (!itemCode || itemCode !== productCode) return { ok: false, error: "候補と商品情報のitemCodeが一致しないため、紹介文を保存できません。" };
+  let introText = String(candidate.introText || "").trim();
+  let hashTags = String(candidate.hashTags || "").trim();
+  if (!introText) {
+    const result = buildRoomIntroVariants(product);
+    if (!result.ok) return { ok: false, error: result.error };
+    const selected = chooseRoomIntroVariant(product, result.variants);
+    if (!selected?.text) return { ok: false, error: "安全な紹介文を生成できませんでした。" };
+    introText = selected.text;
+  }
+  if (!hashTags) hashTags = getSafeRoomCopyTags(product);
+  introText = finalizeRoomIntro(candidate, introText);
+  const copyError = validateGeneratedCopy(introText, product);
+  if (copyError) return { ok: false, error: copyError };
+  if (!hashTags || `${introText}\n${hashTags}`.length > 500) {
+    return { ok: false, error: "紹介文とハッシュタグを確認できないか、合計500文字を超えています。" };
+  }
+
+  const changed = introText !== String(candidate.introText || "").trim()
+    || hashTags !== String(candidate.hashTags || "").trim();
+  if (!changed) return { ok: true, introText, hashTags };
+  candidate.introText = introText;
+  candidate.hashTags = hashTags;
+  if (candidate.status === "未作成" || !candidate.status) candidate.status = "文章作成済み";
+  const saved = saveData(data, { render: false });
+  const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+  const verified = saved.ok && persisted?.candidates?.some((item) => item.id === candidate.id
+    && String(item.itemCode || item.product?.itemCode || "").trim() === itemCode
+    && item.introText === introText && item.hashTags === hashTags);
+  return verified
+    ? { ok: true, introText, hashTags }
+    : { ok: false, error: "紹介文の保存を確認できなかったため、投稿準備を停止しました。" };
+}
+
 function renderRoomCopyVariants(variants, selectedIndex = -1) {
   const target = $("#roomCopyResults");
   if (!target) return;
@@ -2895,8 +2933,18 @@ function renderQueueProgress() {
     progress.textContent = `投稿待ち ${queue.filter((item) => item.postStatus === "投稿待ち").length}件。確認モードで先頭の商品を準備できます。`;
     return;
   }
-  const position = roomCandidates.findIndex((item) => item.id === active.id) + 1;
-  progress.textContent = `現在の処理商品：${active.title}（${position} / ${roomCandidates.length}件） / 状態：${active.postStatus}`;
+  progress.textContent = window.RoomSequentialQueue.formatRoomSequentialProgress(active, activeRoomPostQueue);
+}
+
+function getRequestedRoomQueueCount() {
+  const input = $("#sequential-processing-count");
+  const raw = String(input?.value || "").trim();
+  const count = Number(raw);
+  if (!raw || !Number.isInteger(count) || count < 1) {
+    toast("処理件数は1以上の整数で指定してください。");
+    return null;
+  }
+  return count;
 }
 
 function buildQueueCandidate(product) {
@@ -4471,8 +4519,9 @@ function resolveOrphanPendingAsUnposted() {
   if (saved.ok) toast("ROOM未投稿の確認に基づき、孤立pendingを解除しました。");
 }
 
-async function startSequentialProcessing(mode = "confirmation") {
+async function startSequentialProcessing(mode = "confirmation", requestedCount = getRequestedRoomQueueCount()) {
   const message = $("#codex-result-message");
+  if (!Number.isInteger(requestedCount) || requestedCount < 1) return;
   if (data.pendingRoomPost) {
     const text = getPendingRoomPostStopMessage();
     if (message) message.textContent = text;
@@ -4486,7 +4535,7 @@ async function startSequentialProcessing(mode = "confirmation") {
     toast(text);
     return;
   }
-  const builtQueue = window.RoomSequentialQueue.buildRoomSequentialQueue(getDisplayedRoomCandidates());
+  const builtQueue = window.RoomSequentialQueue.buildRoomSequentialQueue(getDisplayedRoomCandidates(), requestedCount);
   if (!builtQueue.ok) {
     if (message) message.textContent = builtQueue.error;
     toast(builtQueue.error);
@@ -4503,9 +4552,9 @@ async function startSequentialProcessing(mode = "confirmation") {
   activeRoomPostQueue = { entries: builtQueue.entries, currentIndex: 0, mode: postMode };
   const firstEntry = activeRoomPostQueue.entries[0];
   const resolved = window.RoomSequentialQueue.resolveRoomQueueCandidate(firstEntry, data.candidates);
-  if (!resolved.ok || postedHistoryMatch(resolved.candidate)) {
+  if (!resolved.ok) {
     activeRoomPostQueue = null;
-    const text = resolved.error || "先頭候補が投稿履歴と一致するため連続処理を開始しません。";
+    const text = resolved.error;
     if (message) message.textContent = text;
     toast(text);
     return;
@@ -4539,10 +4588,6 @@ async function startNextCandidate(id, mode = activeRoomPostMode) {
   if (result.done) {
     activeRoomPostQueue = null;
     toast("連続キューの候補をすべて処理しました。次の商品には進みません。");
-    return;
-  }
-  if (postedHistoryMatch(result.candidate)) {
-    toast("次候補は投稿履歴と一致するため、連続処理を停止しました。");
     return;
   }
   const previousIndex = activeRoomPostQueue.currentIndex;
@@ -5072,7 +5117,12 @@ async function startCodexPost(id, mode = "confirmation", expectedItemCode = "") 
   }
   const postMode = window.RoomProcessingState.normalizePostMode(mode);
   if (postMode === "continuous" && activeRoomPostQueue?.mode !== "continuous") {
-    const builtQueue = window.RoomSequentialQueue.buildRoomSequentialQueue(getDisplayedRoomCandidates());
+    const displayedCandidate = getDisplayedRoomCandidates().find((item) => item.id === id);
+    if (!displayedCandidate) {
+      toast("選択商品が現在の表示候補にないため、投稿を開始しません。");
+      return false;
+    }
+    const builtQueue = window.RoomSequentialQueue.buildRoomSequentialQueue([displayedCandidate], 1);
     if (!builtQueue.ok) {
       toast(builtQueue.error);
       return false;
@@ -5112,16 +5162,18 @@ async function startCodexPost(id, mode = "confirmation", expectedItemCode = "") 
     toast("ITEM_CODEがないため、Codex投稿準備を開始できません。商品検索から候補を保存し直してください。");
     return false;
   }
-  const payload = validateRoomPostingPayload(candidate, candidate.introText);
+  if (postedHistoryMatch(candidate)) {
+    toast("同じitemCodeの投稿履歴があるため、再投稿を停止しました。");
+    return false;
+  }
+  const preparedCopy = prepareRoomCopyForPosting(candidate);
+  if (!preparedCopy.ok) {
+    toast(preparedCopy.error);
+    return false;
+  }
+  const payload = validateRoomPostingPayload(candidate, preparedCopy.introText);
   if (!payload.ok) {
     toast(payload.error);
-    if (!payload.introText) {
-      openDetailByCandidate(id);
-      const status = $("#roomCopyStatus");
-      if (status) status.textContent = "紹介文が未作成です。確認済みの商品特徴から生成し、候補へ保存してからCodex投稿を開始してください。";
-      const builder = $("#room-copy-builder");
-      builder?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-    }
     return false;
   }
   if (!itemUrl) {
