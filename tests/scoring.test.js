@@ -5,6 +5,7 @@ const source = fs.readFileSync(path.join(__dirname, "..", "script.js"), "utf8");
 
 const identitySource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "product-identity.js"), "utf8");
 const duplicateSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "duplicate-detection.js"), "utf8");
+const roomProcessingStateSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "room-processing-state.js"), "utf8");
 const discountRulesSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "discount-rules.js"), "utf8");
 const utilsSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "utils.js"), "utf8");
 const affiliateSalesSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "affiliate-sales.js"), "utf8");
@@ -39,6 +40,7 @@ const context = {
 };
 context.window = context;
 vm.createContext(context);
+vm.runInContext(roomProcessingStateSource, context);
 vm.runInContext(discountRulesSource, context);
 vm.runInContext(utilsSource, context);
 vm.runInContext(affiliateSalesSource, context);

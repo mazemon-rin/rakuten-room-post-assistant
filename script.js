@@ -2739,6 +2739,7 @@ function renderCandidates() {
   });
   $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
   renderThreadsOnlyCandidates();
+  renderRoomProcessingDiagnostics();
   renderQueueProgress();
   renderCollectionSummary();
 }
@@ -4324,14 +4325,149 @@ function focusNextCandidate(id) {
 }
 
 function getProcessingBlocker(excludeId = "") {
-  return data.candidates.filter(isRoomCandidate).find((candidate) => candidate.id !== excludeId && ["Codex処理中", "確認待ち", "要手動確認"].includes(candidate.postStatus));
+  const issue = getRoomProcessingDiagnostics().issues.find((entry) => entry.candidateId !== excludeId);
+  return issue ? data.candidates.find((candidate) => candidate.id === issue.candidateId) || null : null;
+}
+
+function getRoomProcessingDiagnostics() {
+  return window.RoomProcessingState.inspectRoomProcessingState(data.candidates, data.history, data.pendingRoomPost, {
+    isRoomCandidate,
+    isVisibleRoomCandidate,
+    postedHistoryMatch: (candidate, history) => window.DuplicateDetection.postedHistoryMatch(candidate, history)
+  });
+}
+
+function getRoomProcessingStopMessage(candidate) {
+  const issue = getRoomProcessingDiagnostics().issues.find((entry) => entry.candidateId === candidate?.id);
+  if (!issue) return "A：アプリ内の確認待ち候補があります。診断パネルで状態を確認してください。";
+  const pendingMismatch = issue.pendingRelation !== "なし" && issue.pendingRelation !== "候補ID・itemCodeとも一致";
+  const category = pendingMismatch ? "B：pendingRoomPostの不整合" : "A：アプリ内の確認待ち候補";
+  const history = issue.historyMatch ? `履歴一致：あり（${issue.historyMatch.itemCode}）` : "履歴一致：なし";
+  return `${category}で開始を停止しました。商品：${issue.title} / itemCode：${issue.itemCode} / 状態：${issue.postStatus} / 表示理由：${issue.hiddenReason} / ${history} / pending：${issue.pendingRelation}。診断パネルでROOM側の結果を照合してください。不明なら状態を変更せず、この商品を保留してください。`;
+}
+
+function getPendingRoomPostStopMessage() {
+  const diagnostics = getRoomProcessingDiagnostics();
+  const pending = diagnostics.pendingStatus;
+  const category = diagnostics.pendingIssue ? "B：pendingRoomPostの不整合" : "A：アプリ内の処理中・確認待ち状態";
+  return `${category}のため新しい投稿を開始しません。商品：${pending?.title || "未確認"} / itemCode：${pending?.itemCode || "未確認"} / 候補との関連：${pending?.relation || "未確認"}。診断パネルで候補・履歴・ROOM側の結果を照合してください。不明ならpendingを解除せず保留してください。`;
+}
+
+function renderRoomProcessingDiagnostics() {
+  const panel = $("#room-processing-diagnostics");
+  if (!panel) return;
+  const diagnostics = getRoomProcessingDiagnostics();
+  const keyword = $("#candidateFilter")?.value?.trim().toLowerCase() || "";
+  const status = $("#candidateStatusFilter")?.value || "";
+  const activeIssues = diagnostics.issues.map((issue) => {
+    const candidate = data.candidates.find((entry) => entry.id === issue.candidateId);
+    const candidateText = `${candidate?.title || ""} ${candidate?.shopName || ""} ${candidate?.memo || ""}`.toLowerCase();
+    const postStatus = candidate?.postStatus || candidate?.status || "投稿待ち";
+    const hiddenByFilter = Boolean((keyword && !candidateText.includes(keyword)) || (status && postStatus !== status && candidate?.status !== status));
+    const historyText = issue.historyMatch
+      ? `一致あり：${escapeHtml(issue.historyMatch.title)}（itemCode：${escapeHtml(issue.historyMatch.itemCode)}）`
+      : "一致なし";
+    return `<article class="room-processing-issue"><h4>${escapeHtml(issue.title)}</h4>
+      <dl><dt>itemCode</dt><dd>${escapeHtml(issue.itemCode)}</dd>
+      <dt>現在のpostStatus</dt><dd>${escapeHtml(issue.postStatus)}</dd>
+      <dt>候補一覧の表示</dt><dd>${issue.visible ? (hiddenByFilter ? "検索・ステータスフィルターで非表示" : "表示対象") : escapeHtml(issue.hiddenReason)}</dd>
+      <dt>投稿履歴との一致</dt><dd>${historyText}</dd>
+      <dt>pendingRoomPostとの関連</dt><dd>${escapeHtml(issue.pendingRelation)}</dd></dl>
+      <div class="record-actions">
+        <button class="secondary-button" type="button" onclick="resolveBlockedRoomCandidate('${escapeAttr(issue.candidateId)}','posted')">ROOM投稿済みを確認して記録</button>
+        <button class="secondary-button" type="button" onclick="resolveBlockedRoomCandidate('${escapeAttr(issue.candidateId)}','unposted')">ROOM未投稿を確認して投稿待ちへ</button>
+      </div><p class="meta">結果不明の場合は操作せず、ブロックを維持してください。</p></article>`;
+  }).join("");
+  const pendingText = diagnostics.pendingStatus
+    ? (() => {
+      const pendingCandidate = data.candidates.find((entry) => entry.id === data.pendingRoomPost?.candidateId)
+        || data.candidates.find((entry) => String(entry.itemCode || entry.product?.itemCode || "").trim() === String(data.pendingRoomPost?.itemCode || "").trim());
+      const alreadyListed = pendingCandidate && diagnostics.issues.some((issue) => issue.candidateId === pendingCandidate.id);
+      const pendingResolution = pendingCandidate && !alreadyListed && diagnostics.pendingStatus.relation === "候補ID・itemCodeとも一致"
+        ? `<div class="record-actions"><button class="secondary-button" type="button" onclick="resolveBlockedRoomCandidate('${escapeAttr(pendingCandidate.id)}','posted')">ROOM投稿済みを確認して記録</button><button class="secondary-button" type="button" onclick="resolveBlockedRoomCandidate('${escapeAttr(pendingCandidate.id)}','unposted')">ROOM未投稿を確認して投稿待ちへ</button></div><p class="meta">結果不明の場合は操作せず、pendingを維持してください。</p>`
+        : "";
+      return `<article class="room-processing-issue"><h4>pendingRoomPostの保存状態</h4><dl>
+      <dt>商品名</dt><dd>${escapeHtml(diagnostics.pendingStatus.title)}</dd>
+      <dt>itemCode</dt><dd>${escapeHtml(diagnostics.pendingStatus.itemCode)}</dd>
+      <dt>候補との関連</dt><dd>${escapeHtml(diagnostics.pendingStatus.relation)}</dd></dl>
+      ${diagnostics.pendingIssue ? `<p role="alert">対応する候補がない、または候補IDとitemCodeが一致しません。自動解除せず、照合が必要です。</p>` : ""}
+      ${diagnostics.pendingIssue?.relation === "一致する候補なし" ? `<button class="secondary-button" type="button" onclick="resolveOrphanPendingAsUnposted()">ROOM未投稿を確認して孤立pendingを解除</button>` : ""}
+      ${pendingResolution}</article>`;
+    })()
+    : "";
+  const hasIssues = diagnostics.issues.length > 0 || Boolean(diagnostics.pendingStatus);
+  panel.hidden = !hasIssues;
+  panel.innerHTML = hasIssues
+    ? `<h3>ROOM投稿状態の確認が必要です</h3><p>一覧に見えない候補やpending情報も開始判定に含まれます。投稿結果が不明な状態は自動解除されません。</p>${activeIssues}${pendingText}`
+    : "";
+}
+
+function resolveBlockedRoomCandidate(id, result) {
+  const candidate = data.candidates.find((item) => item.id === id && isRoomCandidate(item));
+  if (!candidate || !["posted", "unposted"].includes(result)) return;
+  const stateLabel = result === "posted" ? "ROOM投稿済み" : "ROOM未投稿";
+  if (!window.confirm(`ROOM側で「${candidate.title}」を${stateLabel}と確認しましたか？\n確認済みの場合だけ状態を反映します。投稿結果が不明ならキャンセルしてください。`)) return;
+  if (result === "unposted" && findPostedHistoryRecord(candidate)) {
+    toast("投稿履歴に同じitemCodeがあるため、未投稿へは変更しません。履歴とROOMの状態を先に照合してください。");
+    return;
+  }
+  const pendingMatches = window.RoomProcessingState.isPendingLinkedToCandidate(candidate, data.pendingRoomPost);
+  if (result === "posted") {
+    const existingHistory = findPostedHistoryRecord(candidate);
+    candidate.status = "投稿済み";
+    candidate.postStatus = "投稿済み";
+    candidate.postedAt = existingHistory?.postedAt || candidate.postedAt || "";
+    candidate.roomUrl = existingHistory?.roomUrl || candidate.roomUrl || "";
+    candidate.introText = finalizeRoomIntro(candidate, candidate.introText || "");
+    const historySnapshot = createHistoryRecord(candidate, { postedAt: candidate.postedAt, introText: candidate.introText });
+    historySnapshot.id = existingHistory?.id || candidate.id;
+    if (existingHistory) Object.assign(existingHistory, historySnapshot);
+    else data.history.unshift(historySnapshot);
+    compactPostedCandidate(candidate, data.history);
+  } else {
+    candidate.postStatus = "投稿待ち";
+    candidate.status = "投稿待ち";
+  }
+  if (pendingMatches) data.pendingRoomPost = null;
+  const saved = saveData();
+  if (!saved.ok) return;
+  toast(result === "posted" ? "確認されたROOM投稿を履歴へ反映しました。" : "ROOM未投稿の確認を反映し、投稿待ちへ戻しました。");
+}
+
+function resolveOrphanPendingAsUnposted() {
+  const pending = data.pendingRoomPost;
+  const itemCode = String(pending?.itemCode || "").trim();
+  if (!pending || !itemCode) {
+    toast("孤立pendingのitemCodeが確認できないため解除しません。");
+    return;
+  }
+  const linkedCandidate = data.candidates.some((candidate) => isRoomCandidate(candidate)
+    && (candidate.id === pending.candidateId || String(candidate.itemCode || candidate.product?.itemCode || "").trim() === itemCode));
+  if (linkedCandidate) {
+    toast("候補との関連が残っているため、この操作では解除しません。");
+    return;
+  }
+  if (data.history.some((entry) => !entry.repostRequested && String(entry.itemCode || entry.product?.itemCode || "").trim() === itemCode)) {
+    toast("同じitemCodeの投稿履歴があるため、未投稿として解除しません。");
+    return;
+  }
+  if (!window.confirm(`ROOMでitemCode「${itemCode}」が未投稿と確認済みですか？\n確認済みの場合だけ孤立pendingを解除します。不明な場合はキャンセルしてください。`)) return;
+  data.pendingRoomPost = null;
+  const saved = saveData();
+  if (saved.ok) toast("ROOM未投稿の確認に基づき、孤立pendingを解除しました。");
 }
 
 function startSequentialProcessing(mode = "confirmation") {
   const message = $("#codex-result-message");
+  if (data.pendingRoomPost) {
+    const text = getPendingRoomPostStopMessage();
+    if (message) message.textContent = text;
+    toast(text);
+    return;
+  }
   const blocker = getProcessingBlocker();
   if (blocker) {
-    const text = `別の商品「${blocker.title}」が${blocker.postStatus}です。現在のROOM画面・候補状態を確認してから次を開始してください。`;
+    const text = getRoomProcessingStopMessage(blocker);
     if (message) message.textContent = text;
     toast(text);
     return;
@@ -4354,7 +4490,7 @@ function startNextCandidate(id) {
   }
   const blocker = getProcessingBlocker();
   if (blocker) {
-    toast(`別の商品「${blocker.title}」が${blocker.postStatus}のため開始できません。`);
+    toast(getRoomProcessingStopMessage(blocker));
     return;
   }
   const roomCandidates = data.candidates.filter(isRoomCandidate);
@@ -4860,7 +4996,11 @@ async function startCodexPost(id, mode = "confirmation") {
   if (!candidate) return;
   const active = getProcessingBlocker(id);
   if (active) {
-    toast(`別の商品「${active.title}」が${active.postStatus}です。先に現在のROOM画面と候補状態を確認してください。`);
+    toast(getRoomProcessingStopMessage(active));
+    return;
+  }
+  if (data.pendingRoomPost) {
+    toast(getPendingRoomPostStopMessage());
     return;
   }
   if (["Codex処理中", "確認待ち", "投稿済み", "スキップ"].includes(candidate.postStatus)) {
@@ -5006,6 +5146,11 @@ function prepareCandidatePost(id) {
 }
 
 function deleteCandidate(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (candidate && window.RoomProcessingState.isPendingAssociatedWithCandidate(candidate, data.pendingRoomPost)) {
+    toast("この候補はpendingRoomPostに紐付いているため削除できません。ROOM状態を照合して先に解消してください。");
+    return;
+  }
   data.candidates = data.candidates.filter((item) => item.id !== id);
   saveData();
 }
