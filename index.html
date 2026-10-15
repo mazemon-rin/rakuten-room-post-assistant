@@ -358,14 +358,14 @@
         <div id="couponSearchResults" class="coupon-results-grid"></div>
         <details class="panel api-rate-diagnostic" id="apiRateDiagnostic">
           <summary>開発者向け：API料率診断</summary>
-          <p class="small-note">A〜Dは個別に実行できます。keyword検索は最大30件、shopCode検索も最大30件を取得して対象itemCodeと完全照合します。実行した条件だけAPI通信し、認証情報・リクエストURL・レスポンス全文は表示・保存しません。</p>
+          <p class="small-note">A〜Dは個別に実行できます。keyword検索は最大30件、shopCode検索は最大2ページ・60件まで確認し、対象itemCodeと完全照合します。実行した条件だけAPI通信し、認証情報・リクエストURL・レスポンス全文は表示・保存しません。</p>
           <p>対象 itemCode：<code>sunshine-osaka:kuro50-siso50</code></p>
           <div class="button-row api-rate-diagnostic-actions">
             <button class="secondary-button" type="button" data-api-rate-condition="A">A：keyword / 料率指定なし</button>
             <button class="secondary-button" type="button" data-api-rate-condition="B">B：itemCode / 料率指定なし</button>
             <button class="secondary-button" type="button" data-api-rate-condition="C">C：keyword / 5%以上</button>
             <button class="secondary-button" type="button" data-api-rate-condition="D">D：itemCode / 5%以上</button>
-            <button class="secondary-button" type="button" data-api-rate-condition="E">E：shopCode / 30件</button>
+            <button class="secondary-button" type="button" data-api-rate-condition="E">E：shopCode / 最大2ページ・60件</button>
           </div>
           <div id="apiRateDiagnosticResults" role="status" aria-live="polite"></div>
         </details>

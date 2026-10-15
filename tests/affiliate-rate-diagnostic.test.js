@@ -30,6 +30,7 @@ for (const [id, values] of Object.entries(expected)) {
   assert.strictEqual(params.get("minAffiliateRate"), values.minimum);
 }
 const shopCodeParams = api.buildDiagnosticParams(appId, accessKey, "E");
+assert.strictEqual(api.CONDITIONS.find(({ id }) => id === "E").label, "E：対象shopCode / 最大2ページ・60件");
 assert.strictEqual(shopCodeParams.get("shopCode"), "sunshine-osaka");
 assert.strictEqual(shopCodeParams.get("itemCode"), null);
 assert.strictEqual(shopCodeParams.get("keyword"), null);

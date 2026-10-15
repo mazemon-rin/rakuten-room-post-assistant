@@ -13,7 +13,7 @@ for (const rate of [5, 10, 15, 20]) if (!html.includes(`value="${rate}">${rate}%
 if (!html.includes('API参考料率') || !script.includes('searchHighAffiliateRateProducts') || !script.includes('updateAffiliateRateSearchVisibility')) throw new Error("high affiliate-rate UI flow is missing");
 if (!html.includes('id="apiRateDiagnostic"') || !script.includes('runApiRateDiagnostic')) throw new Error("developer API rate diagnostic UI flow is missing");
 for (const condition of ["A", "B", "C", "D", "E"]) if (!html.includes(`data-api-rate-condition="${condition}"`)) throw new Error(`API rate diagnostic condition ${condition} is missing`);
-if (!html.includes("shopCode検索も最大30件") || !script.includes("対象商品未発見")) throw new Error("diagnostic must distinguish a successful search from target item discovery");
+if (!html.includes("shopCode検索は最大2ページ・60件まで確認") || !html.includes("E：shopCode / 最大2ページ・60件") || !script.includes("対象商品未発見")) throw new Error("shopCode diagnostic UI must communicate its two-page, 60-item limit");
 if (!script.includes('エラーコード：${result.errorCode || "詳細不明"}')) throw new Error("diagnostic UI must show only allowlisted error codes or an unknown-detail label");
 if (!script.includes("安全なエラー理由：${result.safeErrorReason}")) throw new Error("diagnostic UI must display only a sanitized API error reason");
 if (!script.includes("取得した全件に対象商品なし") || !script.includes("対象商品未確認（全件確認は未完了）") || !script.includes("result.pagesChecked")) throw new Error("shop-code diagnostic must distinguish complete and incomplete two-page scans");

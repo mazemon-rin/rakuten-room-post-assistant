@@ -7,7 +7,7 @@
     Object.freeze({ id: "B", label: "B：対象itemCode / 料率指定なし", searchType: "itemCode", keyword: "", minAffiliateRate: null, hits: 1 }),
     Object.freeze({ id: "C", label: "C：keyword=しそ餃子 / minAffiliateRate=5", searchType: "keyword", keyword: "しそ餃子", minAffiliateRate: 5, hits: 30 }),
     Object.freeze({ id: "D", label: "D：対象itemCode / minAffiliateRate=5", searchType: "itemCode", keyword: "", minAffiliateRate: 5, hits: 1 }),
-    Object.freeze({ id: "E", label: "E：対象shopCode / hits=30", searchType: "shopCode", shopCode: "sunshine-osaka", minAffiliateRate: null, hits: 30 })
+    Object.freeze({ id: "E", label: "E：対象shopCode / 最大2ページ・60件", searchType: "shopCode", shopCode: "sunshine-osaka", minAffiliateRate: null, hits: 30 })
   ]);
   const MIN_REQUEST_INTERVAL_MS = 1200;
   let requestQueue = Promise.resolve();
