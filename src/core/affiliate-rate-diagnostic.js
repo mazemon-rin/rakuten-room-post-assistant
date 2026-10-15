@@ -142,7 +142,7 @@
     };
   }
 
-  function buildDiagnosticParams(applicationId, accessKey, conditionId) {
+  function buildDiagnosticParams(applicationId, accessKey, conditionId, page = 1) {
     const condition = CONDITIONS.find((item) => item.id === conditionId);
     if (!condition) throw new Error("診断条件が不正です。");
     const params = new URLSearchParams({
@@ -155,7 +155,36 @@
     else if (condition.searchType === "shopCode") params.set("shopCode", condition.shopCode);
     else params.set("itemCode", ITEM_CODE);
     if (condition.minAffiliateRate != null) params.set("minAffiliateRate", String(condition.minAffiliateRate));
+    if (conditionId === "E") params.set("page", String(page));
     return params;
+  }
+
+  function getUniqueProductEntries(entries) {
+    const seenItemCodes = new Set();
+    return entries.filter((entry) => {
+      const itemCode = getProductData(entry)?.itemCode;
+      // itemCodeを確認できない行は、重複のない商品として全件確認数に加えない。
+      if (typeof itemCode !== "string" || itemCode.trim() === "") return false;
+      if (seenItemCodes.has(itemCode)) return false;
+      seenItemCodes.add(itemCode);
+      return true;
+    });
+  }
+
+  function createRequestError(condition, error) {
+    return {
+      conditionId: condition.id,
+      condition: condition.label,
+      state: "api_error",
+      httpStatus: null,
+      apiCount: null,
+      fetchedCount: 0,
+      targetFound: false,
+      affiliateRate: null,
+      affiliateRateType: "unavailable",
+      errorCode: null,
+      errorType: error?.name === "TypeError" ? "network_error" : "request_error"
+    };
   }
 
   async function runDiagnosticCondition({ applicationId, accessKey, conditionId, fetchImpl, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = () => Date.now() }) {
@@ -164,30 +193,111 @@
     const condition = CONDITIONS.find((item) => item.id === conditionId);
     if (!condition) throw new Error("診断条件が不正です。");
     const execute = async () => {
-      while (lastRequestStartedAt && now() - lastRequestStartedAt < MIN_REQUEST_INTERVAL_MS) {
-        await wait(MIN_REQUEST_INTERVAL_MS - (now() - lastRequestStartedAt));
-      }
-      lastRequestStartedAt = now();
-      try {
-        const params = buildDiagnosticParams(applicationId, accessKey, conditionId);
-        const response = await fetchImpl(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`, {
-          method: "GET",
-          headers: { Accept: "application/json" }
-        });
-        let payload = {};
-        try { payload = await response.json(); } catch { /* HTTP statusだけを返し、生レスポンスは露出しない */ }
-        const summary = summarizeResponse(response.status, payload);
+      const requestPage = async (page) => {
+        while (lastRequestStartedAt && now() - lastRequestStartedAt < MIN_REQUEST_INTERVAL_MS) {
+          await wait(MIN_REQUEST_INTERVAL_MS - (now() - lastRequestStartedAt));
+        }
+        lastRequestStartedAt = now();
+        try {
+          const params = buildDiagnosticParams(applicationId, accessKey, conditionId, page);
+          const response = await fetchImpl(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`, {
+            method: "GET",
+            headers: { Accept: "application/json" }
+          });
+          let payload = {};
+          try { payload = await response.json(); } catch { /* 生レスポンスは露出しない */ }
+          const summary = summarizeResponse(response.status, payload);
+          return {
+            summary,
+            entries: getResponseItems(payload),
+            payload,
+            responsePage: Number.isFinite(Number(payload?.page ?? payload?.Page)) ? Number(payload.page ?? payload.Page) : null,
+            pageCount: Number.isFinite(Number(payload?.pageCount ?? payload?.PageCount)) ? Number(payload.pageCount ?? payload.PageCount) : null,
+            ...(summary.state === "api_error" ? { safeErrorReason: getSafeApiErrorReason(payload) } : {})
+          };
+        } catch (error) {
+          return { summary: createRequestError(condition, error), entries: [], payload: {} };
+        }
+      };
+
+      const firstPage = await requestPage(1);
+      if (conditionId === "E") {
+        const pageOne = firstPage.summary;
+        const initialEntries = firstPage.entries;
+        const firstUniqueEntries = getUniqueProductEntries(initialEntries);
+        const firstTarget = firstUniqueEntries.some((entry) => getProductData(entry)?.itemCode === ITEM_CODE);
+        const apiCount = Number(pageOne.apiCount);
+        const needsSecondPage = pageOne.state !== "api_error" && !firstTarget && Number.isFinite(apiCount) && apiCount > 30;
+        const firstPageNumberMatches = firstPage.responsePage === 1;
+        const expectedPageCount = Number.isFinite(apiCount) ? Math.ceil(apiCount / 30) : null;
+
+        if (pageOne.state === "api_error" || !needsSecondPage) {
+          const scanComplete = pageOne.state !== "api_error"
+            && Number.isFinite(apiCount)
+            && firstPageNumberMatches
+            && (apiCount === 0
+              ? firstUniqueEntries.length === 0
+              : firstPage.pageCount === expectedPageCount && expectedPageCount === 1 && firstUniqueEntries.length === apiCount);
+          return {
+            ...pageOne,
+            conditionId,
+            condition: condition.label,
+            fetchedCount: initialEntries.length,
+            uniqueFetchedCount: firstUniqueEntries.length,
+            pagesChecked: 1,
+            pagesToCheck: needsSecondPage ? 2 : 1,
+            responsePage: firstPage.responsePage,
+            pageCount: firstPage.pageCount,
+            scanComplete
+          };
+        }
+
+        const secondPage = await requestPage(2);
+        const allEntries = initialEntries.concat(secondPage.entries);
+        const uniqueEntries = getUniqueProductEntries(allEntries);
+        const mergedPayload = { count: pageOne.apiCount, Items: uniqueEntries };
+        const combined = summarizeResponse(secondPage.summary.httpStatus, mergedPayload);
+        const countsMatch = Number(secondPage.summary.apiCount) === apiCount;
+        const scanComplete = secondPage.summary.state !== "api_error"
+          && countsMatch
+          && firstPageNumberMatches
+          && secondPage.responsePage === 2
+          && firstPage.pageCount === expectedPageCount
+          && secondPage.pageCount === firstPage.pageCount
+          && expectedPageCount === 2
+          && uniqueEntries.length === apiCount;
+
         return {
+          ...combined,
+          ...(secondPage.summary.state === "api_error" ? {
+            state: "api_error",
+            errorCode: secondPage.summary.errorCode,
+            errorType: secondPage.summary.errorType,
+            safeErrorReason: secondPage.safeErrorReason
+          } : {}),
           conditionId,
           condition: condition.label,
-          ...summary,
-          ...(summary.state === "api_error" ? { safeErrorReason: getSafeApiErrorReason(payload) } : {}),
-          ...(conditionId === "A" && summary.state !== "api_error" ? { rateDistribution: summarizeAffiliateRateDistribution(payload) } : {})
+          httpStatus: secondPage.summary.httpStatus,
+          apiCount: pageOne.apiCount,
+          fetchedCount: allEntries.length,
+          uniqueFetchedCount: uniqueEntries.length,
+          pagesChecked: secondPage.summary.state === "api_error" ? 1 : 2,
+          pagesAttempted: 2,
+          pagesToCheck: 2,
+          responsePage: secondPage.responsePage,
+          pageCount: secondPage.pageCount,
+          scanComplete
         };
-      } catch (error) {
-        // Fetch例外の文面にはURL等が含まれる可能性があるため、詳細は表示・記録しない。
-        return { conditionId, condition: condition.label, state: "api_error", httpStatus: null, apiCount: null, fetchedCount: 0, targetFound: false, affiliateRate: null, affiliateRateType: "unavailable", errorCode: null, errorType: error?.name === "TypeError" ? "network_error" : "request_error" };
       }
+
+      const { summary, payload } = firstPage;
+      return {
+        conditionId,
+        condition: condition.label,
+        ...summary,
+        ...(summary.state === "api_error" ? { safeErrorReason: getSafeApiErrorReason(payload) } : {}),
+        ...(conditionId === "A" && summary.state !== "api_error" ? { rateDistribution: summarizeAffiliateRateDistribution(payload) } : {})
+      };
     };
     const pending = requestQueue.then(execute, execute);
     requestQueue = pending.then(() => undefined, () => undefined);

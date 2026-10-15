@@ -807,15 +807,19 @@ async function runApiRateDiagnostic(conditionId, button) {
     title.textContent = result.condition;
     const details = document.createElement("p");
     const state = result.state === "api_error" ? `APIエラー${result.httpStatus ? `（HTTP ${result.httpStatus}）` : "（HTTP status未取得）"} / エラーコード：${result.errorCode || "詳細不明"}${result.errorType ? ` / ${result.errorType}` : ""}`
-      : result.state === "zero_results" ? "API正常応答・検索結果0件"
-        : result.targetFound ? "API正常応答・対象商品発見" : "API正常応答・対象商品未発見";
+      : conditionId === "E" && result.targetFound ? "API正常応答・対象商品発見"
+        : conditionId === "E" && result.scanComplete ? "取得した全件に対象商品なし"
+          : conditionId === "E" ? "対象商品未確認（全件確認は未完了）"
+            : result.state === "zero_results" ? "API正常応答・検索結果0件"
+              : result.targetFound ? "API正常応答・対象商品発見" : "API正常応答・対象商品未発見";
     details.textContent = [
       state,
       ...(result.safeErrorReason ? [`安全なエラー理由：${result.safeErrorReason}`] : []),
       `HTTPステータス：${result.httpStatus == null ? "未取得" : result.httpStatus}`,
       `API count：${result.apiCount == null ? "未取得" : String(result.apiCount)}`,
       `取得件数：${result.fetchedCount}`,
-      `対象商品：${result.targetFound ? "発見" : "対象商品未発見"}`,
+      `対象商品：${result.targetFound ? "発見" : conditionId === "E" && !result.scanComplete ? "未確認" : "対象商品なし"}`,
+      ...(conditionId === "E" ? [`ページ確認：${result.pagesChecked ?? 0}/${result.pagesToCheck ?? 1}`, `API応答ページ：${result.responsePage ?? "未確認"}/${result.pageCount ?? "未確認"}`, `重複除外後：${result.uniqueFetchedCount ?? result.fetchedCount}件`] : []),
       `対象商品のaffiliateRate：${result.targetFound && result.affiliateRate != null ? String(result.affiliateRate) : "未取得"}`,
       `affiliateRateの型：${result.affiliateRateType}`,
       ...(result.product ? [`商品名：${result.product.itemName || "未取得"}`, `価格：${result.product.itemPrice == null ? "未取得" : formatYen(result.product.itemPrice)}`, `商品URL：${result.product.itemUrl ? "取得済み" : "未取得"}`, `ショップ名：${result.product.shopName || "未取得"}`, `商品画像URL：${result.product.hasMediumImageUrl ? "あり" : "なし"}`] : [])

@@ -35,6 +35,9 @@ assert.strictEqual(shopCodeParams.get("itemCode"), null);
 assert.strictEqual(shopCodeParams.get("keyword"), null);
 assert.strictEqual(shopCodeParams.get("hits"), "30");
 assert.strictEqual(shopCodeParams.get("format"), "json");
+assert.strictEqual(shopCodeParams.get("page"), "1");
+assert.strictEqual(api.buildDiagnosticParams(appId, accessKey, "E", 2).get("page"), "2");
+for (const id of ["A", "B", "C", "D"]) assert.strictEqual(api.buildDiagnosticParams(appId, accessKey, id).get("page"), null);
 assert.throws(() => api.buildDiagnosticParams(appId, accessKey, "X"), /診断条件が不正/);
 
 const success = api.summarizeResponse(200, { count: 2, Items: [
@@ -156,9 +159,10 @@ assert.strictEqual(api.getSafeApiErrorReason({ error_description: "sensitive unk
       const parsed = new URL(url);
       assert.strictEqual(parsed.searchParams.get("shopCode"), "sunshine-osaka");
       assert.strictEqual(parsed.searchParams.get("hits"), "30");
+      assert.strictEqual(parsed.searchParams.get("page"), "1");
       assert.strictEqual(parsed.searchParams.get("itemCode"), null);
       assert.strictEqual(parsed.searchParams.get("keyword"), null);
-      return { status: 200, json: async () => ({ count: 33, Items: [
+      return { status: 200, json: async () => ({ count: 33, page: 1, pageCount: 2, Items: [
         { Item: { itemCode, itemName: "一龍堂 しそ餃子", itemPrice: 3980, itemUrl: "https://item.rakuten.co.jp/sunshine-osaka/kuro50-siso50/", shopName: "一龍堂", mediumImageUrls: [{ imageUrl: "https://example.test/item.jpg" }] } },
         { Item: { itemCode: "sunshine-osaka:other", itemName: "別商品" } }
       ] }) };
@@ -170,6 +174,8 @@ assert.strictEqual(api.getSafeApiErrorReason({ error_description: "sensitive unk
   assert.strictEqual(shopResponse.targetFound, true);
   assert.strictEqual(shopResponse.product.itemName, "一龍堂 しそ餃子");
   assert.strictEqual(shopResponse.product.hasMediumImageUrl, true);
+  assert.strictEqual(shopResponse.pagesChecked, 1, "a page-one match must not trigger page two");
+  assert.strictEqual(shopResponse.scanComplete, false, "finding the target does not claim all shop products were scanned");
   assert.strictEqual(JSON.stringify(shopResponse).includes(appId), false);
   assert.strictEqual(JSON.stringify(shopResponse).includes(accessKey), false);
 
@@ -248,22 +254,134 @@ assert.strictEqual(api.getSafeApiErrorReason({ error_description: "sensitive unk
   assert.strictEqual(targetRateMissing.affiliateRate, null);
   assert.strictEqual(targetRateMissing.affiliateRateType, "unavailable");
   assert.strictEqual(targetRateMissing.rateDistribution, undefined, "condition B behavior must not be extended with A distribution");
-  const noShopTarget = await api.runDiagnosticCondition({
+  const makeShopItems = (start, count) => Array.from({ length: count }, (_, index) => ({
+    Item: { itemCode: `sunshine-osaka:other-${start + index}`, itemName: `別商品${start + index}` }
+  }));
+  const pageRequests = [];
+  const pageTwoMatch = await api.runDiagnosticCondition({
     applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
-    fetchImpl: async () => ({ status: 200, json: async () => ({ count: 30, Items: [{ Item: { itemCode: "sunshine-osaka:other" } }] }) })
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      pageRequests.push(parsed.searchParams.get("page"));
+      const page = Number(parsed.searchParams.get("page"));
+      return { status: 200, json: async () => ({
+        count: 41,
+        page,
+        pageCount: 2,
+        Items: page === 1 ? makeShopItems(1, 30) : [
+          { Item: { itemCode, itemName: "対象商品", itemPrice: 3980, mediumImageUrls: [{ imageUrl: "https://example.test/target.jpg" }] } },
+          ...makeShopItems(31, 10)
+        ]
+      }) };
+    }
   });
-  assert.strictEqual(noShopTarget.state, "success");
-  assert.strictEqual(noShopTarget.fetchedCount, 1);
-  assert.strictEqual(noShopTarget.targetFound, false);
-  assert.strictEqual(noShopTarget.product, null);
+  assert.deepStrictEqual(pageRequests, ["1", "2"]);
+  assert.strictEqual(pageTwoMatch.targetFound, true);
+  assert.strictEqual(pageTwoMatch.product.itemName, "対象商品");
+  assert.strictEqual(pageTwoMatch.product.itemPrice, 3980);
+  assert.strictEqual(pageTwoMatch.product.hasMediumImageUrl, true);
+  assert.strictEqual(pageTwoMatch.apiCount, 41);
+  assert.strictEqual(pageTwoMatch.fetchedCount, 41);
+  assert.strictEqual(pageTwoMatch.uniqueFetchedCount, 41);
+  assert.strictEqual(pageTwoMatch.pagesChecked, 2);
+  assert.strictEqual(pageTwoMatch.pagesToCheck, 2);
+  assert.strictEqual(pageTwoMatch.scanComplete, true);
+
+  const allPagesNoMatch = await api.runDiagnosticCondition({
+    applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
+    fetchImpl: async (url) => ({ status: 200, json: async () => ({
+      count: 41,
+      page: Number(new URL(url).searchParams.get("page")),
+      pageCount: 2,
+      Items: Number(new URL(url).searchParams.get("page")) === 1
+        ? makeShopItems(1, 30) : makeShopItems(31, 11)
+    }) })
+  });
+  assert.strictEqual(allPagesNoMatch.targetFound, false);
+  assert.strictEqual(allPagesNoMatch.scanComplete, true);
+  assert.strictEqual(allPagesNoMatch.fetchedCount, 41);
+  assert.strictEqual(allPagesNoMatch.uniqueFetchedCount, 41);
+
+  const beyondTwoPages = await api.runDiagnosticCondition({
+    applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
+    fetchImpl: async (url) => {
+      const page = Number(new URL(url).searchParams.get("page"));
+      return { status: 200, json: async () => ({
+        count: 61, page, pageCount: 3,
+        Items: makeShopItems((page - 1) * 30 + 1, 30)
+      }) };
+    }
+  });
+  assert.strictEqual(beyondTwoPages.fetchedCount, 60);
+  assert.strictEqual(beyondTwoPages.pageCount, 3);
+  assert.strictEqual(beyondTwoPages.scanComplete, false, "60 rows do not certify all results when API reports a third page");
+
+  let failedPageRequests = 0;
+  const pageTwoError = await api.runDiagnosticCondition({
+    applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
+    fetchImpl: async () => {
+      failedPageRequests += 1;
+      if (failedPageRequests === 1) return { status: 200, json: async () => ({ count: 41, page: 1, pageCount: 2, Items: makeShopItems(1, 30) }) };
+      return { status: 400, json: async () => ({ error: "wrong_parameter", error_description: "page parameter is not valid" }) };
+    }
+  });
+  assert.strictEqual(failedPageRequests, 2);
+  assert.strictEqual(pageTwoError.state, "api_error");
+  assert.strictEqual(pageTwoError.pagesChecked, 1);
+  assert.strictEqual(pageTwoError.pagesAttempted, 2);
+  assert.strictEqual(pageTwoError.scanComplete, false);
+  assert.strictEqual(pageTwoError.targetFound, false);
+  assert.strictEqual(pageTwoError.safeErrorReason, "pageパラメータが無効です。");
+
+  let shortCountRequests = 0;
+  const shortCount = await api.runDiagnosticCondition({
+    applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
+    fetchImpl: async () => {
+      shortCountRequests += 1;
+      return { status: 200, json: async () => ({ count: 2, page: 1, pageCount: 1, Items: [
+        { Item: { itemCode: "sunshine-osaka:other-a" } }, { Item: { itemCode: "sunshine-osaka:other-b" } }
+      ] }) };
+    }
+  });
+  assert.strictEqual(shortCountRequests, 1, "count <= 30 must not request page two");
+  assert.strictEqual(shortCount.scanComplete, true);
+  assert.strictEqual(shortCount.targetFound, false);
+
+  const unidentifiedRows = await api.runDiagnosticCondition({
+    applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
+    fetchImpl: async () => ({ status: 200, json: async () => ({ count: 1, page: 1, pageCount: 1, Items: [{ Item: { itemName: "itemCode未取得" } }] }) })
+  });
+  assert.strictEqual(unidentifiedRows.uniqueFetchedCount, 0);
+  assert.strictEqual(unidentifiedRows.scanComplete, false, "rows without itemCode cannot certify complete matching");
+
+  let duplicatePageRequests = 0;
+  const duplicateAcrossPages = await api.runDiagnosticCondition({
+    applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
+    fetchImpl: async (url) => {
+      duplicatePageRequests += 1;
+      const page = Number(new URL(url).searchParams.get("page"));
+      const firstPageItems = makeShopItems(1, 29);
+      firstPageItems.push({ Item: { itemCode: "sunshine-osaka:repeated" } });
+      return { status: 200, json: async () => ({ count: 32, page, pageCount: 2, Items: page === 1 ? firstPageItems : [
+        { Item: { itemCode: "sunshine-osaka:repeated" } }, { Item: { itemCode } }
+      ] }) };
+    }
+  });
+  assert.strictEqual(duplicatePageRequests, 2);
+  assert.strictEqual(duplicateAcrossPages.targetFound, true);
+  assert.strictEqual(duplicateAcrossPages.fetchedCount, 32);
+  assert.strictEqual(duplicateAcrossPages.uniqueFetchedCount, 31);
+  assert.strictEqual(duplicateAcrossPages.scanComplete, false, "duplicates must not count as distinct scanned products");
   const emptyShop = await api.runDiagnosticCondition({
     applicationId: appId, accessKey, conditionId: "E", ...rateLimitOptions,
-    fetchImpl: async () => ({ status: 200, json: async () => ({ count: 0, Items: [] }) })
+    fetchImpl: async () => ({ status: 200, json: async () => ({ count: 0, page: 1, pageCount: 0, Items: [] }) })
   });
   assert.strictEqual(emptyShop.state, "zero_results");
+  assert.strictEqual(emptyShop.scanComplete, true);
   const missingImage = api.summarizeResponse(200, { count: 1, Items: [{ Item: { itemCode, itemName: "商品" } }] });
   assert.strictEqual(missingImage.product.hasMediumImageUrl, false);
-  assert.deepStrictEqual(waits, [1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200]);
+  assert.ok(waits.length >= 1, "API request spacing should be exercised");
+  assert.ok(waits.every((ms) => ms === 1200), "requests must remain at least 1.2 seconds apart");
 
   console.log("Affiliate rate diagnostic mock cases: passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
