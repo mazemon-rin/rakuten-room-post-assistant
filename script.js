@@ -2159,7 +2159,7 @@ function generateRoomCopy(mode = "auto") {
   else if (status) status.textContent = "5種類の案を作成しました。文章を選び、必要なら編集して保存してください。";
 }
 
-function saveRoomCopyDraft({ startAfterSave = false } = {}) {
+function saveRoomCopyDraft() {
   const product = currentProduct;
   const itemCode = String(product?.itemCode || product?.product?.itemCode || "");
   if (!product || !itemCode || currentRoomCopySession.itemCode !== itemCode || $("#room-copy-builder")?.dataset.itemCode !== itemCode) {
@@ -2190,10 +2190,6 @@ function saveRoomCopyDraft({ startAfterSave = false } = {}) {
     return false;
   }
   if (isRoomCopySandboxMode()) {
-    if (startAfterSave) {
-      if (status) status.textContent = "隔離テストモードでは投稿開始できません。文章の保存テストだけ実行できます。";
-      return false;
-    }
     const verified = saveRoomCopySandboxDraft(product, introText, hashTags);
     if (!verified) {
       if (status) status.textContent = "隔離テスト保存を確認できませんでした。通常データは変更していません。";
@@ -2248,11 +2244,12 @@ function saveRoomCopyDraft({ startAfterSave = false } = {}) {
   currentRoomCopySession.candidateId = candidateId;
   if (introInput) introInput.value = introText;
   if (tagInput) tagInput.value = hashTags;
+  const postStartButton = $("#startRoomPostFromDetail");
+  if (postStartButton) postStartButton.disabled = false;
   if ($("#candidateList")) renderCandidates();
   if ($("#statsGrid")) renderDashboard();
   renderStorageStatus();
-  if (status) status.textContent = `itemCode ${itemCode} の候補へ保存し、保存内容を再確認しました。ROOM投稿前の下書きです。`;
-  if (startAfterSave) startRoomPostFromDetail();
+  if (status) status.textContent = `itemCode ${itemCode} の候補へ紹介文とハッシュタグを保存し、保存内容を再確認しました。投稿開始は別操作です。`;
   return true;
 }
 
@@ -2372,6 +2369,11 @@ function openDetail(product, draft = {}) {
   const sandboxDraft = readRoomCopySandboxDraft(productItemCode);
   const savedIntroText = sandboxDraft?.introText || linkedCandidate?.introText || draft.introText || "";
   const savedHashTags = sandboxDraft?.hashTags || linkedCandidate?.hashTags || draft.hashTags || getSafeRoomCopyTags(product);
+  const hasSavedRoomCopy = Boolean(
+    currentRoomCopySession.candidateId
+    && String(linkedCandidate?.introText || "").trim()
+    && `${String(linkedCandidate.introText).trim()}\n${String(linkedCandidate.hashTags || "").trim()}`.length <= 500
+  );
   $("#detailArea").innerHTML = `
     <div class="detail-layout">
       <div>
@@ -2425,7 +2427,7 @@ function openDetail(product, draft = {}) {
         <p class="meta">選んだ文章は編集できます。紹介文とハッシュタグの合計を500文字以内にしてから保存してください。</p>
         <div class="button-row">
           <button class="primary-button" type="button" onclick="saveRoomCopyDraft()">${isRoomCopySandboxMode() ? "テスト文面を隔離保存" : "紹介文・ハッシュタグを保存"}</button>
-          ${isRoomCopySandboxMode() ? "" : currentRoomCopySession.candidateId ? `<button class="secondary-button" type="button" onclick="startRoomPostFromDetail()">Codex投稿開始</button>` : `<button class="secondary-button" type="button" onclick="saveRoomCopyDraft({ startAfterSave: true })">保存してCodex投稿開始</button>`}
+          ${isRoomCopySandboxMode() ? "" : `<button id="startRoomPostFromDetail" class="secondary-button" type="button" onclick="startRoomPostFromDetail()" ${hasSavedRoomCopy ? "" : "disabled"}>保存済み文面でROOM投稿準備へ（別操作）</button>`}
         </div>
         <label class="original-photo-option"><input type="checkbox" id="detail-original-photo"> 📷 オリジナル写真で投稿</label>
         <div class="button-row">
@@ -3314,7 +3316,7 @@ function candidateCard(item) {
         <details class="candidate-tools">
           <summary>手動操作・トラブル対応</summary>
           <div class="record-actions">
-          <button class="primary-button" type="button" onclick="openDetailByCandidate('${item.id}')">商品詳細・紹介文作成</button>
+          <button class="primary-button" type="button" onclick="openDetailByCandidate('${item.id}')">保存済み情報から文章を準備</button>
           <button class="secondary-button" type="button" onclick="generateCandidatePrompt('${item.id}')">紹介文プロンプト</button>
           <button class="secondary-button" type="button" onclick="openCandidateForPaste('${item.id}')">紹介文を貼り付け</button>
           <button class="secondary-button" type="button" onclick="pasteCodexResult('${item.id}')">Codex結果を貼り付け</button>

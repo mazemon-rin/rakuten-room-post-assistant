@@ -753,8 +753,11 @@ roomCopyElements["#detailArea"] = {
     this.html = value;
     const itemCode = value.match(/data-item-code="([^"]*)"/)?.[1] || "";
     roomCopyElements["#room-copy-builder"] = { dataset: { itemCode }, scrollIntoView() {} };
+    const postStartButton = value.match(/<button id="startRoomPostFromDetail"[^>]*>/)?.[0];
+    if (postStartButton) roomCopyElements["#startRoomPostFromDetail"].disabled = /\sdisabled(?:\s|>)/.test(postStartButton);
   }
 };
+roomCopyElements["#startRoomPostFromDetail"] = { disabled: true };
 ["#roomCopyStyle", "#roomCopyResults", "#roomCopyStatus", "#introText", "#hashTags", "#promptOutput", "#postType", "#reader", "#tone", "#length", "#emoji", "#focusPoint", "#caution"].forEach((selector) => {
   roomCopyElements[selector] = { value: "", textContent: "", innerHTML: "" };
 });
@@ -777,7 +780,11 @@ const roomCopyProduct = {
   itemUrl: "https://example.com/hook-test-umbrella"
 };
 scoring.openDetail(roomCopyProduct);
-assert(roomCopyElements["#detailArea"].html.includes("5パターン比較生成") && roomCopyElements["#detailArea"].html.includes("保存してCodex投稿開始"), "Room copy UI A: generation modes and save/start action are present");
+assert(roomCopyElements["#detailArea"].html.includes("5パターン比較生成") && roomCopyElements["#detailArea"].html.includes("紹介文・ハッシュタグを保存") && roomCopyElements["#detailArea"].html.includes("保存済み文面でROOM投稿準備へ（別操作）") && roomCopyElements["#startRoomPostFromDetail"].disabled, "Room copy UI A: save and post preparation are separate; post start stays disabled before save");
+const blankSavedCandidate = { id: "blank-room-copy-candidate", itemCode: roomCopyProduct.itemCode, product: roomCopyProduct, title: roomCopyProduct.itemName, introText: "", hashTags: "#傘", postStatus: "投稿待ち" };
+roomCopyData.candidates = [blankSavedCandidate];
+scoring.openDetail(roomCopyProduct, blankSavedCandidate);
+assert(roomCopyElements["#startRoomPostFromDetail"].disabled, "Room copy UI A2: an existing candidate with no saved intro cannot start ROOM preparation");
 scoring.generateRoomCopy("compare");
 assert(roomCopyElements["#roomCopyResults"].innerHTML.includes("驚き・ニュース型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("対象者呼びかけ型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("悩み・共感型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("メリット先出し型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("短い一言型"), "Room copy UI B: five hook variants render");
 assert(!roomCopyElements["#roomCopyResults"].innerHTML.includes("50%OFF") && !roomCopyElements["#roomCopyResults"].innerHTML.includes("使ってみました"), "Room copy safety A: unconfirmed discounts and fake usage are omitted");
@@ -789,6 +796,7 @@ const autoHookChoices = ["0", "1", "2", "3", "4"].map((suffix) => scoring.choose
 assert(new Set(autoHookChoices).size === 5, "Room copy UX: auto mode distributes hook styles across different item identities");
 roomCopyElements["#introText"].value += "編集済み。";
 assert(scoring.saveRoomCopyDraft(), "Room copy workflow A: edited copy saves");
+assert(!roomCopyElements["#startRoomPostFromDetail"].disabled && !scoring.getCurrentData().pendingRoomPost, "Room copy workflow A2: successful save enables a separate post action without starting it");
 let savedRoomCopy = scoring.getCurrentData().candidates.find((candidate) => candidate.itemCode === roomCopyProduct.itemCode);
 assert(savedRoomCopy && savedRoomCopy.introText.endsWith("編集済み。") && savedRoomCopy.hashTags && savedRoomCopy.product.itemCode === roomCopyProduct.itemCode, "Room copy workflow B: exact itemCode, edited intro, tags, and product are saved together");
 assert(`${savedRoomCopy.introText}\n${savedRoomCopy.hashTags}`.length <= 500, "Room copy workflow C: combined ROOM text stays within 500 characters");
@@ -798,6 +806,23 @@ savedRoomCopy = reloadedRoomCopyData.candidates.find((candidate) => candidate.it
 assert(savedRoomCopy && savedRoomCopy.introText.endsWith("編集済み。") && savedRoomCopy.hashTags && reloadedRoomCopyData.candidates.length === candidateCountBeforeReload, "Room copy workflow D: saved copy and candidate count survive reload without duplication");
 scoring.openDetail(roomCopyProduct, savedRoomCopy);
 assert(scoring.saveRoomCopyDraft() && scoring.getCurrentData().candidates.filter((candidate) => candidate.itemCode === roomCopyProduct.itemCode).length === 1, "Room copy workflow E: editing after reload updates the matching candidate");
+const savedOnlyProduct = {
+  itemCode: "saved-only:usb-c-light",
+  itemName: "USB-C対応 LEDライト",
+  itemCaption: "USB-C対応。軽量設計。",
+  itemPrice: 1980,
+  shopName: "保存済み情報ショップ",
+  categoryName: "照明"
+};
+scoring.openDetail(savedOnlyProduct);
+scoring.generateRoomCopy("auto");
+const preparedOnlyIntro = roomCopyElements["#introText"].value;
+assert(preparedOnlyIntro && scoring.saveRoomCopyDraft(), "Room preparation without product-page URL A: confirmed saved fields generate and save copy");
+let savedOnlyCandidate = scoring.getCurrentData().candidates.find((candidate) => candidate.itemCode === savedOnlyProduct.itemCode);
+assert(savedOnlyCandidate?.introText === preparedOnlyIntro && !savedOnlyCandidate.itemUrl && !scoring.getCurrentData().pendingRoomPost, "Room preparation without product-page URL B: saved copy remains a draft and creates no posting action");
+const preparedCandidateCount = scoring.getCurrentData().candidates.length;
+const preparedAfterReload = scoring.reloadData().candidates.find((candidate) => candidate.itemCode === savedOnlyProduct.itemCode);
+assert(preparedAfterReload?.introText === preparedOnlyIntro && preparedAfterReload.hashTags && !scoring.getCurrentData().pendingRoomPost && scoring.getCurrentData().candidates.length === preparedCandidateCount, "Room preparation without product-page URL C: saved copy persists after reload without posting or duplicate candidates");
 const sandboxProduct = {
   itemCode: "actual-product-test:001",
   itemName: "ステンレスボトル 500ml 保温保冷対応",
