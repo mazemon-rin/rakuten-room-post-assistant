@@ -341,6 +341,8 @@ function isRoomCandidate(item = {}) {
 let data = loadData();
 let currentProduct = null;
 let currentRoomCopySession = { itemCode: "", candidateId: "", variants: [], mode: "" };
+// Reloadすると安全側の確認モードへ戻す。連続実投稿の選択はこの画面セッション内だけ保持する。
+let activeRoomPostMode = "confirmation";
 let searchResults = [];
 let affiliateRateSearchResults = [];
 
@@ -4479,10 +4481,12 @@ function startSequentialProcessing(mode = "confirmation") {
     toast(text);
     return;
   }
-  startCodexPost(next.id, mode === "continuous" ? "continuous" : "confirmation");
+  const postMode = window.RoomProcessingState.normalizePostMode(mode);
+  activeRoomPostMode = postMode;
+  startCodexPost(next.id, postMode);
 }
 
-function startNextCandidate(id) {
+function startNextCandidate(id, mode = activeRoomPostMode) {
   const current = data.candidates.find((candidate) => candidate.id === id);
   if (!current || current.postStatus !== "投稿済み") {
     toast("前の商品を投稿済みにしてから次の商品を処理してください。");
@@ -4501,7 +4505,7 @@ function startNextCandidate(id) {
     toast("次の投稿待ち商品はありません。");
     return;
   }
-  startCodexPost(next.id);
+  startCodexPost(next.id, window.RoomProcessingState.normalizePostMode(mode));
 }
 
 function findPostedHistoryRecord(item) {
@@ -4857,6 +4861,14 @@ function completePendingRoomPost() {
 function markPosted(id) {
   const item = data.candidates.find((candidate) => candidate.id === id);
   if (!item) return;
+  if (data.pendingRoomPost) {
+    if (window.RoomProcessingState.isPendingLinkedToCandidate(item, data.pendingRoomPost)) {
+      completePendingRoomPost();
+      return;
+    }
+    toast(getPendingRoomPostStopMessage());
+    return;
+  }
   const existingHistory = findPostedHistoryRecord(item);
   if ((item.status === "投稿済み" || item.postStatus === "投稿済み") && existingHistory) {
     toast("この商品はすでに投稿済みです。");
@@ -5041,7 +5053,8 @@ async function startCodexPost(id, mode = "confirmation") {
     return;
   }
   saveData();
-  const postMode = mode === "continuous" ? "continuous" : "confirmation";
+  const postMode = window.RoomProcessingState.normalizePostMode(mode);
+  activeRoomPostMode = postMode;
   const instructions = buildCodexPostInstructions(candidate, { mode: postMode });
   data.pendingRoomPost = {
     candidateId: candidate.id,

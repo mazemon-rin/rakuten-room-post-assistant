@@ -59,4 +59,9 @@ assert.strictEqual(api.isPendingAssociatedWithCandidate(unknown, { candidateId: 
 // Mismatched identifiers must remain unresolved.
 assert.strictEqual(api.isPendingLinkedToCandidate(unknown, { candidateId: "other", itemCode: "shop:unknown" }), false);
 assert.strictEqual(api.isPendingAssociatedWithCandidate(unknown, { candidateId: "other", itemCode: "shop:other" }), false);
-console.log("ROOM processing state cases A-F: passed");
+
+// G: a selected continuous mode remains continuous for the next item; reload/default mode stays safe.
+assert.strictEqual(api.normalizePostMode("continuous"), "continuous");
+assert.strictEqual(api.normalizePostMode("confirmation"), "confirmation");
+assert.strictEqual(api.normalizePostMode(undefined), "confirmation");
+console.log("ROOM processing state cases A-G: passed");

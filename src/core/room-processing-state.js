@@ -76,5 +76,9 @@
     return findPendingRelation(candidate, pending) !== "なし" && findPendingRelation(candidate, pending) !== "一致なし";
   }
 
-  root.RoomProcessingState = Object.freeze({ inspectRoomProcessingState, isPendingLinkedToCandidate, isPendingAssociatedWithCandidate });
+  function normalizePostMode(mode) {
+    return mode === "continuous" ? "continuous" : "confirmation";
+  }
+
+  root.RoomProcessingState = Object.freeze({ inspectRoomProcessingState, isPendingLinkedToCandidate, isPendingAssociatedWithCandidate, normalizePostMode });
 })(typeof window !== "undefined" ? window : globalThis);
