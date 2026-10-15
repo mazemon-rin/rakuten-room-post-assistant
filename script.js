@@ -3352,6 +3352,14 @@ function renderHistory() {
     groups.get(key).push(item);
   });
   const groupedItems = [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  const renderHistoryProductUrl = (item) => {
+    const itemUrl = window.HistoryDisplay.getProductUrl(item);
+    if (!itemUrl) return `<p>商品URL：未記録</p>`;
+    if (window.HistoryDisplay.isSafeProductUrl(itemUrl)) {
+      return `<p>商品URL：<a href="${escapeAttr(itemUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(itemUrl)}</a></p>`;
+    }
+    return `<p>商品URL：${escapeHtml(itemUrl)}（安全確認できないためリンクなし）</p>`;
+  };
   historyList.innerHTML = items.length ? groupedItems.map(([weekKey, weekItems], groupIndex) => `
     <details class="history-week" ${groupIndex === 0 ? "open" : ""}>
       <summary><span>${escapeHtml(formatWeekLabel(weekKey))}</span><time>${escapeHtml(weekKey === "日付未設定" ? "" : formatDate(weekKey))}</time><em>${weekItems.length}件</em></summary>
@@ -3360,7 +3368,13 @@ function renderHistory() {
       <img src="${escapeAttr(item.imageUrl)}" alt="">
       <div>
         <h3>${escapeHtml(item.title)}</h3>
-        <p><span class="badge">投稿済み</span> ${formatDate(item.postedAt)} / ${escapeHtml(item.genreId || "ジャンル未設定")}</p>
+        <p><span class="badge">投稿済み</span> ${formatDate(item.postedAt)}</p>
+        <div class="history-product-identifiers" aria-label="保存済み商品識別情報">
+          <p>itemCode：<code>${escapeHtml(window.HistoryDisplay.getStoredValue(item, "itemCode"))}</code></p>
+          <p>ショップ名：${escapeHtml(window.HistoryDisplay.getStoredValue(item, "shopName"))}</p>
+          ${renderHistoryProductUrl(item)}
+          <p>ジャンルID：<code>${escapeHtml(window.HistoryDisplay.getStoredValue(item, "genreId"))}</code></p>
+        </div>
         <p class="collection-status">投稿タイプ：${escapeHtml({ normal: "通常商品", sale: "セール商品", used: "使用済み商品", warning: "注意喚起商品" }[item.postType] || "通常商品")} / 信頼性：${escapeHtml(item.trustStatus || "未確認")}</p>
         ${item.selectedCollection || item.recommendedCollection ? `<p class="collection-status">コレクション：${escapeHtml(getCollectionById(item.selectedCollection || item.recommendedCollection)?.name || item.selectedCollection || item.recommendedCollection)}</p>` : ""}
         <p>${escapeHtml(shorten(item.introText || "", 140))}</p>
