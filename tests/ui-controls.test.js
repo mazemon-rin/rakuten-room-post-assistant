@@ -84,8 +84,19 @@ if (!script.includes('queue.policy === "successful_posts"') || !script.includes(
   throw new Error("unknown results must remain protected, and only a verified closure may advance the fixed queue");
 }
 if (!html.includes('id="queue-stats"') || !html.includes('id="candidate-count-summary"') || !html.includes('id="stale-queue-recovery"') || !html.includes('id="refresh-latest-app"')) throw new Error("candidate and queue summaries, stale-queue recovery, and safe cache refresh controls must be present");
+if (!html.includes('id="stop-room-queue-only"') || !html.includes('キューを終了（次候補へ進まない）')
+    || !html.includes('キューだけを終了') || !script.includes('function stopRoomQueueOnly()')
+    || !script.includes('on("#stop-room-queue-only", "click", stopRoomQueueOnly)')) {
+  throw new Error("a dedicated queue-only stop action must be available without advancing or changing candidate state");
+}
+const queueOnlyStopSource = script.slice(script.indexOf("function stopRoomQueueOnly()"), script.indexOf("function resetRoomCandidates()"));
+if (queueOnlyStopSource.includes("startNextCandidate(") || queueOnlyStopSource.includes("confirmRoomOperationClosed(")
+    || queueOnlyStopSource.includes("roomAttempt =") || queueOnlyStopSource.includes("postStatus =")
+    || queueOnlyStopSource.includes("data.history =") || queueOnlyStopSource.includes("data.candidates =")) {
+  throw new Error("queue-only stop must not start a next item, confirm ROOM closure, or mutate candidate/history state");
+}
 if (!html.includes('src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-progress-separated-result-20261016')
-    || !html.includes('script.js?v=room-attempt-start-gate-20261016')) throw new Error("queue and ROOM-copy assets must use their expected cache identifiers");
+    || !html.includes('script.js?v=queue-only-stop-20261016')) throw new Error("queue and ROOM-copy assets must use their expected cache identifiers");
 if (!script.includes('function getPostableRoomCandidates()')
     || !script.includes('updateCandidateViewCounts(postableCandidates)')
     || !script.includes('getDisplayedRoomCandidates(postableCandidates)')

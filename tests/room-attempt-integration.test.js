@@ -621,5 +621,53 @@ run("data = loadData();");
   assert.strictEqual(run("data.candidates.length"), 1);
   assert.strictEqual(run("data.roomPostQueue.status"), "active");
 
+  // Queue-only stop ends persisted progression without changing candidates,
+  // ROOM attempts, copy, history, result-wait state, or starting the next item.
+  const magRide = { ...candidate, id: "magride", title: "MagRide",
+    itemCode: "magcruise:10000091", product: { ...candidate.product, itemCode: "magcruise:10000091", itemName: "MagRide" },
+    introText: "保存済みMagRide紹介文", hashTags: "#MagRide", postStatus: "投稿待ち",
+    roomAttempt: { status: "not_posted_confirmed", candidateId: "magride", itemCode: "magcruise:10000091" } };
+  const waitingDevirock = { ...candidate, id: "devirock", title: "devirock",
+    itemCode: "devirockstore:10031954", product: { ...candidate.product, itemCode: "devirockstore:10031954" },
+    postStatus: "結果確認待ち", roomAttempt: { status: "result_check_required", candidateId: "devirock", itemCode: "devirockstore:10031954" } };
+  const nextCandidate = { ...candidate, id: "next-item", title: "次候補", itemCode: "shop:next-item",
+    product: { ...candidate.product, itemCode: "shop:next-item" }, postStatus: "紹介文未作成", status: "未作成" };
+  const historyBeforeStop = [{ id: "history-existing", itemCode: "shop:posted", postedAt: "2026-10-15T00:00:00.000Z" }];
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [magRide, waitingDevirock, nextCandidate], history: historyBeforeStop });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  run("data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'magride', itemCode: 'magcruise:10000091' }, { candidateId: 'next-item', itemCode: 'shop:next-item' }], 2, '2026-10-16T00:00:00.000Z', 'queue-only-stop').queue;");
+  const candidatesBeforeQueueStop = JSON.stringify(run("data.candidates"));
+  const historyBeforeQueueStop = JSON.stringify(run("data.history"));
+  const entriesBeforeQueueStop = JSON.stringify(run("data.roomPostQueue.entries"));
+  context.mockRoomStarts = [];
+  assert.strictEqual(run("stopRoomQueueOnly()"), true, "verified saved queue can be stopped independently");
+  assert.strictEqual(run("data.roomPostQueue.status"), "stopped");
+  assert.strictEqual(run("data.roomPostQueue.currentIndex"), 0, "queue-only stop does not advance the current index");
+  assert.strictEqual(JSON.stringify(run("data.roomPostQueue.entries")), entriesBeforeQueueStop, "fixed queue entries remain intact");
+  assert.strictEqual(JSON.stringify(run("data.candidates")), candidatesBeforeQueueStop, "candidate, intro, and attempt data remain byte-for-byte equivalent");
+  assert.strictEqual(JSON.stringify(run("data.history")), historyBeforeQueueStop, "posting history is unchanged");
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'magride').roomAttempt.roomOperationClosedAt"), undefined,
+    "queue stop does not falsely claim ROOM operation closure");
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'devirock').roomAttempt.status"), "result_check_required",
+    "other result-confirmation-wait candidates remain unchanged");
+  assert.deepStrictEqual(context.mockRoomStarts, [], "queue-only stop never starts the next candidate");
+  assert.strictEqual(JSON.parse(context.localStorage.value).roomPostQueue.status, "stopped", "queue stop is persisted");
+
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [magRide], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  run("data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'magride', itemCode: 'magcruise:10000091' }], 1, '2026-10-16T00:00:00.000Z', 'queue-only-stop-save-failure').queue;");
+  run("saveData(data, { render: false });");
+  const savedBeforeStopFailure = context.localStorage.value;
+  context.localStorage.fail = true;
+  assert.strictEqual(run("stopRoomQueueOnly()"), false, "storage failure must reject queue stop");
+  assert.strictEqual(context.localStorage.value, savedBeforeStopFailure, "failed save leaves stored state untouched");
+  assert.strictEqual(run("data.roomPostQueue.status"), "active", "failed save leaves in-memory queue active as restored from storage");
+  context.localStorage.fail = false;
+
+  run("activeRoomPostQueue = { entries: [{ candidateId: 'magride', itemCode: 'magcruise:10000091' }], currentIndex: 0 };");
+  assert.strictEqual(run("stopRoomQueueOnly()"), false, "queue-only stop cannot race an active runtime queue");
+  assert.strictEqual(run("data.roomPostQueue.status"), "active");
+  run("activeRoomPostQueue = null;");
+
   console.log("ROOM attempt integration, bounded queue, reload recovery, legacy protection and failed-save safety: passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

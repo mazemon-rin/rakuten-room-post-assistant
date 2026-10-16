@@ -629,6 +629,7 @@ function bindForms() {
   on("#executePostedCandidateCleanup", "click", executePostedCandidateCleanup);
   on("#refresh-latest-app", "click", reloadLatestAppWithoutClearingData);
   on("#end-stale-queue", "click", endStaleRoomQueue);
+  on("#stop-room-queue-only", "click", stopRoomQueueOnly);
 }
 
 function reloadLatestAppWithoutClearingData() {
@@ -722,6 +723,53 @@ function endStaleRoomQueue() {
       "ROOM操作終了を確認しました。前商品は結果確認待ち・再投稿禁止のまま、固定キューの別候補へ進みます。");
   }
   toast("ROOM操作終了を記録しました。投稿結果不明の商品は保持し、固定キューは完了しました。");
+  return true;
+}
+
+function stopRoomQueueOnly() {
+  const queue = data.roomPostQueue;
+  const openStatuses = [roomCodexBridge.QUEUE_STATUS.ACTIVE, roomCodexBridge.QUEUE_STATUS.ADVANCE_READY,
+    roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED, roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED];
+  if (activeRoomPostQueue || !queue || !openStatuses.includes(queue.status)) {
+    toast("実行中のROOM処理があるか、終了可能な保存キューがありません。変更していません。");
+    return false;
+  }
+  const entry = queue.entries?.[queue.currentIndex];
+  const candidate = entry && data.candidates.find((item) => item.id === entry.candidateId);
+  const match = candidate && roomCodexBridge.matchStaleQueueCurrent(queue, candidate);
+  if (!match?.ok || !queue.queueId) {
+    toast("キューの現在候補ID・itemCodeを照合できません。変更していません。");
+    return false;
+  }
+
+  const originalCandidates = JSON.stringify(data.candidates);
+  const originalHistory = JSON.stringify(data.history);
+  const stoppedAt = new Date().toISOString();
+  const nextData = structuredClone(data);
+  nextData.roomPostQueue = { ...nextData.roomPostQueue,
+    status: roomCodexBridge.QUEUE_STATUS.STOPPED,
+    stopReason: "利用者が保存キューだけを終了しました。ROOM操作・投稿結果・候補状態は変更していません。",
+    stoppedAt };
+  const result = saveData(nextData, { render: false });
+  if (!result.ok) return false;
+
+  let persisted;
+  try { persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { persisted = null; }
+  const savedQueue = persisted?.roomPostQueue;
+  const expectedQueue = nextData.roomPostQueue;
+  if (!savedQueue || savedQueue.queueId !== expectedQueue.queueId
+      || savedQueue.status !== roomCodexBridge.QUEUE_STATUS.STOPPED
+      || savedQueue.stoppedAt !== stoppedAt
+      || savedQueue.stopReason !== expectedQueue.stopReason
+      || JSON.stringify(savedQueue.entries) !== JSON.stringify(queue.entries)
+      || savedQueue.currentIndex !== queue.currentIndex
+      || JSON.stringify(persisted.candidates) !== originalCandidates
+      || JSON.stringify(persisted.history) !== originalHistory) {
+    toast("キュー停止または候補・履歴の不変更を保存後に確認できませんでした。追加操作を停止しました。");
+    return false;
+  }
+  renderAll();
+  toast("保存キューだけを終了しました。次候補へは進まず、候補・紹介文・履歴・確認待ちは変更していません。");
   return true;
 }
 

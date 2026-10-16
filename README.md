@@ -1,6 +1,6 @@
 # 楽天ROOM投稿アシスタント
 
-ローカル作業版：Ver.2-7.1.4（未公開） — https://mazemon-rin.github.io/rakuten-room-post-assistant/
+公開版：Ver.2-7.1.4 — https://mazemon-rin.github.io/rakuten-room-post-assistant/
 
 楽天ROOMへ投稿する商品の検索、紹介文作成用プロンプト、投稿候補、投稿履歴をまとめて管理する静的Webアプリです。
 
