@@ -45,7 +45,7 @@ vm.runInContext(affiliateSalesSource, context);
 vm.runInContext(productNormalizationSource, context);
 vm.runInContext(rankingRulesSource, context);
 vm.runInContext(trendRulesSource, context);
-vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeStoredData, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, isRoomResultCheckRequired, getItemCodes, resetRoomCandidateAfterPrePostFailure, canConfirmRoomPostNotSubmitted, getProcessingBlocker, validateGeneratedCopy, buildLightweightPostedProduct, getCandidateProductForDisplay, candidateCard, data, ROOM_COPY_HOOKS, cleanRoomProductTitle, extractVerifiedRoomFeatures, buildRoomIntroVariants, chooseRoomIntroVariant, getSafeRoomCopyTags, openDetail, generatePrompt, generateRoomCopy, selectRoomCopyVariant, saveRoomCopyDraft, startCodexPost, startSequentialProcessing, getCurrentData: () => data, reloadData: () => { data = loadData(); return data; } };`, context);
+vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, canRecordRoomPosting, markPosted, completePendingRoomPost, normalizeSnsRecords, normalizeStoredData, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, isRoomResultCheckRequired, getItemCodes, resetRoomCandidateAfterPrePostFailure, canConfirmRoomPostNotSubmitted, getProcessingBlocker, validateGeneratedCopy, buildLightweightPostedProduct, getCandidateProductForDisplay, candidateCard, data, ROOM_COPY_HOOKS, cleanRoomProductTitle, extractVerifiedRoomFeatures, buildRoomIntroVariants, chooseRoomIntroVariant, getSafeRoomCopyTags, openDetail, generatePrompt, generateRoomCopy, selectRoomCopyVariant, saveRoomCopyDraft, startCodexPost, startSequentialProcessing, getCurrentData: () => data, reloadData: () => { data = loadData(); return data; } };`, context);
 vm.runInContext("this.__roomPostTest = { cleanRoomCopySource, buildRoomIntroVariants, buildCodexPostInstructions };", context);
 
 context.__scoring.resetRoomCandidateAfterPrePostFailure = context.resetRoomCandidateAfterPrePostFailure;
@@ -659,6 +659,65 @@ assert(scoring.canConfirmRoomPostNotSubmitted(safeUnpostedCandidate, safeUnposte
 assert(!scoring.canConfirmRoomPostNotSubmitted(safeUnpostedCandidate, { ...safeUnpostedPending, itemCode: "other:1" }, []), "ROOM status: unposted transition rejects pending itemCode mismatch");
 assert(!scoring.canConfirmRoomPostNotSubmitted({ ...safeUnpostedCandidate, roomAttempt: { status: "result_check_required" } }, safeUnpostedPending, []), "ROOM status: unposted transition preserves result-check-required attempts");
 assert(!scoring.canConfirmRoomPostNotSubmitted(safeUnpostedCandidate, safeUnpostedPending, [{ itemCode: "suzukachan:10000207", postedAt: "2026-10-01T00:00:00.000Z" }]), "ROOM status: unposted transition rejects a matching posted history item");
+
+// ROOM success was human-confirmed for Yoga mat, while a separate devirock
+// result-check record remains protected. Posting record must target Yoga only.
+const yogaCandidate = {
+  id: "cc811630-8586-4895-a8ca-0b245b777093",
+  itemCode: "lively777/yujiadian003",
+  title: "Gruper ヨガマット",
+  shopName: "lively777",
+  itemUrl: "https://item.rakuten.co.jp/lively777/yujiadian003/",
+  introText: "保存済みヨガマット紹介文。",
+  hashTags: "#ヨガマット",
+  status: "投稿待ち",
+  postStatus: "投稿待ち",
+  product: { itemCode: "lively777/yujiadian003", itemName: "Gruper ヨガマット", shopName: "lively777" }
+};
+const protectedDevirock = {
+  id: "devirock-protected-post-record",
+  itemCode: "devirockstore:10031954",
+  title: "devirock アソートパンツ",
+  postStatus: "確認待ち",
+  roomAttempt: { status: "result_check_required" },
+  introText: "devirock保存文",
+  hashTags: "#devirock"
+};
+const postingData = scoring.getCurrentData();
+const oldCandidates = postingData.candidates;
+const oldHistory = postingData.history;
+const oldPending = postingData.pendingRoomPost;
+const oldConfirm = context.confirm;
+const oldToast = context.toast;
+const oldShowTab = context.showTab;
+const oldSaveData = context.saveData;
+const oldCompact = context.compactPostedCandidate;
+postingData.candidates = [yogaCandidate, protectedDevirock];
+postingData.history = [];
+postingData.pendingRoomPost = { candidateId: protectedDevirock.id, itemCode: protectedDevirock.itemCode, title: protectedDevirock.title };
+context.confirm = () => true;
+context.toast = () => {};
+context.showTab = () => {};
+context.saveData = () => ({ ok: true });
+context.compactPostedCandidate = () => ({ changed: false });
+assert(scoring.canRecordRoomPosting(yogaCandidate), "ROOM completion: an unrelated, correctly bound result-check item does not block the confirmed target");
+assert(scoring.markPosted(yogaCandidate.id) === true, "ROOM completion: normal UI record action accepts the exact confirmed candidate");
+assert(yogaCandidate.postStatus === "投稿済み" && postingData.history.length === 1, "ROOM completion: only the confirmed Yoga candidate is marked and written to history");
+assert(postingData.history[0].id === yogaCandidate.id && postingData.history[0].itemCode === yogaCandidate.itemCode, "ROOM completion: history preserves exact candidate ID and itemCode");
+assert(postingData.pendingRoomPost.candidateId === protectedDevirock.id && protectedDevirock.postStatus === "確認待ち", "ROOM completion: unrelated devirock pending/result-check state remains unchanged");
+const activeOtherPending = { ...postingData.pendingRoomPost, candidateId: "unresolved-active", itemCode: "other:active" };
+assert(!scoring.canRecordRoomPosting(yogaCandidate, activeOtherPending, postingData.candidates), "ROOM completion: orphan or unverified other pending state still blocks recording");
+const activeCandidate = { id: "active-other", itemCode: "other:active", postStatus: "投稿待ち" };
+assert(!scoring.canRecordRoomPosting(yogaCandidate, { candidateId: activeCandidate.id, itemCode: activeCandidate.itemCode }, [yogaCandidate, activeCandidate]), "ROOM completion: a valid pending record for another active candidate still blocks posting record");
+assert(!scoring.canRecordRoomPosting(yogaCandidate, { candidateId: yogaCandidate.id, itemCode: "lively777:wrong" }, [yogaCandidate, protectedDevirock]), "ROOM completion: target candidate ID with a mismatched itemCode is rejected");
+postingData.candidates = oldCandidates;
+postingData.history = oldHistory;
+postingData.pendingRoomPost = oldPending;
+context.confirm = oldConfirm;
+context.toast = oldToast;
+context.showTab = oldShowTab;
+context.saveData = oldSaveData;
+context.compactPostedCandidate = oldCompact;
 
 const introCandidate = {
   id: "intro-persistence-candidate",

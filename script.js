@@ -4199,6 +4199,28 @@ function findAnyHistoryRecord(item) {
   return itemCode ? data.history.find((historyItem) => (historyItem.itemCode || historyItem.product?.itemCode || "") === itemCode) || null : null;
 }
 
+function canRecordRoomPosting(candidate, pending = data.pendingRoomPost, candidates = data.candidates) {
+  const itemCode = String(candidate?.itemCode || candidate?.product?.itemCode || "").trim();
+  if (!candidate?.id || !itemCode) return false;
+  if (!pending) return true;
+
+  // The target's own preparation state must match exactly. A stale or mismatched
+  // preparation record must never be used to mark another identity as posted.
+  if (pending.candidateId === candidate.id) return pending.itemCode === itemCode;
+
+  // An unrelated pending record is non-blocking only when it is still bound to
+  // its own candidate and that candidate is explicitly protected for review.
+  // Keep that record untouched while recording the independently confirmed post.
+  const pendingCandidate = candidates.find((entry) => entry.id === pending.candidateId);
+  const pendingItemCode = String(pendingCandidate?.itemCode || pendingCandidate?.product?.itemCode || "").trim();
+  return Boolean(
+    pendingCandidate &&
+    pendingItemCode &&
+    pending.itemCode === pendingItemCode &&
+    (pendingCandidate.postStatus === "確認待ち" || isRoomResultCheckRequired(pendingCandidate))
+  );
+}
+
 function hasPostedHistoryRecord(candidate, history = data.history) {
   const itemCode = String(candidate.itemCode || candidate.product?.itemCode || "").trim();
   if (!itemCode) return false;
@@ -4539,8 +4561,8 @@ function markPosted(id) {
   if (!item) return;
   const itemCode = item.itemCode || item.product?.itemCode || "";
   const pending = data.pendingRoomPost;
-  if (pending && (pending.candidateId !== item.id || pending.itemCode !== itemCode)) {
-    toast("保存中のROOM準備状態と候補ID・itemCodeが一致しないため、投稿済みには変更しませんでした。");
+  if (!canRecordRoomPosting(item, pending, data.candidates)) {
+    toast("対象候補のID・itemCode、または別候補の確認待ち状態を照合できないため、投稿済みには変更しませんでした。");
     return false;
   }
   if (!window.confirm(`ROOM側で投稿成功を確認しましたか？\n\n${item.title || item.product?.itemName || "商品"}\n${itemCode}\n\n成功を確認した場合だけ投稿済み履歴を記録します。`)) return false;
