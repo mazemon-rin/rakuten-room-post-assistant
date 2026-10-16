@@ -351,7 +351,7 @@ function renderCandidateDeleteControl(item, label = "候補を削除") {
 
 let data = loadData();
 let currentProduct = null;
-let currentRoomCopySession = { itemCode: "", candidateId: "", variants: [], mode: "" };
+let currentRoomCopySession = { itemCode: "", candidateId: "", variants: [], mode: "", detailLevel: "" };
 // 画面セッションの標準経路は連続投稿。実際の外部公開は現在のユーザー依頼で許可された場合だけ行う。
 let activeRoomPostMode = "continuous";
 let activeRoomPostQueue = null;
@@ -2135,6 +2135,26 @@ function extractVerifiedRoomFeatures(product = {}) {
   const featureCue = /(対応|収納|付属|素材|材質|容量|サイズ|冷凍|北海道産|国産|日本製|個包装|セット|加工|搭載|防水|撥水|UVカット|洗える|丸洗い|洗濯機|折りたたみ|軽量|大容量|保温|保冷|耐水|USB|Bluetooth|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点))/i;
   const unsafeFeature = /(\d{1,3}\s*[%％]\s*OFF|クーポン|セール|期間限定|最大\s*\d|最安|人気|ランキング|売り切れ|残りわずか|絶対|必ず|効果|口コミ|レビュー|買ってよかった|使ってみた|愛用)/i;
   const features = [];
+  // 商品説明にある機能語だけを拾い、宣伝的な修飾や使用体験の表現は紹介文へ持ち込まない。
+  const describedPerformanceTerms = ["クッション性", "柔軟性", "通気性"].filter((term) => {
+    const index = caption.indexOf(term);
+    if (index < 0) return false;
+    const context = caption.slice(Math.max(0, index - 8), index + term.length + 10);
+    return !/(?:ない|ありません|なし|不足|低い|非対応|不要)/.test(context);
+  });
+  if (describedPerformanceTerms.length) {
+    features.push(`商品説明では${describedPerformanceTerms.join("・")}が特徴として紹介されています`);
+  }
+  // 楽天商品説明の仕様欄に明記されたアッパー・ソール素材だけを抽出する。
+  const materialFacts = [
+    { label: "アッパー素材", pattern: /(?:甲材\s*[（(]?\s*アッパー\s*[）)]?|アッパー素材)\s*[:：]\s*([^■\n。]+)/i },
+    { label: "ソール素材", pattern: /(?:底材\s*[（(]?\s*ソール\s*[）)]?|ソール素材)\s*[:：]\s*([^■\n。]+)/i }
+  ].map(({ label, pattern }) => {
+    const match = caption.match(pattern);
+    const value = match?.[1]?.trim();
+    return value && value.length <= 40 && !unsafeFeature.test(value) ? `${label}は${value}` : "";
+  }).filter(Boolean);
+  if (materialFacts.length) features.push(`商品説明には、${materialFacts.join("、")}と記載されています`);
   // 長い商品説明に注意書きが混在しても、明示された短い仕様だけを抽出する。
   const size = caption.match(/サイズ\s*[:：]\s*(\d+(?:\.\d+)?\s*[×xX]\s*\d+(?:\.\d+)?\s*cm)/i);
   if (size) features.push(`サイズは${size[1]}`);
@@ -2165,12 +2185,36 @@ function cleanRoomProductTitle(product = {}) {
     .trim();
 }
 
+function cleanRoomMinimalCopyTitle(product = {}) {
+  return cleanRoomProductTitle(product)
+    .replace(/(?:\d{1,2}[\/月]\d{1,2}日?\s*)?(?:期間限定|限定)?\s*[★☆]?\s*抽選で最大\s*\d+(?:\.\d+)?\s*[%％]?\s*Pバック/gi, "")
+    .replace(/抽選で最大\s*\d+(?:\.\d+)?\s*[%％]?\s*Pバック/gi, "")
+    .replace(/\d{1,2}[\/月]\d{1,2}日?\s*/g, "")
+    .replace(/[★☆]+/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s・:：|｜]+|[\s・:：|｜]+$/g, "")
+    .trim();
+}
+
 function buildRoomIntroVariants(product = {}) {
   const title = cleanRoomProductTitle(product);
-  if (!title) return { ok: false, error: "商品名を確認できないため、紹介文を作成できません。商品名を確認してください。", variants: [] };
+  if (!title) return { ok: false, code: "missing_product_identity", error: "商品名を確認できないため、紹介文を作成できません。商品名を確認してください。", variants: [] };
   const features = extractVerifiedRoomFeatures(product);
-  if (!features.length) return { ok: false, error: "確認済みの商品特徴がありません。商品説明や商品ページから、対応規格・素材・容量などの商品固有情報を1つ確認してください。", variants: [] };
   const category = cleanRoomCopySource(product.categoryName || "");
+  if (!features.length) {
+    const minimalTitle = cleanRoomMinimalCopyTitle(product);
+    if (!minimalTitle) return { ok: false, code: "missing_product_identity", error: "商品名を確認できないため、紹介文を作成できません。商品名を確認してください。", variants: [] };
+    const safeCategory = category && category.length <= 32 && !/(クーポン|セール|\d+\s*[%％]|人気|最安|抽選)/i.test(category) ? category : "";
+    const categoryLead = safeCategory ? `${safeCategory}を探している方へ。` : "商品をお探しの方へ。";
+    const minimalVariants = [
+      `${categoryLead}「${minimalTitle}」の商品情報をチェック。`,
+      `「${minimalTitle}」が気になる方は、掲載情報を確認してみてください。`,
+      `${safeCategory || "商品"}選びは、掲載情報を見比べるところから。「${minimalTitle}」もチェック。`,
+      `「${minimalTitle}」を検討中の方へ。商品ページの情報も確認してみてください。`,
+      `「${minimalTitle}」、気になったら詳細をチェック。`
+    ].map((text, index) => ({ ...ROOM_COPY_HOOKS[index], text: finalizeRoomIntro(product, text) }));
+    return { ok: true, title: minimalTitle, category: safeCategory, features: [], detailLevel: "minimal", variants: minimalVariants };
+  }
   const titleFeatureTerms = ["USB-C対応", "Bluetooth対応", "A4対応", "A4収納", "PC収納", "個包装", "北海道産", "国産", "日本製", "撥水", "防水", "UVカット", "軽量", "大容量", "保温", "保冷"];
   const removableTitleFeatures = [...titleFeatureTerms.filter((term) => title.includes(term) && features.some((value) => value.includes(term))),
     ...features.filter((value) => /\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点)(?:入り|セット|対応)?/i.test(value) && title.includes(value))];
@@ -2195,6 +2239,7 @@ function buildRoomIntroVariants(product = {}) {
     general: { discovery: category ? `${category}選び、仕様から見てみる。` : "商品選び、仕様から見てみる。", audience: category ? `${category}を探している方` : "仕様を見て選びたい方", concern: category ? `${category}選び、どこを比べるか迷うことも` : "商品選びでは、仕様の違いも気になるところ", short: "選ぶポイントを、ひとつ確認。" }
   }[genre];
   const featureSentence = (value, includeSubject = true) => {
+    if (/^商品説明では.+が特徴として紹介されています$/.test(value) || /^商品説明には、.+と記載されています$/.test(value)) return `${value}。`;
     const property = value.match(/^(.+?)は(.+)$/);
     return property ? `${includeSubject ? `${copyTitle}の` : ""}${property[1]}は${property[2]}。` : `${includeSubject ? `${copyTitle}は` : ""}${value}。`;
   };
@@ -2290,7 +2335,7 @@ function selectRoomCopyVariant(index) {
   intro.value = variant.text;
   renderRoomCopyVariants(currentRoomCopySession.variants, index);
   const status = $("#roomCopyStatus");
-  if (status) status.textContent = `${variant.label}を選択しました。必要に応じて編集して保存してください。`;
+  if (status) status.textContent = `${variant.label}を選択しました。${currentRoomCopySession.detailLevel === "minimal" ? "確認できる情報が限られるため、商品名・カテゴリの範囲で短文にしています。" : ""}必要に応じて編集して保存してください。`;
 }
 
 function generateRoomCopy(mode = "auto") {
@@ -2306,7 +2351,9 @@ function generateRoomCopy(mode = "auto") {
   if (mode === "classic") {
     generatePrompt();
     const status = $("#roomCopyStatus");
-    if (status) status.textContent = "従来型プロンプトを作成しました。確認済みの商品情報だけで生成し、割引未確認だけを理由に通常文を省略しないでください。";
+    if (status) status.textContent = extractVerifiedRoomFeatures(currentProduct).length
+      ? "従来型プロンプトを作成しました。確認済みの商品情報だけで生成し、割引未確認だけを理由に通常文を省略しないでください。"
+      : "商品特徴の情報が限られるため、商品名・カテゴリだけを使う短文用プロンプトを作成しました。";
     return;
   }
   const result = buildRoomIntroVariants(currentProduct);
@@ -2320,11 +2367,15 @@ function generateRoomCopy(mode = "auto") {
   const variants = mode === "auto" ? [chooseRoomIntroVariant(currentProduct, result.variants)].filter(Boolean) : result.variants;
   currentRoomCopySession.variants = variants;
   currentRoomCopySession.mode = mode;
+  currentRoomCopySession.detailLevel = result.detailLevel || "verified_features";
   const tags = $("#hashTags");
-  if (tags && !tags.value.trim()) tags.value = getSafeRoomCopyTags(currentProduct);
+  const tagProduct = result.detailLevel === "minimal"
+    ? { ...currentProduct, itemName: result.title, itemCaption: "", categoryName: result.category || "" }
+    : currentProduct;
+  if (tags && !tags.value.trim()) tags.value = getSafeRoomCopyTags(tagProduct);
   renderRoomCopyVariants(variants, mode === "auto" ? 0 : -1);
   if (mode === "auto") selectRoomCopyVariant(0);
-  else if (status) status.textContent = "5種類の案を作成しました。文章を選び、必要なら編集して保存してください。";
+  else if (status) status.textContent = `${result.detailLevel === "minimal" ? "商品名・カテゴリなど確認できる情報だけで" : "確認済みの商品特徴を使って"}5種類の案を作成しました。文章を選び、必要なら編集して保存してください。`;
 }
 
 function saveRoomCopyDraft() {
@@ -2532,7 +2583,8 @@ function openDetail(product, draft = {}) {
     itemCode: productItemCode,
     candidateId: linkedCandidate && linkedItemCode === productItemCode ? linkedCandidate.id : "",
     variants: [],
-    mode: ""
+    mode: "",
+    detailLevel: ""
   };
   const duplicate = findDuplicate(product);
   const sandboxDraft = readRoomCopySandboxDraft(productItemCode);
@@ -2624,14 +2676,29 @@ function generatePrompt() {
   if (!currentProduct) return;
   const title = cleanRoomProductTitle(currentProduct);
   if (!title) {
+    const status = $("#roomCopyStatus");
+    if (status) status.textContent = "商品名を確認できないため、商品を特定できません。商品情報を確認してください。";
     toast("商品名を確認できないため、紹介文を作成できません。");
     return;
   }
   const features = extractVerifiedRoomFeatures(currentProduct);
   if (!features.length) {
+    const minimalTitle = cleanRoomMinimalCopyTitle(currentProduct);
+    if (!minimalTitle) {
+      const status = $("#roomCopyStatus");
+      if (status) status.textContent = "商品名を確認できないため、商品を特定できません。商品情報を確認してください。";
+      toast("商品名を確認できないため、紹介文を作成できません。");
+      return;
+    }
+    const rawCategory = cleanRoomCopySource(currentProduct.categoryName || "");
+    const category = rawCategory && rawCategory.length <= 32 && !/(クーポン|セール|\d+\s*[%％]|人気|最安|抽選)/i.test(rawCategory) ? rawCategory : "";
+    const tagCount = Number(data.settings.defaultTagCount) || 8;
+    const tagProduct = { ...currentProduct, itemName: minimalTitle, itemCaption: "", categoryName: category };
+    $("#promptOutput").value = `楽天ROOM向けの短い紹介文を5案作成してください。\n\n【使用してよい情報】\n商品名：${minimalTitle}\nカテゴリー：${category || "未記録"}\nショップ名：${cleanRoomCopySource(currentProduct.shopName || "") || "未記録"}\n\n商品固有の確認済み特徴がないため、上記にない特徴・性能・用途・対象者・悩み・効果・使用体験を追加しないでください。商品名やカテゴリーから特徴を推測せず、情報量に合わせて各案を短くしてください。未確認の価格、割引、クーポン、在庫、期限、人気・売上表現も書かないでください。\n\n【5案の方向】驚き・発見／対象者への呼びかけ／共感／メリット先出し（商品情報の確認を促す表現）／短い一言。事実を増やさず、商品名・カテゴリー・ショップ名の範囲で自然な短文にしてください。\n\n【出力】ROOM紹介文5案と、商品名・カテゴリーだけから作るハッシュタグ候補を${tagCount}個。`;
+    $("#hashTags").value = getSafeRoomCopyTags(tagProduct);
     const status = $("#roomCopyStatus");
-    if (status) status.textContent = "確認済みの商品特徴がありません。商品説明または商品ページから商品固有の特徴を1つ確認してください。";
-    toast("確認済みの商品特徴がないため、従来型プロンプトを作成できません。");
+    if (status) status.textContent = "確認できる情報が限られるため、商品名・カテゴリーだけを使う短文用プロンプトを作成しました。";
+    toast("商品名・カテゴリーの範囲で短文用プロンプトを作成しました。");
     return;
   }
   const tagCount = Number(data.settings.defaultTagCount) || 8;

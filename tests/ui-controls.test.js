@@ -41,7 +41,7 @@ if (!script.includes('window.HistoryDisplay.getStoredValue(item, "itemCode")') |
 if (!script.includes('安全確認できないためリンクなし') || !script.includes('商品URL：未記録') || !appCss.includes('.history-product-identifiers')) throw new Error("history product URL safety and missing-field display are missing");
 if (!script.includes('id="room-copy-builder"') || !script.includes('id="roomCopyResults"') || !script.includes('onclick="saveRoomCopyDraft()"') || !script.includes('id="startRoomPostFromDetail"') || !script.includes('disabled') || script.includes('saveRoomCopyDraft({ startAfterSave: true })')) throw new Error("ROOM copy save and separate post-start UI is missing or combined");
 if (!script.includes('保存済み情報から文章を準備')) throw new Error("Candidate copy preparation must clearly use saved information without requiring a product-page visit");
-if (!script.includes("ROOM_COPY_HOOKS") || !script.includes("確認済みの商品特徴がありません")) throw new Error("ROOM copy hook definitions or minimum-evidence guidance are missing");
+if (!script.includes("ROOM_COPY_HOOKS") || !script.includes("商品名・カテゴリなど確認できる情報だけで") || !script.includes("商品を一意に照合できません")) throw new Error("ROOM copy hooks must allow evidence-limited copy while distinguishing insufficient information from product mismatch");
 if (!html.includes('id="candidateStatusFilter"') || !html.includes('value="unposted" selected>未投稿') || !html.includes('value="review">確認待ち') || !html.includes('value="all">すべて')) throw new Error("candidate list must default to unposted and offer review/all filters");
 if (html.includes('id="start-sequential-processing"') || html.includes('id="start-sequential-posting"') || html.includes('id="sequential-processing-count"') || html.includes('id="reset-room-candidates"')) throw new Error("legacy queue controls or bulk candidate reset remain in the UI");
 if (!script.includes('items.map(candidateCardCompact)') || !script.includes('function candidateCardCompact(item)') || !script.includes('詳細を開く') || !script.includes('data-candidate-id="${escapeAttr(item.id)}"')) throw new Error("candidate cards must be compact with an expandable detail view and stable identity");
@@ -84,7 +84,7 @@ if (!script.includes('queue.policy === "successful_posts"') || !script.includes(
 }
 if (!html.includes('id="queue-stats"') || !html.includes('id="candidate-count-summary"') || !html.includes('id="stale-queue-recovery"') || !html.includes('id="refresh-latest-app"')) throw new Error("candidate and queue summaries, stale-queue recovery, and safe cache refresh controls must be present");
 if (!html.includes('src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-progress-separated-result-20261016')
-    || !html.includes('script.js?v=room-2.7.1.4-queue-progress-separated-result-20261016')) throw new Error("queue summary and rendering changes need fresh cache identifiers");
+    || !html.includes('script.js?v=room-copy-minimal-info-20261016')) throw new Error("queue and ROOM-copy assets must use their expected cache identifiers");
 if (!script.includes('function getPostableRoomCandidates()')
     || !script.includes('updateCandidateViewCounts(postableCandidates)')
     || !script.includes('getDisplayedRoomCandidates(postableCandidates)')

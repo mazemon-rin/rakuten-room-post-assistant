@@ -880,11 +880,59 @@ const countBeforeLengthCheck = scoring.getCurrentData().candidates.length;
 assert(!scoring.saveRoomCopyDraft() && scoring.getCurrentData().candidates.length === countBeforeLengthCheck, "Room copy safety F: combined text over 500 characters is not saved");
 scoring.openDetail({ ...roomCopyProduct, itemCode: "hook-test:featureless", itemName: "通常の品名", itemCaption: "商品説明はありません。", itemUrl: "https://example.com/hook-test-featureless" });
 scoring.generateRoomCopy("auto");
-assert(roomCopyElements["#roomCopyStatus"].textContent.includes("確認済みの商品特徴がありません"), "Room copy safety B: missing feature reports the specific blocker");
-const noFeatureResult = scoring.buildRoomIntroVariants({ itemName: "通常の品名", itemCaption: "特徴記載なし" });
-assert(!noFeatureResult.ok && noFeatureResult.error.includes("特徴"), "Room copy safety C: featureless product is not fabricated");
+assert(roomCopyElements["#introText"].value.includes("通常の品名") && roomCopyElements["#roomCopyStatus"].textContent.includes("商品名・カテゴリの範囲で短文"), "Room copy minimal A: sparse product info generates a short name-only draft");
+const noFeatureResult = scoring.buildRoomIntroVariants({ itemName: "通常の品名", categoryName: "雑貨", itemCaption: "特徴記載なし" });
+assert(noFeatureResult.ok && noFeatureResult.detailLevel === "minimal" && noFeatureResult.features.length === 0 && noFeatureResult.variants.length === 5, "Room copy minimal B: featureless but identified product retains all five hooks without inventing features");
+assert(new Set(noFeatureResult.variants.map((variant) => variant.text)).size === 5 && noFeatureResult.variants.every((variant) => variant.text.includes("通常の品名") && variant.text.length <= 180), "Room copy minimal C: five distinct concise variants use the known product name");
+assert(noFeatureResult.variants.every((variant) => !/(割引|クーポン|人気|最安|使ってみ|効果|売れて)/.test(variant.text)), "Room copy minimal D: sparse variants do not invent discounts, experience, effects, or popularity");
+const sparsePromoTitle = scoring.buildRoomIntroVariants({
+  itemCode: "hook-test:sparse-promo-title",
+  itemName: "10/15 限定★抽選で最大100％Pバック シンプルな商品",
+  categoryName: "雑貨",
+  itemCaption: "商品情報はありません。"
+});
+assert(sparsePromoTitle.ok && sparsePromoTitle.variants.every((variant) => !/(10\/15|限定|抽選|Pバック|100％)/.test(variant.text)), "Room copy minimal E: unverified campaign wording in a sparse product title is removed");
+const titleOnlyResult = scoring.buildRoomIntroVariants({ itemName: "名前だけの商品", itemCaption: "" });
+assert(titleOnlyResult.ok && titleOnlyResult.detailLevel === "minimal" && titleOnlyResult.variants.every((variant) => variant.text.includes("名前だけの商品")), "Room copy minimal F: product name alone is sufficient for a factual short draft");
 const noNameResult = scoring.buildRoomIntroVariants({ itemCaption: "軽量設計。" });
-assert(!noNameResult.ok && noNameResult.error.includes("商品名"), "Room copy safety C2: unidentified product reports missing identity");
+assert(!noNameResult.ok && noNameResult.code === "missing_product_identity" && noNameResult.error.includes("商品名"), "Room copy identity safety: missing product name is distinct from sparse product information");
+scoring.openDetail({ ...roomCopyProduct, itemCode: "hook-test:session-product" });
+roomCopyElements["#room-copy-builder"].dataset.itemCode = "hook-test:mismatched-product";
+scoring.generateRoomCopy("auto");
+assert(roomCopyElements["#roomCopyStatus"].textContent.includes("一意に照合できません") && !roomCopyElements["#introText"].value.includes("折りたたみ傘"), "Room copy identity safety: itemCode mismatch stops instead of using the sparse fallback");
+const sparseCopyProduct = {
+  itemCode: "hook-test:sparse-copy-save",
+  itemName: "収納ボックス",
+  itemCaption: "商品説明に特徴の記載はありません。",
+  categoryName: "収納用品",
+  shopName: "テストショップ"
+};
+scoring.openDetail(sparseCopyProduct);
+roomCopyElements["#introText"].value = "";
+roomCopyElements["#hashTags"].value = "";
+scoring.generateRoomCopy("compare");
+scoring.selectRoomCopyVariant(4);
+assert(roomCopyElements["#roomCopyStatus"].textContent.includes("確認できる情報が限られる"), "Room copy minimal G: UI labels the limited-information mode");
+const sparseCopyCountBeforeSave = scoring.getCurrentData().candidates.length;
+assert(scoring.saveRoomCopyDraft(), "Room copy minimal H: generated short copy and safe tags save through the existing UI flow");
+const savedSparseCopy = scoring.getCurrentData().candidates.find((candidate) => candidate.itemCode === sparseCopyProduct.itemCode);
+assert(savedSparseCopy && savedSparseCopy.introText.includes("収納ボックス") && savedSparseCopy.hashTags && scoring.getCurrentData().candidates.length === sparseCopyCountBeforeSave + 1, "Room copy minimal I: saved draft remains bound to the exact itemCode without extra candidate writes");
+const nikeRevolution8 = {
+  itemCode: "alpen:10506609",
+  itemName: "ナイキ REVOLUTION 8 ワイド",
+  itemCaption: "◇ナイキ レボリューション 8の快適な履き心地で、これからのランをリードしよう。ランニングの成功には、快適性が欠かせません。そこで、足を踏み出すたびにクッション性と柔軟性を実感できる、柔らかい履き心地を追求。通気性に優れたデザインで人気モデルをアップデートしました。■カラー(メーカー表記):ブラック×ホワイト(001)■甲材(アッパー):合成樹脂■底材(ソール):合成底■生産国:インドネシア■2025年モデル",
+  categoryName: "ランニングシューズ"
+};
+const nikeFeatures = scoring.extractVerifiedRoomFeatures(nikeRevolution8);
+assert(nikeFeatures.some((feature) => feature.includes("クッション性・柔軟性・通気性")), "Room copy feature regression: Nike objective performance terms are found in saved caption despite promotional wording");
+assert(nikeFeatures.some((feature) => feature.includes("アッパー素材は合成樹脂") && feature.includes("ソール素材は合成底")), "Room copy feature regression: explicit Nike upper and sole materials are extracted from specification labels");
+assert(nikeFeatures.every((feature) => !/(人気モデル|リードしよう|実感できる|優れたデザイン)/.test(feature)), "Room copy feature safety: promotional phrases and first-person-style experience language are not carried into extracted facts");
+const nikeVariants = scoring.buildRoomIntroVariants(nikeRevolution8);
+assert(nikeVariants.ok && nikeVariants.variants.length === 5, "Room copy feature regression: Nike Revolution 8 generates all five ROOM copy patterns");
+assert(nikeVariants.variants.every((variant) => variant.text.includes("クッション性・柔軟性・通気性") || (variant.text.includes("アッパー素材は合成樹脂") && variant.text.includes("ソール素材は合成底"))), "Room copy feature regression: each Nike copy variant remains anchored to saved product specifications");
+assert(nikeVariants.variants.every((variant) => !/(人気モデル|これからのランをリードしよう|実感できる|通気性に優れた)/.test(variant.text)), "Room copy feature safety: Nike generated copy excludes promotional wording from caption");
+const negativePerformanceProduct = { itemName: "通気性の記載がある商品", itemCaption: "通気性はありません。" };
+assert(!scoring.extractVerifiedRoomFeatures(negativePerformanceProduct).some((feature) => feature.includes("通気性が特徴として紹介")), "Room copy feature safety: explicitly negated performance terms are not converted into positive features");
 const babyProduct = {
   itemCode: "hook-test:baby-bedding",
   itemName: "抱っこ布団 ベビー用",
