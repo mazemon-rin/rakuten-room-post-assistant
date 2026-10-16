@@ -662,6 +662,43 @@ run("data = loadData();");
   assert.deepStrictEqual(context.mockRoomStarts, [], "queue-only stop never starts the next candidate");
   assert.strictEqual(JSON.parse(context.localStorage.value).roomPostQueue.status, "stopped", "queue stop is persisted");
 
+  // A legacy queue cursor without a roomAttempt can be stopped as queue
+  // metadata only, even when an unrelated result-check candidate exists.
+  // Neither candidate's ambiguous status nor the unknown result is resolved.
+  const legacyNoAttempt = { ...candidate, id: "legacy-no-attempt", title: "旧処理候補",
+    itemCode: "shop:legacy-no-attempt", product: { ...candidate.product, itemCode: "shop:legacy-no-attempt" },
+    postStatus: "Codex処理中" };
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [legacyNoAttempt, waitingDevirock], history: historyBeforeStop });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  run("data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'legacy-no-attempt', itemCode: 'shop:legacy-no-attempt' }], 1, '2026-10-16T00:00:00.000Z', 'legacy-no-attempt-stop').queue;");
+  const legacyCandidatesBeforeStop = JSON.stringify(run("data.candidates"));
+  const legacyHistoryBeforeStop = JSON.stringify(run("data.history"));
+  assert.strictEqual(run("stopRoomQueueOnly()"), true,
+    "a saved legacy queue cursor without a roomAttempt can be stopped without asserting a ROOM result");
+  assert.strictEqual(run("data.roomPostQueue.status"), "stopped");
+  assert.strictEqual(JSON.stringify(run("data.candidates")), legacyCandidatesBeforeStop,
+    "legacy candidate status remains unchanged and is not converted to posted/not-posted/result-confirmed");
+  assert.strictEqual(JSON.stringify(run("data.history")), legacyHistoryBeforeStop);
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'devirock').roomAttempt.status"), "result_check_required",
+    "devirock result-confirmation wait remains unchanged");
+
+  // A queue cursor with an unresolved but non-processing attempt may be
+  // stopped without confirming ROOM closure or changing the result-wait state.
+  const currentResultWait = { ...candidate, id: "current-result-wait", title: "結果確認待ち候補",
+    itemCode: "shop:current-result-wait", product: { ...candidate.product, itemCode: "shop:current-result-wait" },
+    postStatus: "結果確認待ち", roomAttempt: { attemptId: "unknown-attempt", candidateId: "current-result-wait",
+      itemCode: "shop:current-result-wait", status: "result_check_required", startedAt: null } };
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [currentResultWait, waitingDevirock], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  run("data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'current-result-wait', itemCode: 'shop:current-result-wait' }], 1, '2026-10-16T00:00:00.000Z', 'result-wait-queue-only-stop').queue;");
+  const currentAttemptBeforeStop = JSON.stringify(run("data.candidates.find((item) => item.id === 'current-result-wait').roomAttempt"));
+  assert.strictEqual(run("stopRoomQueueOnly()"), true,
+    "queue-only stop can end persisted progression while retaining an unresolved attempt");
+  assert.strictEqual(run("data.roomPostQueue.status"), "stopped");
+  assert.strictEqual(JSON.stringify(run("data.candidates.find((item) => item.id === 'current-result-wait').roomAttempt")), currentAttemptBeforeStop);
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'current-result-wait').postStatus"), "結果確認待ち");
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'devirock').roomAttempt.status"), "result_check_required");
+
   context.localStorage.value = JSON.stringify({ settings: {}, candidates: [magRide], history: [] });
   run("data = loadData(); activeRoomPostQueue = null;");
   run("data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'magride', itemCode: 'magcruise:10000091' }], 1, '2026-10-16T00:00:00.000Z', 'queue-only-stop-save-failure').queue;");
@@ -706,7 +743,7 @@ run("data = loadData();");
     roomAttempt: { attemptId: "waiting-attempt", candidateId: "waiting-protected", itemCode: "shop:waiting",
       status: "result_check_required", startedAt: null } };
   context.localStorage.value = JSON.stringify({ settings: {}, candidates: [yakenu, waitingProtected], history: [] });
-  run("data = loadData(); activeRoomPostQueue = null; data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'yakenu-id', itemCode: 'shop:stale-code' }], 1, '2026-10-16T00:00:00.000Z', 'yakenu-prestart-mismatch').queue; activeRoomPostQueue = { entries: data.roomPostQueue.entries, currentIndex: 0, mode: 'continuous' };");
+  run("data = loadData(); activeRoomPostQueue = null; data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'yakenu-id', itemCode: 'shop:stale-code' }], 1, '2026-10-16T00:00:00.000Z', 'yakenu-prestart-mismatch').queue;");
   const candidatesBeforeMismatchStop = JSON.stringify(run("data.candidates"));
   const historyBeforeMismatchStop = JSON.stringify(run("data.history"));
   assert.strictEqual(run("stopRoomQueueOnly()"), true,
@@ -723,6 +760,12 @@ run("data = loadData();");
     postStatus: "Codex処理中" }], history: [] });
   run("data = loadData(); activeRoomPostQueue = { entries: [{ candidateId: 'yakenu-id', itemCode: 'suzukachan:10000207' }], currentIndex: 0, mode: 'continuous' }; data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'yakenu-id', itemCode: 'suzukachan:10000207' }], 1, '2026-10-16T00:00:00.000Z', 'yakenu-inflight-queue').queue;");
   assert.strictEqual(run("stopRoomQueueOnly()"), false, "an existing in-flight ROOM attempt prevents queue termination");
+  assert.strictEqual(run("data.roomPostQueue.status"), "active");
+
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [yakenu], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null; data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'yakenu-id', itemCode: 'suzukachan:10000207' }], 1, '2026-10-16T00:00:00.000Z', 'yakenu-runtime-queue').queue; activeRoomPostQueue = { entries: data.roomPostQueue.entries, currentIndex: 0, mode: 'continuous' };");
+  assert.strictEqual(run("stopRoomQueueOnly()"), false,
+    "a live runtime queue prevents queue-only stop even when the candidate has no roomAttempt");
   assert.strictEqual(run("data.roomPostQueue.status"), "active");
 
   console.log("ROOM attempt integration, bounded queue, reload recovery, legacy protection and failed-save safety: passed");

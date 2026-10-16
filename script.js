@@ -733,18 +733,14 @@ function stopRoomQueueOnly() {
     toast("実行中のROOM処理があるか、終了可能な保存キューがありません。変更していません。");
     return false;
   }
-  const unclosedAttempt = data.candidates.find((item) => {
-    const attempt = item.roomAttempt;
-    return attempt?.status === roomAttemptApi.STATUS.PROCESSING || roomAttemptApi.isLegacyProcessingState(item);
-  });
+  const unclosedAttempt = data.candidates.find((item) =>
+    item.roomAttempt?.status === roomAttemptApi.STATUS.PROCESSING);
   if (unclosedAttempt) {
-    toast("ROOM操作中または操作終了未確認の商品があるため、キューだけの終了も行いません。結果確認待ちは変更していません。");
+    toast("ROOM試行が処理中の商品があるため、キューだけの終了も行いません。結果確認待ちは変更していません。");
     return false;
   }
-  if (activeRoomPostQueue && (activeRoomPostQueue.mode !== "continuous"
-      || !Array.isArray(activeRoomPostQueue.entries) || !Number.isInteger(activeRoomPostQueue.currentIndex)
-      || activeRoomPostQueue.currentIndex < 0 || activeRoomPostQueue.currentIndex >= activeRoomPostQueue.entries.length)) {
-    toast("実行キューの状態を確認できないため、変更していません。");
+  if (activeRoomPostQueue) {
+    toast("実行中のROOMキューがあるため、保存キューだけの終了はできません。候補状態は変更していません。");
     return false;
   }
   const entry = queue.entries[queue.currentIndex];
@@ -761,15 +757,17 @@ function stopRoomQueueOnly() {
     && roomCodexBridge.isOperationClosed(current.roomAttempt) && roomAttemptApi.matchesCandidate(current);
   const closedFinalResult = [roomAttemptApi.STATUS.POSTED_CONFIRMED, roomAttemptApi.STATUS.DUPLICATE_CONFIRMED]
     .includes(current.roomAttempt?.status) && roomAttemptApi.matchesCandidate(current);
-  const preOperationCandidate = !current.roomAttempt && !current.postedAt && !postedHistoryMatch(current)
-    && !["Codex処理中", "確認待ち", "結果確認待ち", "ROOM重複確認済み", "投稿済み", "スキップ"].includes(current.postStatus);
+  const noAttemptCandidate = !current.roomAttempt && !current.postedAt && !postedHistoryMatch(current)
+    && !["ROOM重複確認済み", "投稿済み"].includes(current.postStatus);
+  const protectedResultWait = current.roomAttempt?.status === roomAttemptApi.STATUS.RESULT_CHECK_REQUIRED
+    && identityMatches && roomAttemptApi.matchesCandidate(current);
   const completedQueueCandidate = queue.status === roomCodexBridge.QUEUE_STATUS.ADVANCE_READY
     && identityMatches && closedFinalResult
     && ((current.roomAttempt.status === roomAttemptApi.STATUS.POSTED_CONFIRMED
       && current["postStatus"] === "投稿済み" && hasPostedHistoryRecord(current))
       || (current.roomAttempt.status === roomAttemptApi.STATUS.DUPLICATE_CONFIRMED
         && current["postStatus"] === "ROOM重複確認済み" && roomCodexBridge.isOperationClosed(current.roomAttempt)));
-  if (!(preOperationCandidate || (identityMatches && (retryableClosedAttempt || closedUnknown)) || completedQueueCandidate)) {
+  if (!(noAttemptCandidate || (identityMatches && (retryableClosedAttempt || closedUnknown || protectedResultWait)) || completedQueueCandidate)) {
     toast("キュー現在候補にROOM試行・投稿記録・結果確認待ちがあります。状態を変更せず停止しました。");
     return false;
   }
