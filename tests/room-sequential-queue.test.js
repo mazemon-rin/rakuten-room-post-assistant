@@ -111,10 +111,22 @@ const persistedActiveSummary = queueApi.formatRoomQueueSummary({ policy: "fixed_
 assert(persistedActiveSummary.includes("保存上ACTIVE・実行状態未確認"),
   "a persisted ACTIVE queue without a live in-memory queue must not claim processing");
 const liveQueue = { currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] };
+const liveCandidate = { ...candidate("next", "shop:next"),
+  roomAttempt: { status: "processing", candidateId: "next", itemCode: "shop:next" } };
 const liveSummary = queueApi.formatRoomQueueSummary({ policy: "fixed_items", status: "active",
-  currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] }, postableAfterCompletion, liveQueue,
-  postableAfterCompletion);
+  currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] }, [liveCandidate], liveQueue,
+  [liveCandidate]);
 assert(liveSummary.includes("処理中 next"), "only an exact runtime and persisted candidate match may be shown as processing");
+const preparedCandidate = { ...candidate("prepared", "shop:prepared"), roomPreparedAt: "2026-10-16T00:00:00.000Z",
+  roomPreparedMode: "continuous", postStatus: "投稿準備済み" };
+const preparedQueue = { policy: "fixed_items", status: "active", currentIndex: 0,
+  entries: [{ candidateId: "prepared", itemCode: "shop:prepared" }] };
+assert.strictEqual(queueApi.getEligibleRoomCandidates([preparedCandidate], []).length, 0,
+  "a prepared candidate stays excluded from another queue before the ROOM operation begins");
+const preparedSummary = queueApi.formatRoomQueueSummary(preparedQueue, [], null, [preparedCandidate]);
+assert.match(preparedSummary, /投稿準備済み・ROOM操作開始待ち prepared/);
+assert.doesNotMatch(preparedSummary, /処理中/,
+  "a saved queue in preparation must not be described as a live ROOM operation");
 const stoppedSummary = queueApi.formatRoomQueueSummary({ ...completedLegacyQueue, status: "stopped" }, postableAfterCompletion, null,
   [candidate("posted", "shop:posted", "投稿済み"), ...postableAfterCompletion]);
 assert(stoppedSummary.includes("キュー停止（処理中なし）"));
@@ -130,11 +142,12 @@ assert.doesNotMatch(pendingProgress, /現在の処理商品：/);
 const verifiedActiveQueue = { policy: "fixed_items", status: "active", currentIndex: 0,
   entries: [{ candidateId: "next", itemCode: "shop:next" }] };
 const verifiedRuntimeQueue = { currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] };
-const verifiedActiveProgress = queueApi.formatRoomQueueProgress(verifiedActiveQueue, postableAfterCompletion,
-  verifiedRuntimeQueue, postableAfterCompletion);
+const verifiedCandidates = [liveCandidate];
+const verifiedActiveProgress = queueApi.formatRoomQueueProgress(verifiedActiveQueue, verifiedCandidates,
+  verifiedRuntimeQueue, verifiedCandidates);
 assert.match(verifiedActiveProgress, /処理中 next/);
-const invalidIdentityProgress = queueApi.formatRoomQueueProgress(verifiedActiveQueue, postableAfterCompletion,
-  { currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:other" }] }, postableAfterCompletion);
+const invalidIdentityProgress = queueApi.formatRoomQueueProgress(verifiedActiveQueue, verifiedCandidates,
+  { currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:other" }] }, verifiedCandidates);
 assert.match(invalidIdentityProgress, /保存上ACTIVE・実行状態未確認/);
 assert.doesNotMatch(invalidIdentityProgress, /処理中 next/);
 

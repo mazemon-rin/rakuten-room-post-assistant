@@ -21,7 +21,7 @@ vm.createContext(context);
 for (const file of ["src/core/product-identity.js", "src/core/room-sequential-queue.js", "src/core/room-codex-bridge.js", "src/core/room-attempt.js",
   "src/core/discount-rules.js", "src/core/utils.js", "src/core/affiliate-sales.js",
   "src/core/product-normalization.js", "src/core/ranking-rules.js", "src/core/trend-rules.js",
-  "src/core/product-identity.js", "src/core/duplicate-detection.js", "script.js"]) {
+  "src/core/product-identity.js", "src/core/duplicate-detection.js", "src/core/candidate-list-view.js", "script.js"]) {
   vm.runInContext(read(file), context);
 }
 // The test drives the real state functions, but never a browser or external API.
@@ -77,14 +77,14 @@ run("data = loadData();");
   // and runtime queue entries match one unique candidate ID and itemCode.
   const activeProgress = run(`RoomSequentialQueue.formatRoomQueueProgress(
     { policy: "fixed_items", status: "active", currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "auc-risecreation:10005250" }] },
-    RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history),
-    { currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "auc-risecreation:10005250" }] }, data.candidates)`);
+    RoomSequentialQueue.getEligibleRoomCandidates(data.candidates.map((item) => item.id === "omutsu" ? { ...item, roomAttempt: { status: "processing", candidateId: "omutsu", itemCode: "auc-risecreation:10005250" } } : item), data.history),
+    { currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "auc-risecreation:10005250" }] }, data.candidates.map((item) => item.id === "omutsu" ? { ...item, roomAttempt: { status: "processing", candidateId: "omutsu", itemCode: "auc-risecreation:10005250" } } : item))`);
   assert.match(activeProgress, /処理中 おむつストッカー/);
   assert.match(activeProgress, /結果確認待ち（処理中とは別・再投稿対象外）：アソートパンツ/);
   const mismatchedProgress = run(`RoomSequentialQueue.formatRoomQueueProgress(
     { policy: "fixed_items", status: "active", currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "auc-risecreation:10005250" }] },
-    RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history),
-    { currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "wrong:item" }] }, data.candidates)`);
+    RoomSequentialQueue.getEligibleRoomCandidates(data.candidates.map((item) => item.id === "omutsu" ? { ...item, roomAttempt: { status: "processing", candidateId: "omutsu", itemCode: "auc-risecreation:10005250" } } : item), data.history),
+    { currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "wrong:item" }] }, data.candidates.map((item) => item.id === "omutsu" ? { ...item, roomAttempt: { status: "processing", candidateId: "omutsu", itemCode: "auc-risecreation:10005250" } } : item))`);
   assert.match(mismatchedProgress, /保存上ACTIVE・実行状態未確認/);
   assert.doesNotMatch(mismatchedProgress, /処理中 おむつストッカー/);
 
@@ -92,6 +92,21 @@ run("data = loadData();");
   run("data = loadData(); activeRoomPostQueue = null;");
 
   assert.strictEqual(await run("startCodexPost('candidate-1', 'confirmation')"), true);
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined, "creating/copying instructions alone must not create a ROOM attempt");
+  assert.strictEqual(run("data.candidates[0].postStatus"), "投稿準備済み");
+  assert.strictEqual(run("Boolean(data.candidates[0].roomPreparedAt)"), true);
+  assert.strictEqual(run("RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history).length"), 0,
+    "prepared work is no longer eligible for another queue");
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(run("getDisplayedRoomCandidates().map((item) => item.id)"))), ["candidate-1"],
+    "prepared work remains visible in the default unposted view so its start/cancel controls are reachable");
+  assert.strictEqual(run("beginPreparedRoomOperation('candidate-1', 'wrong:item-code')"), false,
+    "a mismatched itemCode must not create a ROOM attempt");
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined);
+  assert.strictEqual(run("beginPreparedRoomOperation('missing-candidate', 'shop:item-1')"), false,
+    "an unknown candidate ID must not create a ROOM attempt");
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined);
+  assert.strictEqual(run("beginPreparedRoomOperation('candidate-1', 'shop:item-1')"), true,
+    "the explicit pre-ROOM UI action is the only transition into a processing attempt");
   assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "processing");
   assert.strictEqual(run("data.candidates[0].roomAttempt.itemCode"), "shop:item-1");
   assert.strictEqual(run("data.candidates[0].roomAttempt.candidateId"), "candidate-1");
@@ -108,6 +123,8 @@ run("data = loadData();");
   assert.strictEqual(run("confirmRoomAttemptResult('candidate-1', RoomAttempt.STATUS.NOT_POSTED_CONFIRMED, RoomAttempt.SOURCE.NOT_POSTED)"), true);
   assert.strictEqual(run("data.candidates[0].postStatus"), "投稿待ち");
   assert.strictEqual(await run("startCodexPost('candidate-1', 'confirmation')"), true);
+  assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "not_posted_confirmed", "preparation preserves the prior verified result until the new operation starts");
+  assert.strictEqual(run("beginPreparedRoomOperation('candidate-1', 'shop:item-1')"), true);
   assert.strictEqual(run("markPosted('candidate-1', RoomAttempt.SOURCE.COMPLETION)"), true);
   assert.strictEqual(run("data.history.length"), 1);
   assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "posted_confirmed");
@@ -126,9 +143,26 @@ run("data = loadData();");
   run("importJson({ target: { files: [{ text: testExportBody }] } });");
   assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "posted_confirmed");
   assert.strictEqual(run("data.history.length"), 1);
+
+  // Cancelling before the explicit ROOM-start action stops only the prepared work.
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [{ ...candidate }], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  assert.strictEqual(await run("startCodexPost('candidate-1', 'confirmation')"), true);
+  assert.strictEqual(run("cancelPreparedRoomQueue('candidate-1', 'shop:item-1')"), true);
+  assert.strictEqual(run("data.candidates.length"), 1, "pre-start cancellation preserves the candidate");
+  assert.strictEqual(run("data.candidates[0].introText"), "綿100%のポロシャツです。", "pre-start cancellation preserves saved copy");
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined, "pre-start cancellation never creates an attempt");
+  assert.strictEqual(run("data.candidates[0].roomPreparedAt"), undefined);
+  assert.strictEqual(run("data.history.length"), 0, "pre-start cancellation does not create history");
+  assert.strictEqual(run("data.candidates[0].postStatus"), "紹介文作成済み");
   context.localStorage.value = JSON.stringify({ settings: {}, candidates: [{ ...candidate }], history: [] });
   run("data = loadData();");
   assert.strictEqual(await run("startCodexPost('candidate-1', 'confirmation')"), true);
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined, "preparation must remain non-processing across persistence");
+  run("data = loadData(); recoverInterruptedRoomAttempts();");
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined, "reload must not convert an unstarted preparation into an unknown attempt");
+  assert.strictEqual(run("Boolean(data.candidates[0].roomPreparedAt)"), true);
+  assert.strictEqual(run("beginPreparedRoomOperation('candidate-1', 'shop:item-1')"), true);
   run("data = loadData(); recoverInterruptedRoomAttempts();");
   assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "result_check_required");
   assert.strictEqual(run("data.candidates[0].postStatus"), "結果確認待ち");
@@ -154,6 +188,8 @@ run("data = loadData();");
   assert.strictEqual(JSON.parse(context.localStorage.value).history.length, 0);
   context.localStorage.fail = false;
   assert.strictEqual(await run("startCodexPost('candidate-1', 'confirmation')"), true);
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined);
+  assert.strictEqual(run("beginPreparedRoomOperation('candidate-1', 'shop:item-1')"), true);
   context.localStorage.fail = true;
   assert.strictEqual(run("markPosted('candidate-1', RoomAttempt.SOURCE.COMPLETION)"), false);
   assert.strictEqual(JSON.parse(context.localStorage.value).history.length, 0);
@@ -172,6 +208,12 @@ run("data = loadData();");
   assert.strictEqual(run("data.roomPostQueue.requestedCount"), 2);
   assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "candidate-1");
   assert.strictEqual(run("data.roomPostQueue.currentIndex"), 0);
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-1').roomAttempt"), undefined,
+    "a saved queue and generated instructions must not imply that ROOM interaction started");
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-1').postStatus"), "投稿準備済み");
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(run("getDisplayedRoomCandidates().map((item) => item.id)"))), ["candidate-2", "candidate-1"],
+    "a continuous queue's prepared current item remains visible alongside other postable candidates");
+  assert.strictEqual(run("beginPreparedRoomOperation('candidate-1', 'shop:item-1')"), true);
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-1').roomAttempt.status"), "processing");
   assert.strictEqual(run("JSON.parse(localStorage.value).roomPostQueue.entries.length"), 2);
   assert.strictEqual(run("markPosted('candidate-1', RoomAttempt.SOURCE.COMPLETION)"), true);
@@ -181,6 +223,10 @@ run("data = loadData();");
   assert.strictEqual(run("data.roomPostQueue.entries.length"), 1);
   assert.strictEqual(run("data.roomPostQueue.policy"), "successful_posts");
   assert.strictEqual(run("data.roomPostQueue.successCount"), 1);
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-2').roomAttempt"), undefined,
+    "the next queue entry is only prepared until its own ROOM operation starts");
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-2').postStatus"), "投稿準備済み");
+  assert.strictEqual(run("beginPreparedRoomOperation('candidate-2', 'shop:item-2')"), true);
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-2').roomAttempt.status"), "processing");
   assert.strictEqual(run("Boolean(data.candidates.find((item) => item.id === 'candidate-2').introText)"), true,
     "the next candidate's missing copy is generated and saved as its turn begins");

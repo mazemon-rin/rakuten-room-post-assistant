@@ -85,7 +85,7 @@ if (!script.includes('queue.policy === "successful_posts"') || !script.includes(
 }
 if (!html.includes('id="queue-stats"') || !html.includes('id="candidate-count-summary"') || !html.includes('id="stale-queue-recovery"') || !html.includes('id="refresh-latest-app"')) throw new Error("candidate and queue summaries, stale-queue recovery, and safe cache refresh controls must be present");
 if (!html.includes('src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-progress-separated-result-20261016')
-    || !html.includes('script.js?v=room-copy-minimal-info-20261016')) throw new Error("queue and ROOM-copy assets must use their expected cache identifiers");
+    || !html.includes('script.js?v=room-attempt-start-gate-20261016')) throw new Error("queue and ROOM-copy assets must use their expected cache identifiers");
 if (!script.includes('function getPostableRoomCandidates()')
     || !script.includes('updateCandidateViewCounts(postableCandidates)')
     || !script.includes('getDisplayedRoomCandidates(postableCandidates)')
@@ -93,6 +93,18 @@ if (!script.includes('function getPostableRoomCandidates()')
     || !script.includes('postableCandidates: new Set(postableCandidates)')
     || !script.includes('summarizeRoomCandidates')) {
   throw new Error("candidate badge, unposted filter, and summary must share the exact queue-eligible candidate snapshot");
+}
+if (!script.includes('onclick="beginPreparedRoomOperation(')
+    || !script.includes('onclick="cancelPreparedRoomQueue(')
+    || !script.includes('投稿準備・候補ID・itemCodeまたは履歴を照合できないため、ROOM操作を開始しません。')
+    || !script.includes('nextCandidate.roomAttempt = attempt')
+    || !script.includes('candidate.postStatus = "投稿準備済み"')) {
+  throw new Error("ROOM attempts must begin only through the explicit identity-checked UI; prepared work must be safely cancellable");
+}
+if (!script.includes('const visibleCandidates = new Set(postableCandidates)')
+    || !script.includes('visibleCandidates.add(candidate)')
+    || !script.includes('roomCodexBridge.isSavedQueueConsistent(queue, data.candidates)')) {
+  throw new Error("a verified prepared candidate must remain visible in the unposted view without inflating the postable count");
 }
 if (!roomQueue.includes('結果不明保留 ${queueState.unknownCount || 0}件')) throw new Error("queue status must distinguish unresolved results from confirmed failure and deletion");
 if (!html.includes('queue-recovery-20261016')) throw new Error("static assets need a shared cache-busting identifier");

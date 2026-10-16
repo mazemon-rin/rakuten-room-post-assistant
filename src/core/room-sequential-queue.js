@@ -22,6 +22,7 @@
     return candidate.destination !== "threads_only"
       && ["投稿待ち", "紹介文作成済み", "紹介文未作成"].includes(candidate.postStatus)
       && !["投稿済み", "保留", "対象外"].includes(candidate.status)
+      && !candidate.roomPreparedAt
       && !candidate.postedAt && code && !postedCodes.has(normalizeCode(code))
       && !["processing", "result_check_required", "posted_confirmed", "duplicate_confirmed"].includes(candidate.roomAttempt?.status);
   }
@@ -33,6 +34,7 @@
     const blockedCodes = new Set(roomCandidates.filter((candidate) => {
       const status = candidate.roomAttempt?.status;
       return ["投稿済み", "ROOM重複確認済み"].includes(candidate.postStatus)
+        || Boolean(candidate.roomPreparedAt)
         || candidate.status === "投稿済み" || Boolean(candidate.postedAt)
         || ["processing", "result_check_required", "posted_confirmed", "duplicate_confirmed"].includes(status);
     }).map((candidate) => normalizeItemCode(getItemCode(candidate))).filter(Boolean));
@@ -160,6 +162,12 @@
 
     if (status === "active") {
       const savedEntry = queueState.entries?.[queueState.currentIndex];
+      const savedMatches = candidates.filter((candidate) => candidate.id === savedEntry?.candidateId
+        && normalizeItemCode(getItemCode(candidate)) === normalizeItemCode(savedEntry?.itemCode));
+      if (savedMatches.length === 1 && savedMatches[0].roomPreparedAt && !savedMatches[0].roomAttempt
+          && savedMatches[0].roomPreparedMode === "continuous") {
+        return `${prefix}・投稿準備済み・ROOM操作開始待ち ${savedMatches[0].title || savedMatches[0].product?.itemName || "商品名未確認"}`;
+      }
       const runtimeEntry = runtimeQueue?.entries?.[runtimeQueue.currentIndex];
       const sameEntry = savedEntry && runtimeEntry
         && savedEntry.candidateId === runtimeEntry.candidateId
@@ -168,6 +176,11 @@
         candidate.id === savedEntry.candidateId
           && normalizeItemCode(getItemCode(candidate)) === normalizeItemCode(savedEntry.itemCode));
       if (matches?.length === 1) {
+        if (matches[0].roomAttempt?.status !== "processing"
+            || matches[0].roomAttempt?.candidateId !== matches[0].id
+            || normalizeItemCode(matches[0].roomAttempt?.itemCode) !== normalizeItemCode(savedEntry.itemCode)) {
+          return `${prefix}・保存上ACTIVE・ROOM試行未確認`;
+        }
         const remainingQueue = Math.max(0, queueState.entries.length - queueState.currentIndex);
         return `${prefix}・残りキュー ${remainingQueue}件・処理中 ${matches[0].title || matches[0].product?.itemName || "商品名未確認"}`;
       }

@@ -13,7 +13,7 @@ const defaults = script.slice(script.indexOf("const defaultData = {"), script.in
 assert(!defaults.includes("pendingRoomPost"), "new data defaults should not create pending state");
 assert.match(script, /function normalizeStoredData\(saved\) \{[\s\S]*?\.\.\.defaultData,\s+\.\.\.\(saved \|\| \{\}\)/, "legacy fields are preserved by spreading saved data during normalization");
 assert(script.includes('let activeRoomPostMode = "continuous"'));
-assert(script.includes("連続実投稿を開始"));
+assert(script.includes("投稿指示を準備"));
 assert(script.includes("確認モードで準備"));
 
 console.log("ROOM processing-state removal cases: passed");

@@ -980,7 +980,7 @@ const roomPostPromptCandidate = {
   product: { ...babyProduct, itemUrl: "https://example.com/room-copy-confirmation", shopName: "テストショップ" }
 };
 const roomPostCard = scoring.candidateCard({ ...roomPostPromptCandidate, status: "文章作成済み", price: 1980 });
-assert(roomPostCard.includes("連続実投稿を開始") && roomPostCard.includes("確認モードで準備"), "ROOM post UI: continuous posting is primary and confirmation mode remains available");
+assert(roomPostCard.includes("投稿指示を準備") && roomPostCard.includes("確認モードで準備"), "ROOM post UI: instruction preparation is distinguished from ROOM operation start");
 const confirmationPrompt = context.__roomPostTest.buildCodexPostInstructions(roomPostPromptCandidate, { mode: "confirmation" });
 const continuousPrompt = context.__roomPostTest.buildCodexPostInstructions(roomPostPromptCandidate, { mode: "continuous" });
 assert(confirmationPrompt.includes("確認モード") && confirmationPrompt.includes("ROOM投稿画面と入力済み") && confirmationPrompt.includes("「完了」はクリックしない"), "ROOM post mode: default confirmation instructions stop at the composer without publishing");
@@ -1035,7 +1035,8 @@ scoring.startCodexPost(blankIntroCandidate.id).then(() => {
   const savedBlankIntro = scoring.getCurrentData().candidates.find((candidate) => candidate.id === blankIntroCandidate.id);
   assert(savedBlankIntro.introText && savedBlankIntro.hashTags, "Room post flow: missing intro and tags are generated and saved");
   assert(!Object.hasOwn(scoring.getCurrentData(), "pendingRoomPost"), "Room post flow: instruction creation does not create pending state");
-  assert(savedBlankIntro.postStatus === "Codex処理中", "Room post flow: continuous mode remains visible in the candidate status");
+  assert(savedBlankIntro.postStatus !== "Codex処理中", "Room post flow: preparing instructions must not mark ROOM as processing");
+  assert(savedBlankIntro.roomPreparedAt && !savedBlankIntro.roomAttempt, "Room post flow: preparation is saved without creating an attempt");
   assert(`${savedBlankIntro.introText}\n${savedBlankIntro.hashTags}`.length <= 500, "Room post flow: generated copy remains within the combined 500-character limit");
   context.localStorage.value = previousStoredJson;
   scoring.reloadData();
