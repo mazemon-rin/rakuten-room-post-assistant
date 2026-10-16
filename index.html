@@ -5,17 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <title>楽天ROOM投稿アシスタント</title>
-  <link rel="stylesheet" href="style.css?v=room-2.7.1.4-queue-recovery-20261016">
-  <link rel="stylesheet" href="src/sns-trend.css?v=room-2.7.1.4-queue-recovery-20261016">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="src/sns-trend.css">
 </head>
 <body>
   <header class="app-header">
     <div>
       <p class="eyebrow">ROOMらくらく投稿メーカー</p>
       <h1>楽天ROOM投稿アシスタント</h1>
-      <p class="app-version" aria-label="アプリバージョン">Ver.2-7.1.4</p>
-      <button id="refresh-latest-app" class="secondary-button refresh-app-button" type="button">最新版を読み直す</button>
-      <span id="app-refresh-message" class="visually-hidden" role="status" aria-live="polite"></span>
+      <p class="app-version" aria-label="アプリバージョン">Ver.2-7.1.2</p>
       <p class="lead">商品探し、紹介文づくり、投稿履歴管理をまとめて支える静的Webアプリです。</p>
     </div>
     <div class="header-note">
@@ -127,60 +125,50 @@
         <p>採用商品を1件ずつ準備します。確認モードは完了前に停止し、連続実投稿は現在の依頼で明示許可された場合だけ行います。</p>
       </div>
       <div class="candidate-view-tabs" role="tablist" aria-label="候補の種類">
-        <button class="candidate-view-tab active" id="candidate-room-tab" type="button" role="tab" aria-selected="true" aria-controls="candidate-room-view" data-candidate-view="room">投稿候補・投稿可能 (<span id="roomCandidateCount">0</span>)</button>
+        <button class="candidate-view-tab active" id="candidate-room-tab" type="button" role="tab" aria-selected="true" aria-controls="candidate-room-view" data-candidate-view="room">投稿候補 (<span id="roomCandidateCount">0</span>)</button>
         <button class="candidate-view-tab" id="candidate-threads-tab" type="button" role="tab" aria-selected="false" aria-controls="candidate-threads-view" data-candidate-view="threads">Threads投稿 (<span id="threadsCandidateCount">0</span>)</button>
       </div>
+      <div class="toolbar">
+        <input id="candidateFilter" type="search" placeholder="商品名・ショップ名・メモで検索">
+        <select id="candidateStatusFilter">
+          <option value="">すべてのステータス</option>
+          <option>未作成</option>
+          <option>文章作成待ち</option>
+          <option>Threads候補</option>
+          <option>Threads限定</option>
+          <option>文章作成済み</option>
+          <option>投稿待ち</option>
+          <option>Codex処理中</option>
+          <option>確認待ち</option>
+          <option>投稿済み</option>
+          <option>スキップ</option>
+          <option>エラー</option>
+          <option>保留</option>
+          <option>対象外</option>
+        </select>
+        <button id="reset-room-candidates" class="secondary-button" type="button">ROOM投稿候補をリセット</button>
+      </div>
       <section id="candidate-room-view" class="candidate-view-panel active" role="tabpanel" aria-labelledby="candidate-room-tab">
-       <div class="candidate-toolbar toolbar">
-        <input id="candidateFilter" type="search" placeholder="商品名・ショップ名で検索" aria-label="商品候補を検索">
-        <label for="candidateStatusFilter">表示
-         <select id="candidateStatusFilter">
-          <option value="unposted" selected>未投稿</option>
-          <option value="review">確認待ち</option>
-          <option value="all">すべて</option>
-         </select>
-        </label>
-       </div>
-       <p id="candidate-count-summary" class="candidate-count-summary" aria-live="polite"></p>
-       <div class="queue-status-panel" role="status" aria-live="polite">
-        <p id="queue-progress" class="queue-progress"></p>
-        <p id="queue-stats" class="queue-stats"></p>
-       </div>
-       <details id="stale-queue-recovery" class="panel queue-recovery-panel">
-        <summary>古い保存キューのROOM操作終了を記録</summary>
-        <p>再読み込み後の「保存上ACTIVE」は実行中を意味しません。ROOM画面・投稿操作が終了していることを実際に確認した場合のみ記録してください。投稿結果不明の商品は結果確認待ち・同一itemCode再投稿禁止のまま保持し、成功数に含めません。旧キューは再開せず終了します。別商品の処理は新しい指示で候補を選び直します。</p>
-        <p>「キューだけを終了」は保存キューの進行だけを止めます。ROOM操作終了・投稿結果を確定せず、候補・紹介文・履歴・確認待ち状態も変更しません。</p>
-        <button id="stop-room-queue-only" class="secondary-button" type="button">キューを終了（次候補へ進まない）</button>
-        <p>旧キュー管理データだけを保存データから削除します。候補・紹介文・投稿履歴・roomAttempt・確認待ちは変更しません。別タブを含めROOM操作が実行中でないことを確認してください。</p>
-        <label><input id="delete-room-queue-confirmed" type="checkbox"> ROOM操作が実行中でないことを確認し、旧キュー管理データだけを削除します。</label>
-        <button id="delete-room-queue-only" class="secondary-button" type="button">旧キュー管理データだけ削除</button>
-        <label for="stale-queue-close-reason">ROOM操作終了の確認根拠</label>
-        <input id="stale-queue-close-reason" type="text" autocomplete="off" placeholder="例：ROOM投稿画面を閉じ、処理が継続していないことを確認">
-        <label><input id="stale-queue-close-confirmed" type="checkbox"> ROOM操作が終了したことを確認しました。投稿結果は確定しません。</label>
-        <button id="end-stale-queue" class="secondary-button" type="button">ROOM操作終了を記録して旧キューを終了</button>
-       </details>
-       <details class="panel codex-room-command-panel" aria-labelledby="codex-room-command-title">
-        <summary id="codex-room-command-title">Codex連携を開く</summary>
-        <p>ROOMへの実投稿を明示した自然言語の指示を貼り付け、Control＋Enter（MacはCommand＋Enter）で受け付けます。件数を指定すると投稿成功数の目標になります。登録日時の古い候補から1件ずつ投稿し、ROOMの完了とアプリの履歴保存を確認した後に、次の投稿可能候補を改めて選択します。件数未指定の場合は、開始時点の投稿可能候補数を成功目標として処理します。</p>
-        <form id="codex-room-command-form">
-          <label for="codex-room-command">今回の自然言語指示
-            <textarea id="codex-room-command" rows="3" autocomplete="off" placeholder="例：ROOMへの実投稿を許可します。投稿可能候補を古い順に、候補がなくなるまで1件ずつ連続実投稿してください。X・Threadsは対象外です。"></textarea>
-          </label>
-          <p id="codex-room-command-message" class="message" role="status" aria-live="polite"></p>
-        </form>
-       </details>
-       <details class="panel collection-panel">
-        <summary>コレクション管理</summary>
+       <div class="queue-control-panel panel">
+        <div>
+          <strong>Chrome固定タブ運用</strong>
+          <p>開始前に、同じChromeプロフィールで楽天ROOMタブを1枚開いてください。ROOM用の新規タブは作成しません。</p>
+        </div>
+        <button id="start-sequential-processing" class="primary-button" type="button">確認モードで次の候補を準備</button>
+        <button id="start-sequential-posting" class="secondary-button" type="button">連続実投稿モードで開始</button>
+        <p id="queue-progress" class="queue-progress" role="status" aria-live="polite"></p>
+      </div>
+      <section class="panel collection-panel">
+        <h3>コレクション管理</h3>
         <p>アルゴリズムの推奨を確認し、必要なら選択コレクションを手動で変更します。</p>
         <div id="collectionSummary" class="compact-list"></div>
-       </details>
-       <details class="codex-result-panel">
-        <summary>Codex結果の手動反映</summary>
+      </section>
+      <div class="codex-result-panel">
         <label for="codex-result-input">Codex結果受け取り欄</label>
         <textarea id="codex-result-input" rows="8" placeholder="ITEM_CODE:\n商品コード\n\n紹介文:\n\nハッシュタグ:\n\n状態:\n確認待ち"></textarea>
         <button id="apply-codex-result" class="primary-button" type="button">Codex結果を反映</button>
         <p id="codex-result-message" class="message" role="status" aria-live="polite"></p>
-       </details>
+      </div>
       <div id="candidateList" class="record-list"></div>
       </section>
       <section id="candidate-threads-view" class="candidate-view-panel" role="tabpanel" aria-labelledby="candidate-threads-tab" hidden>
@@ -343,8 +331,6 @@
         <p class="small-note">キーワードまたは対象カテゴリーで商品を探します。お買い得情報は追加条件として使えます。</p>
         <form id="productSearchForm" class="search-form">
           <label class="wide">検索キーワード<input id="unifiedProductKeyword" type="search" placeholder="iPhone18 ケース（空欄ならカテゴリー検索）"></label>
-          <label>検索モード<select id="unifiedSearchMode"><option value="normal" selected>通常検索</option><option value="high_affiliate_rate">高料率検索</option></select></label>
-          <label id="affiliateRateFilterGroup" hidden>API参考料率<select id="affiliateRateMinimum"><option value="5">5%以上</option><option value="10">10%以上</option><option value="15">15%以上</option><option value="20">20%以上</option></select></label>
           <label>表示件数<select id="unifiedProductCount"><option value="5">5件</option><option value="10" selected>10件</option><option value="20">20件</option></select></label>
           <fieldset class="ranking-category-fieldset unified-category-fieldset">
             <legend>対象カテゴリー（商品検索・ランキング共通）</legend>
@@ -363,24 +349,10 @@
           </fieldset>
           <label>最低割引率<select id="unifiedDiscountFilter" name="unifiedDiscountFilter"><option value="">指定なし</option><option value="10">10%以上</option><option value="20">20%以上</option><option value="30">30%以上</option><option value="40">40%以上</option><option value="50">50%以上</option><option value="60">60%以上</option><option value="70">70%以上</option><option value="80">80%以上</option><option value="90">90%以上</option></select></label>
           <p class="small-note search-filter-note">割引商品を探すための検索条件です。表示商品の割引率を保証するものではありません。</p>
-          <p class="small-note" id="affiliateRateSearchNote" hidden>高料率検索の表示は楽天APIの参考料率です。本人に適用される特別料率や確定報酬を示すものではありません。</p>
           <div class="button-row"><button class="primary-button" type="submit">商品を検索</button><button id="clearSearchConditions" class="secondary-button" type="button">クリア</button><button id="openRaCoupon" class="secondary-button" type="button">RaCouponで確認</button></div>
         </form>
-        <p id="couponSearchMessage" class="message" role="status" aria-live="polite" style="white-space: pre-line">検索条件を設定して商品を検索してください。</p>
+        <p id="couponSearchMessage" class="message" role="status" aria-live="polite" style="white-space: pre-line"></p>
         <div id="couponSearchResults" class="coupon-results-grid"></div>
-        <details class="panel api-rate-diagnostic" id="apiRateDiagnostic">
-          <summary>開発者向け：API料率診断</summary>
-          <p class="small-note">A〜Dは個別に実行できます。keyword検索は最大30件、shopCode検索は最大2ページ・60件まで確認し、対象itemCodeと完全照合します。実行した条件だけAPI通信し、認証情報・リクエストURL・レスポンス全文は表示・保存しません。</p>
-          <p>対象 itemCode：<code>sunshine-osaka:kuro50-siso50</code></p>
-          <div class="button-row api-rate-diagnostic-actions">
-            <button class="secondary-button" type="button" data-api-rate-condition="A">A：keyword / 料率指定なし</button>
-            <button class="secondary-button" type="button" data-api-rate-condition="B">B：itemCode / 料率指定なし</button>
-            <button class="secondary-button" type="button" data-api-rate-condition="C">C：keyword / 5%以上</button>
-            <button class="secondary-button" type="button" data-api-rate-condition="D">D：itemCode / 5%以上</button>
-            <button class="secondary-button" type="button" data-api-rate-condition="E">E：shopCode / 最大2ページ・60件</button>
-          </div>
-          <div id="apiRateDiagnosticResults" role="status" aria-live="polite"></div>
-        </details>
       </section>
       <form id="rankingForm" class="search-form">
         <label>ジャンルID<input id="rankingGenreId" type="text" placeholder="空欄で総合"></label>
@@ -486,23 +458,16 @@
   </footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="src/core/product-identity.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/duplicate-detection.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/candidate-list-view.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-progress-separated-result-20261016"></script>
-  <script src="src/core/room-codex-bridge.js?v=room-2.7.1.4-codex-prompt-scope-20261016"></script>
-  <script src="src/core/room-attempt.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/discount-rules.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/utils.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/affiliate-sales.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/history-display.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/product-normalization.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/affiliate-rate-search.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/affiliate-rate-diagnostic.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/ranking-rules.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/core/trend-rules.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="script.js?v=queue-metadata-cleanup-20261016"></script>
-  <script src="src/sns-trend.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="src/sns-trend-discovery.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/product-identity.js"></script>
+  <script src="src/core/duplicate-detection.js"></script>
+  <script src="src/core/discount-rules.js"></script>
+  <script src="src/core/utils.js"></script>
+  <script src="src/core/affiliate-sales.js"></script>
+  <script src="src/core/product-normalization.js"></script>
+  <script src="src/core/ranking-rules.js"></script>
+  <script src="src/core/trend-rules.js"></script>
+  <script src="script.js?v=room-copy-confirmation-20261014-r1"></script>
+  <script src="src/sns-trend.js"></script>
+  <script src="src/sns-trend-discovery.js?v=adoption-feedback-20260929"></script>
 </body>
 </html>
