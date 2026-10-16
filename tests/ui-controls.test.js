@@ -66,6 +66,10 @@ if (!html.includes('id="codex-room-command-form"') || !html.includes('id="codex-
 if (!script.includes('handleCodexRoomCommandSubmit') || !script.includes('parseRequestedCount(prompt)') || !script.includes('hasExplicitPostingIntent(prompt)') || !script.includes('data.roomPostQueue = created.queue')) throw new Error("Codex prompt bridge must parse an explicit count and persist the bounded queue");
 if (!roomBridge.includes('function parseRequestedCount(prompt = "")') || !roomBridge.includes('function canStartQueue(candidates = [], entries = [], previousQueue = null)') || !roomBridge.includes('function recordOutcome(queue, candidateId, itemCode, outcome, proof = {})')) throw new Error("Codex queue validation and result lifecycle helpers are missing");
 if (!script.includes('confirmRoomOperationClosed') || !script.includes('roomOperationClosedAt') || !script.includes('roomOperationCloseReason')) throw new Error("unknown outcomes need a recorded ROOM operation closure before another queue can start");
+if (script.includes('結果を確認・記録するまで同じキューの続行・新しいキューの開始はできません。')
+    || !script.includes('投稿結果は未確定のまま保持されます。同じitemCodeの再投稿は禁止です。別商品の新規キューは、旧キューと候補ID・itemCodeの整合性、および他のROOM操作がないことを開始時に確認できた場合に限り開始できます。旧キューは再開しません。')) {
+  throw new Error("closed unknown results must be described accurately: same-item retry remains blocked while a verified different-item queue can be checked and started independently");
+}
 if (!script.includes('queue.policy === "successful_posts"') || !script.includes('confirmQueueCandidateUnpostable')
     || script.includes('removeClosedUnknownFromSuccessQueue')
     || !html.includes('終了を記録して固定キューの次候補へ')
