@@ -6,7 +6,7 @@ const RANKING_RETRY_SAFETY_MARGIN_MS = 200;
 const RANKING_MAX_RETRIES = 1;
 const RANKING_REQUEST_TIMEOUT_MS = 15000;
 const SELECTION_SCORE_VERSION = "2.7.1";
-const APP_VERSION = "2.7.1.3";
+const APP_VERSION = "2.7.1.4";
 const RECOMMENDATION_TITLE_MAX_LENGTH = 40;
 const TREND_KEYWORD_MAX = 5;
 const TREND_PRODUCTS_PER_KEYWORD = 5;
@@ -2955,7 +2955,11 @@ function renderQueueProgress() {
   const queue = window.RoomSequentialQueue.getEligibleRoomCandidates(roomCandidates, data.history);
   const active = roomCandidates.find(isRoomAttemptBlocked);
   if (active) {
-    progress.textContent = window.RoomSequentialQueue.formatRoomSequentialProgress(active, activeRoomPostQueue || data.roomPostQueue);
+    progress.textContent = window.RoomSequentialQueue.formatRoomSequentialProgress(active, data.roomPostQueue);
+    return;
+  }
+  if (data.roomPostQueue?.status === roomCodexBridge.QUEUE_STATUS.ACTIVE) {
+    progress.textContent = window.RoomSequentialQueue.formatRoomSequentialProgress(null, data.roomPostQueue);
     return;
   }
   if (data.roomPostQueue?.status === roomCodexBridge.QUEUE_STATUS.ADVANCE_READY) {
@@ -3374,8 +3378,17 @@ function candidateCardCompact(item) {
   const attemptSummary = item.roomAttempt
     ? `${roomAttemptApi.STATUS_LABELS[item.roomAttempt.status] || "未確認"} / 開始 ${item.roomAttempt.startedAt || "未記録"} / itemCode ${item.roomAttempt.itemCode || "未確認"}`
     : "試行記録なし";
+  const legacyProtectionControls = roomAttemptApi.isLegacyProcessingState(item) ? `
+    <div class="warning legacy-room-protection">
+      <p><strong>旧形式の処理中状態を検出</strong>：ROOM投稿結果と操作の稼働状況は不明です。ここでは投稿済み・未投稿を決めず、結果確認待ちとして保護できます。</p>
+      <label>確認するitemCode<input id="legacy-room-confirm-code-${escapeAttr(item.id)}" type="text" autocomplete="off" placeholder="表示中の商品itemCodeを入力"></label>
+      <label>保留する理由<input id="legacy-room-protection-reason-${escapeAttr(item.id)}" type="text" autocomplete="off" placeholder="例：ROOM結果不明のため未確定のまま保留"></label>
+      <label><input id="legacy-room-protection-confirmed-${escapeAttr(item.id)}" type="checkbox"> 投稿結果を変更せず、操作終了も未確認として保護することを確認しました</label>
+      <button class="secondary-button" type="button" onclick="protectLegacyRoomProcessing('${item.id}')">旧処理を結果確認待ちとして保護</button>
+    </div>` : "";
   const reviewControls = unresolved ? `
     <p class="warning">結果確認待ちの商品は再投稿できません。ROOM側の結果を確認してから状態を整理してください。</p>
+    ${legacyProtectionControls}
     <label>確認根拠<select id="room-confirmation-source-${escapeAttr(item.id)}">${roomEvidenceOptions}</select></label>
     <div class="record-actions">
       <button class="secondary-button" type="button" onclick="confirmRoomAttemptResult('${item.id}', 'posted_confirmed')">ROOM投稿済みを確認</button>
@@ -4531,6 +4544,82 @@ function isRoomAttemptBlocked(candidate) {
   if (candidate.roomAttempt && !Object.values(roomAttemptApi.STATUS).includes(candidate.roomAttempt.status)) return true;
   return roomAttemptApi.isUnresolved(candidate.roomAttempt)
     || ["Codex処理中", "確認待ち", "要手動確認", "結果確認待ち"].includes(candidate.postStatus);
+}
+
+function protectLegacyRoomProcessing(id) {
+  const candidate = data.candidates.find((item) => item.id === id && isRoomCandidate(item));
+  const itemCode = candidate ? roomAttemptApi.getItemCode(candidate) : "";
+  const confirmedCodeInput = document.querySelector(`#legacy-room-confirm-code-${id}`);
+  const reasonInput = document.querySelector(`#legacy-room-protection-reason-${id}`);
+  const confirmationInput = document.querySelector(`#legacy-room-protection-confirmed-${id}`);
+  const confirmedItemCode = String(confirmedCodeInput?.value || "").trim();
+  const reason = String(reasonInput?.value || "").trim();
+  if (!candidate || !roomAttemptApi.isLegacyProcessingState(candidate) || !itemCode
+      || confirmedItemCode !== itemCode || !reason || confirmationInput?.checked !== true) {
+    toast("旧処理候補・itemCodeを確認し、結果を確定せず保留する確認と理由を入力してください。状態は変更していません。");
+    return false;
+  }
+  if (activeRoomPostQueue) {
+    toast("この画面メモリにROOMキューがあります。キューの終了状態を確認できないため保留処理を行いません。");
+    return false;
+  }
+
+  const nextData = structuredClone(data);
+  const nextCandidate = nextData.candidates.find((item) => item.id === id && isRoomCandidate(item));
+  if (!nextCandidate || !roomAttemptApi.isLegacyProcessingState(nextCandidate)
+      || roomAttemptApi.getItemCode(nextCandidate) !== itemCode) {
+    toast("保存対象の候補ID・itemCodeが確認時と一致しません。状態は変更していません。");
+    return false;
+  }
+  const queue = nextData.roomPostQueue;
+  if (!roomCodexBridge.isSavedQueueConsistent(queue, nextData.candidates)) {
+    toast("保存済みキューの候補ID・itemCode・件数を整合確認できないため、旧状態を変更していません。");
+    return false;
+  }
+  const queueIsOpen = [roomCodexBridge.QUEUE_STATUS.ACTIVE, roomCodexBridge.QUEUE_STATUS.ADVANCE_READY,
+    roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED, roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(queue?.status);
+  const entry = queue?.entries?.[queue.currentIndex];
+  const queueMatchesCandidate = entry?.candidateId === nextCandidate.id && entry?.itemCode === itemCode;
+  if (queueIsOpen && !queueMatchesCandidate) {
+    toast("保存済みキューの現在候補と旧処理候補が一致しません。キュー整合性を確認できないため変更していません。");
+    return false;
+  }
+  if (queueMatchesCandidate && ![roomCodexBridge.QUEUE_STATUS.ACTIVE,
+      roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(queue.status)) {
+    toast("保存済みキューの状態から旧処理を安全に保留できません。状態は変更していません。");
+    return false;
+  }
+
+  const protectedAttempt = roomAttemptApi.protectLegacyResultUnknown(nextCandidate, {
+    attemptId: crypto.randomUUID(),
+    confirmedAt: new Date().toISOString(),
+    confirmedItemCode,
+    reason,
+    explicitlyConfirmed: confirmationInput.checked
+  });
+  if (!protectedAttempt || protectedAttempt.candidateId !== nextCandidate.id || protectedAttempt.itemCode !== itemCode) {
+    toast("候補ID・itemCodeの整合性を確認できません。状態は変更していません。");
+    return false;
+  }
+
+  let nextQueue = queue;
+  if (queueMatchesCandidate) {
+    const transition = roomCodexBridge.recordOutcome(queue, nextCandidate.id, itemCode, "unknown");
+    if (!transition.ok) {
+      toast(`${transition.error} 状態は変更していません。`);
+      return false;
+    }
+    nextQueue = transition.queue;
+  }
+  nextCandidate.roomAttempt = protectedAttempt;
+  nextCandidate.postStatus = "結果確認待ち";
+  if (queueMatchesCandidate) nextData.roomPostQueue = nextQueue;
+
+  // Persist a detached snapshot so the live in-memory state is untouched unless storage verifies.
+  const saved = saveData(nextData);
+  if (!saved.ok) return false;
+  toast("旧処理を結果確認待ちとして保護しました。ROOM結果は不明のままです。同じitemCodeは再投稿できません。");
+  return true;
 }
 
 function recoverInterruptedRoomAttempts() {

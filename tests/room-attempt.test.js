@@ -53,4 +53,33 @@ assert.strictEqual(api.create(mismatch, "bad", "2026-10-16T09:00:00.000Z"), null
 assert.strictEqual(api.interrupt(mismatch), null);
 assert.strictEqual(api.confirm(mismatch, api.STATUS.POSTED_CONFIRMED, api.SOURCE.HISTORY, "2026-10-16T09:00:00.000Z"), null);
 
+const legacyProcessing = { id: "legacy-id", itemCode: "shop:legacy", postStatus: "Codex処理中" };
+assert.strictEqual(api.isLegacyProcessingState(legacyProcessing), true);
+const protectedLegacy = api.protectLegacyResultUnknown(legacyProcessing, {
+  attemptId: "legacy-attempt", confirmedAt: "2026-10-16T10:00:00.000Z",
+  confirmedItemCode: "shop:legacy", reason: "ROOM結果は不明として保留",
+  explicitlyConfirmed: true
+});
+assert.strictEqual(protectedLegacy.status, api.STATUS.RESULT_CHECK_REQUIRED);
+assert.strictEqual(protectedLegacy.startedAt, null, "unknown legacy start time stays null");
+assert.strictEqual(protectedLegacy.confirmedAt, null, "protection is not an outcome confirmation");
+assert.strictEqual(protectedLegacy.confirmationSource, null);
+assert.strictEqual(protectedLegacy.legacyProtectionConfirmedAt, "2026-10-16T10:00:00.000Z");
+assert.strictEqual(api.protectLegacyResultUnknown(legacyProcessing, { ...{
+  attemptId: "legacy-attempt", confirmedAt: "2026-10-16T10:00:00.000Z",
+  confirmedItemCode: "shop:other", reason: "確認", explicitlyConfirmed: true
+} }), null, "itemCode mismatch cannot be protected");
+assert.strictEqual(api.protectLegacyResultUnknown(legacyProcessing, {
+  attemptId: "legacy-attempt", confirmedAt: "2026-10-16T10:00:00.000Z",
+  confirmedItemCode: "shop:legacy", reason: "確認", explicitlyConfirmed: false
+}), null, "explicit human confirmation is required");
+assert.strictEqual(api.protectLegacyResultUnknown({ ...legacyProcessing, product: { itemCode: "shop:wrong" } }, {
+  attemptId: "legacy-attempt", confirmedAt: "2026-10-16T10:00:00.000Z",
+  confirmedItemCode: "shop:legacy", reason: "確認", explicitlyConfirmed: true
+}), null, "conflicting candidate itemCodes are rejected");
+assert.strictEqual(api.protectLegacyResultUnknown({ ...legacyProcessing, roomAttempt: {} }, {
+  attemptId: "legacy-attempt", confirmedAt: "2026-10-16T10:00:00.000Z",
+  confirmedItemCode: "shop:legacy", reason: "確認", explicitlyConfirmed: true
+}), null, "existing attempt state is not treated as legacy");
+
 console.log("ROOM attempt transitions and legacy compatibility: passed");

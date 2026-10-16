@@ -62,6 +62,12 @@ assert.match(boundedProgress, /（1 \/ 3件）/);
 assert(!boundedProgress.includes("371"));
 const unavailableProgress = queueApi.formatRoomSequentialProgress(manyCandidates[0], null);
 assert(unavailableProgress.includes("開始時のキュー件数は復元できません"));
+const persistedActiveProgress = queueApi.formatRoomSequentialProgress(manyCandidates[0], {
+  status: "active", entries: threeOnly.entries, currentIndex: 0
+});
+assert(persistedActiveProgress.includes("保存上ACTIVE・実行状態未確認"), "persisted ACTIVE is not presented as proof of a live worker");
+assert(queueApi.formatRoomSequentialProgress(null, { status: "active" }).includes("保存上ACTIVE・実行状態未確認"),
+  "an orphaned ACTIVE queue must remain visible even when no candidate can be resolved");
 
 // Phase 2: savedAt determines posting order, never the card order or a screen filter.
 const dated = [

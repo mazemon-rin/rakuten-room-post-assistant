@@ -69,14 +69,25 @@ const unknown = bridge.recordOutcome(created.queue, "c-old", "Shop:one", "unknow
 assert.strictEqual(unknown.queue.status, bridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED);
 assert.strictEqual(unknown.queue.entries[0].outcome, "result_check_required");
 assert.strictEqual(unknown.queue.entries[0].outcome === "posted", false);
-const unresolvedCandidates = [{ id: "c-old", itemCode: "Shop:one", roomAttempt: { status: "result_check_required", itemCode: "Shop:one" } }];
+const unresolvedCandidates = [
+  { id: "c-old", itemCode: "Shop:one", roomAttempt: { status: "result_check_required", itemCode: "Shop:one" } },
+  { id: "c-next", itemCode: "shop:two" }
+];
 assert.strictEqual(bridge.canStartQueue(unresolvedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], unknown.queue).ok, false);
-const closedCandidates = [{ id: "c-old", itemCode: "Shop:one", roomAttempt: {
-  status: "result_check_required", itemCode: "Shop:one",
-  roomOperationClosedAt: "2026-10-16T01:00:00.000Z", roomOperationCloseReason: "ROOM画面を閉じた"
-} }];
+const closedCandidates = [
+  { id: "c-old", itemCode: "Shop:one", roomAttempt: {
+    status: "result_check_required", itemCode: "Shop:one",
+    roomOperationClosedAt: "2026-10-16T01:00:00.000Z", roomOperationCloseReason: "ROOM画面を閉じた"
+  } },
+  { id: "c-next", itemCode: "shop:two" }
+];
 assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], unknown.queue).ok, true);
 assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "same-code", itemCode: "shop:one" }], unknown.queue).ok, false);
+assert.strictEqual(bridge.isSavedQueueConsistent(unknown.queue, closedCandidates), true);
+assert.strictEqual(bridge.isSavedQueueConsistent(unknown.queue, [closedCandidates[0]]), false,
+  "a queue with a missing fixed candidate is inconsistent");
+assert.strictEqual(bridge.isSavedQueueConsistent(unknown.queue, [closedCandidates[0], { id: "c-next", itemCode: "shop:wrong" }]), false,
+  "a queue whose fixed candidate itemCode changed is inconsistent");
 
 const photo = bridge.recordOutcome(created.queue, "c-old", "Shop:one", "original_photo");
 assert.strictEqual(photo.queue.status, bridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED);

@@ -101,12 +101,17 @@
   }
 
   function formatRoomSequentialProgress(candidate, queueState) {
-    if (!candidate) return "処理対象の商品はありません。";
+    if (!candidate) return queueState?.status === "active"
+      ? "保存上ACTIVE・実行状態未確認（固定キューと候補の対応を確認してください）。"
+      : "処理対象の商品はありません。";
+    const queueStateLabel = queueState?.status === "active"
+      ? " / キュー：保存上ACTIVE・実行状態未確認"
+      : queueState?.status ? ` / 保存キュー状態：${queueState.status}` : "";
     const entry = queueState?.entries?.[queueState.currentIndex];
     if (entry?.candidateId === candidate.id && entry.itemCode === getItemCode(candidate)) {
-      return `現在の処理商品：${candidate.title || candidate.product?.itemName || "商品名未確認"}（${queueState.currentIndex + 1} / ${queueState.entries.length}件） / 状態：${candidate.postStatus || "未確認"}`;
+      return `現在の処理商品：${candidate.title || candidate.product?.itemName || "商品名未確認"}（${queueState.currentIndex + 1} / ${queueState.entries.length}件） / 状態：${candidate.postStatus || "未確認"}${queueStateLabel}`;
     }
-    return `現在の処理商品：${candidate.title || candidate.product?.itemName || "商品名未確認"} / 状態：${candidate.postStatus || "未確認"}（開始時のキュー件数は復元できません）`;
+    return `現在の処理商品：${candidate.title || candidate.product?.itemName || "商品名未確認"} / 状態：${candidate.postStatus || "未確認"}（開始時のキュー件数は復元できません）${queueStateLabel}`;
   }
 
   root.RoomSequentialQueue = Object.freeze({ getEligibleRoomCandidates, buildRoomSequentialQueue, resolveRoomQueueCandidate, advanceRoomSequentialQueue, formatRoomSequentialProgress });

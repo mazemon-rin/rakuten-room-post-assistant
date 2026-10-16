@@ -41,6 +41,30 @@
       && getItemCode(candidate) && getItemCode(candidate) === String(attempt.itemCode || ""));
   }
 
+  function isLegacyProcessingState(candidate = {}) {
+    return candidate.postStatus === "Codex処理中" && !candidate.roomAttempt;
+  }
+
+  function protectLegacyResultUnknown(candidate, options = {}) {
+    const itemCode = getItemCode(candidate);
+    const confirmedItemCode = String(options.confirmedItemCode || "").trim();
+    const reason = String(options.reason || "").trim();
+    if (!isLegacyProcessingState(candidate) || !candidate.id || !itemCode
+        || confirmedItemCode !== itemCode || !reason || !options.explicitlyConfirmed
+        || !options.attemptId || !options.confirmedAt) return null;
+    return {
+      attemptId: options.attemptId,
+      candidateId: candidate.id,
+      itemCode,
+      startedAt: null,
+      status: STATUS.RESULT_CHECK_REQUIRED,
+      confirmedAt: null,
+      confirmationSource: null,
+      legacyProtectionConfirmedAt: options.confirmedAt,
+      legacyProtectionReason: reason
+    };
+  }
+
   function create(candidate, attemptId, startedAt) {
     const itemCode = getItemCode(candidate);
     if (!candidate?.id || !itemCode || !attemptId || !startedAt) return null;
@@ -75,5 +99,6 @@
   }
 
   root.RoomAttempt = Object.freeze({ STATUS, SOURCE, SOURCE_LABELS, STATUS_LABELS,
-    getItemCode, isUnresolved, matchesCandidate, create, interrupt, confirm });
+    getItemCode, isUnresolved, matchesCandidate, isLegacyProcessingState, protectLegacyResultUnknown,
+    create, interrupt, confirm });
 })(typeof window !== "undefined" ? window : globalThis);

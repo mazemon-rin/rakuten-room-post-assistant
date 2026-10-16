@@ -240,5 +240,81 @@ run("data = loadData();");
   assert.strictEqual(run("data.roomPostQueue.entries[2].candidateId"), "queue-3",
     "reloading preserves the final fixed ID without appending a fourth candidate");
 
-  console.log("ROOM attempt integration, bounded queue, reload recovery, persistence and failed-save safety: passed");
+  // Legacy status-only processing is protected only after an explicit identity check and confirmation.
+  const legacyCandidate = { id: "2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e", destination: "room",
+    itemCode: "devirockstore:10031954", title: "旧形式の候補", status: "投稿待ち", postStatus: "Codex処理中" };
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [legacyCandidate], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null; data.roomPostQueue = undefined;");
+  context.commandInputs = {
+    "#legacy-room-confirm-code-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e": { value: "devirockstore:10031954" },
+    "#legacy-room-protection-reason-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e": { value: "ROOM結果不明のまま保留する確認" },
+    "#legacy-room-protection-confirmed-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e": { checked: true }
+  };
+  assert.strictEqual(run("RoomAttempt.isLegacyProcessingState(data.candidates[0])"), true);
+  assert.strictEqual(run("protectLegacyRoomProcessing('2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e')"), true);
+  assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "result_check_required");
+  assert.strictEqual(run("data.candidates[0].roomAttempt.startedAt"), null);
+  assert.strictEqual(run("data.candidates[0].roomAttempt.confirmedAt"), null);
+  assert.strictEqual(run("data.candidates[0].roomAttempt.confirmationSource"), null);
+  assert.strictEqual(run("data.candidates[0].roomAttempt.itemCode"), "devirockstore:10031954");
+  assert.strictEqual(run("data.candidates[0].postStatus"), "結果確認待ち");
+  assert.strictEqual(run("JSON.parse(localStorage.value).candidates[0].roomAttempt.startedAt"), null);
+  run("data = loadData(); recoverInterruptedRoomAttempts();");
+  assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "result_check_required", "reload preserves the unknown result");
+  assert.strictEqual(run("data.candidates[0].roomAttempt.startedAt"), null);
+
+  context.commandInputs["#room-operation-close-reason-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e"] = {
+    value: "ROOM投稿画面を閉じ、操作が継続していないことを目視確認"
+  };
+  assert.strictEqual(run("confirmRoomOperationClosed('2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e')"), true);
+  assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "result_check_required", "operation closure is not a post result");
+  assert.strictEqual(run("data.candidates[0].roomAttempt.confirmedAt"), null);
+  assert.strictEqual(run("getProcessingBlocker()"), null, "confirmed closure can unblock a different item");
+  context.otherQueueEntries = [{ candidateId: "other-id", itemCode: "different-shop:item" }];
+  context.sameQueueEntries = [{ candidateId: "retry-id", itemCode: "devirockstore:10031954" }];
+  assert.strictEqual(run("RoomCodexBridge.canStartQueue(data.candidates, otherQueueEntries, null).ok"), true);
+  assert.strictEqual(run("RoomCodexBridge.canStartQueue(data.candidates, sameQueueEntries, null).ok"), false,
+    "the protected itemCode remains blocked even after operation closure");
+
+  // Candidate identity conflict and a mismatched open queue are refused without changing the saved record.
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [{ ...legacyCandidate, product: { itemCode: "shop:mismatch" } }], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null; data.roomPostQueue = undefined;");
+  assert.strictEqual(run("protectLegacyRoomProcessing('2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e')"), false);
+  assert.strictEqual(run("data.candidates[0].postStatus"), "Codex処理中");
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined);
+
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [legacyCandidate], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  run("data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'different-id', itemCode: 'shop:other' }], 1, '2026-10-16T00:00:00.000Z', 'other-queue').queue;");
+  assert.strictEqual(run("protectLegacyRoomProcessing('2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e')"), false);
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined);
+  assert.strictEqual(run("data.roomPostQueue.status"), "active");
+
+  // A matching persisted queue is stopped as unknown; save failure leaves the legacy record intact.
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [legacyCandidate], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  run("data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: '2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e', itemCode: 'devirockstore:10031954' }], 1, '2026-10-16T00:00:00.000Z', 'matching-queue').queue;");
+  context.commandInputs = {
+    "#legacy-room-confirm-code-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e": { value: "devirockstore:10031954" },
+    "#legacy-room-protection-reason-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e": { value: "ROOM結果不明のまま保留する確認" },
+    "#legacy-room-protection-confirmed-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e": { checked: true }
+  };
+  assert.strictEqual(run("protectLegacyRoomProcessing('2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e')"), true);
+  assert.strictEqual(run("data.roomPostQueue.status"), "result_check_required");
+  assert.strictEqual(run("data.roomPostQueue.entries[0].outcome"), "result_check_required");
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [legacyCandidate], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null; data.roomPostQueue = undefined;");
+  context.localStorage.fail = true;
+  context.commandInputs = {
+    "#legacy-room-confirm-code-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e": { value: "devirockstore:10031954" },
+    "#legacy-room-protection-reason-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e": { value: "ROOM結果不明のまま保留する確認" },
+    "#legacy-room-protection-confirmed-2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e": { checked: true }
+  };
+  assert.strictEqual(run("protectLegacyRoomProcessing('2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e')"), false);
+  assert.strictEqual(run("data.candidates[0].postStatus"), "Codex処理中");
+  assert.strictEqual(run("data.candidates[0].roomAttempt"), undefined);
+  assert.strictEqual(JSON.parse(context.localStorage.value).candidates[0].postStatus, "Codex処理中");
+  context.localStorage.fail = false;
+
+  console.log("ROOM attempt integration, bounded queue, reload recovery, legacy protection and failed-save safety: passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

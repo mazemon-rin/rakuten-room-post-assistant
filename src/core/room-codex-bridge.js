@@ -88,7 +88,36 @@
       && String(attempt.roomOperationCloseReason || "").trim());
   }
 
+  function isSavedQueueConsistent(queue, candidates = []) {
+    if (!queue) return true;
+    const statuses = Object.values(QUEUE_STATUS);
+    const entries = queue.entries;
+    if (!statuses.includes(queue.status) || !Array.isArray(entries) || !entries.length
+        || !queue.queueId || queue.requestedCount !== entries.length
+        || !Number.isInteger(queue.currentIndex) || queue.currentIndex < 0 || queue.currentIndex >= entries.length) return false;
+    const ids = new Set();
+    const codes = new Set();
+    for (const entry of entries) {
+      const id = String(entry?.candidateId || "").trim();
+      const code = getEntryCode(entry);
+      if (!id || !code || ids.has(id) || codes.has(normalizeItemCode(code))) return false;
+      ids.add(id);
+      codes.add(normalizeItemCode(code));
+      const matches = candidates.filter((candidate) => String(candidate?.id || "") === id);
+      if (matches.length !== 1) return false;
+      const candidate = matches[0];
+      const topCode = String(candidate.itemCode || "").trim();
+      const nestedCode = String(candidate.product?.itemCode || "").trim();
+      const candidateCode = topCode && nestedCode && topCode !== nestedCode ? "" : topCode || nestedCode;
+      if (!candidateCode || normalizeItemCode(candidateCode) !== normalizeItemCode(code)) return false;
+    }
+    return true;
+  }
+
   function canStartQueue(candidates = [], entries = [], previousQueue = null) {
+    if (!isSavedQueueConsistent(previousQueue, candidates)) {
+      return { ok: false, error: "保存済みキューの件数・候補ID・itemCodeを整合確認できません。" };
+    }
     if ([QUEUE_STATUS.ACTIVE, QUEUE_STATUS.ADVANCE_READY, QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(previousQueue?.status)) {
       return { ok: false, error: "前のROOMキューが継続中または人間操作待ちです。" };
     }
@@ -173,5 +202,5 @@
   }
 
   root.RoomCodexBridge = Object.freeze({ QUEUE_STATUS, parseRequestedCount, hasExplicitPostingIntent,
-    createQueue, isOperationClosed, canStartQueue, recordOutcome, advanceQueue });
+    createQueue, isOperationClosed, isSavedQueueConsistent, canStartQueue, recordOutcome, advanceQueue });
 })(typeof window !== "undefined" ? window : globalThis);
