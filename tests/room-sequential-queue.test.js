@@ -90,6 +90,36 @@ assert(persistedActiveProgress.includes("保存上ACTIVE・実行状態未確認
 assert(queueApi.formatRoomSequentialProgress(null, { status: "active" }).includes("保存上ACTIVE・実行状態未確認"),
   "an orphaned ACTIVE queue must remain visible even when no candidate can be resolved");
 
+const completedLegacyQueue = { policy: "fixed_items", status: "completed", currentIndex: 0,
+  entries: [{ candidateId: "posted", itemCode: "shop:posted", outcome: "posted" }] };
+const postableAfterCompletion = [candidate("next", "shop:next", "紹介文未作成")];
+const completedSummary = queueApi.formatRoomQueueSummary(completedLegacyQueue, postableAfterCompletion, null,
+  [candidate("posted", "shop:posted", "投稿済み"), ...postableAfterCompletion]);
+assert.strictEqual(completedSummary, "残り候補 1件・キュー完了（処理中なし）",
+  "completed legacy entries must not be treated as a live current candidate");
+assert(!completedSummary.includes("posted"));
+const completedSuccessQueue = { policy: "successful_posts", status: "completed", requestedCount: 1, successCount: 1,
+  currentIndex: 0, entries: [{ candidateId: "posted", itemCode: "shop:posted", outcome: "posted" }] };
+const completedSuccessSummary = queueApi.formatRoomQueueSummary(completedSuccessQueue, postableAfterCompletion, null,
+  [candidate("posted", "shop:posted", "投稿済み"), ...postableAfterCompletion]);
+assert(completedSuccessSummary.includes("成功 1/1件・"));
+assert(completedSuccessSummary.endsWith("キュー完了（処理中なし）"));
+assert(!completedSuccessSummary.includes("処理中 posted"));
+const persistedActiveSummary = queueApi.formatRoomQueueSummary({ policy: "fixed_items", status: "active",
+  currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] }, postableAfterCompletion, null,
+  postableAfterCompletion);
+assert(persistedActiveSummary.includes("保存上ACTIVE・実行状態未確認"),
+  "a persisted ACTIVE queue without a live in-memory queue must not claim processing");
+const liveQueue = { currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] };
+const liveSummary = queueApi.formatRoomQueueSummary({ policy: "fixed_items", status: "active",
+  currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] }, postableAfterCompletion, liveQueue,
+  postableAfterCompletion);
+assert(liveSummary.includes("処理中 next"), "only an exact runtime and persisted candidate match may be shown as processing");
+const stoppedSummary = queueApi.formatRoomQueueSummary({ ...completedLegacyQueue, status: "stopped" }, postableAfterCompletion, null,
+  [candidate("posted", "shop:posted", "投稿済み"), ...postableAfterCompletion]);
+assert(stoppedSummary.includes("キュー停止（処理中なし）"));
+assert(!stoppedSummary.includes("処理中 next"));
+
 // Phase 2: savedAt determines posting order, never the card order or a screen filter.
 const dated = [
   { ...candidate("newer", "shop:newer"), savedAt: "2026-10-15T00:00:00.000Z" },

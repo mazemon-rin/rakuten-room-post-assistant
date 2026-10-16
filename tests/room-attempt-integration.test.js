@@ -9,7 +9,7 @@ const context = {
   console, URL, URLSearchParams, Intl, Date, Math, Number, String, Boolean, Object, Array,
   Set, Map, RegExp, JSON, Promise, TextEncoder, Blob, setTimeout, clearTimeout, structuredClone,
   crypto: { randomUUID: () => "test-attempt" },
-  document: { addEventListener() {}, querySelector(selector) { return context.commandInputs?.[selector] || null; }, querySelectorAll() { return []; }, getElementById() { return null; },
+  document: { addEventListener() {}, querySelector(selector) { return context.uiNodes?.[selector] || context.commandInputs?.[selector] || null; }, querySelectorAll() { return []; }, getElementById() { return null; },
     createElement() { return { innerHTML: "", textContent: "" }; } },
   localStorage: { value: null, fail: false, getItem() { return this.value; },
     setItem(key, value) { if (this.fail) throw Object.assign(new Error("quota"), { name: "QuotaExceededError" }); this.value = value; } },
@@ -37,6 +37,40 @@ context.localStorage.value = JSON.stringify({ settings: {}, candidates: [candida
 run("data = loadData();");
 
 (async () => {
+  // Regression: a completed legacy fixed-items queue retains its final entry.
+  // The real saved state also has an unrelated unresolved item and one eligible
+  // candidate without copy. None may make the posted Pampers look in progress.
+  const completedPampers = { ...candidate, id: "pampers", title: "パンパース 肌へのいちばん",
+    itemCode: "netbaby:10051424", product: { ...candidate.product, itemCode: "netbaby:10051424" },
+    postStatus: "投稿済み", status: "投稿済み", postedAt: "2026-10-16T00:00:00.000Z",
+    roomAttempt: { status: "posted_confirmed", candidateId: "pampers", itemCode: "netbaby:10051424" } };
+  const unresolvedDevirock = { ...candidate, id: "devirock", title: "アソートパンツ",
+    itemCode: "devirockstore:10031954", product: { ...candidate.product, itemCode: "devirockstore:10031954" },
+    postStatus: "結果確認待ち", roomAttempt: { status: "result_check_required", candidateId: "devirock", itemCode: "devirockstore:10031954" } };
+  const unpreparedOmutsu = { ...candidate, id: "omutsu", title: "おむつストッカー",
+    itemCode: "auc-risecreation:10005250", product: { ...candidate.product, itemCode: "auc-risecreation:10005250" },
+    introText: "", hashTags: "#ベビー用品", status: "未作成", postStatus: "紹介文未作成" };
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [completedPampers, unresolvedDevirock, unpreparedOmutsu],
+    history: [{ itemCode: "netbaby:10051424", postedAt: "2026-10-16T00:00:00.000Z" }],
+    roomPostQueue: { version: 1, policy: "fixed_items", queueId: "completed-pampers-queue", requestedCount: 1,
+      currentIndex: 0, status: "completed", entries: [{ candidateId: "pampers", itemCode: "netbaby:10051424", outcome: "posted" }] } });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  context.uiNodes = { "#queue-progress": { textContent: "" }, "#queue-stats": { textContent: "" },
+    "#stale-queue-recovery": { hidden: false } };
+  run("renderQueueProgress()");
+  assert.match(context.uiNodes["#queue-stats"].textContent, /残り候補 1件/);
+  assert.match(context.uiNodes["#queue-stats"].textContent, /キュー完了/);
+  assert.match(context.uiNodes["#queue-stats"].textContent, /処理中なし/);
+  assert.doesNotMatch(context.uiNodes["#queue-stats"].textContent, /パンパース/,
+    "a completed persisted entry must never be rendered as the current processing product");
+  assert.match(context.uiNodes["#queue-progress"].textContent, /アソートパンツ/,
+    "the unrelated result-check-required candidate remains visible as unresolved");
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(run("RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history).map((item) => item.id)"))), ["omutsu"],
+    "the unprepared next candidate remains eligible while posted and unknown products are excluded");
+
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [candidate], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null;");
+
   assert.strictEqual(await run("startCodexPost('candidate-1', 'confirmation')"), true);
   assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "processing");
   assert.strictEqual(run("data.candidates[0].roomAttempt.itemCode"), "shop:item-1");

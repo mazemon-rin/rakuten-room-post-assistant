@@ -148,5 +148,37 @@
     return `現在の処理商品：${candidate.title || candidate.product?.itemName || "商品名未確認"} / 状態：${candidate.postStatus || "未確認"}（開始時のキュー件数は復元できません）${queueStateLabel}`;
   }
 
-  root.RoomSequentialQueue = Object.freeze({ getEligibleRoomCandidates, buildRoomSequentialQueue, resolveRoomQueueCandidate, advanceRoomSequentialQueue, formatRoomSequentialProgress });
+  function formatRoomQueueSummary(queueState, eligibleCandidates = [], runtimeQueue = null, candidates = []) {
+    const remaining = Array.isArray(eligibleCandidates) ? eligibleCandidates.length : 0;
+    const prefix = queueState?.policy === "successful_posts"
+      ? `成功 ${queueState.successCount || 0}/${queueState.requestedCount || 0}件・失敗 ${queueState.failureCount || 0}件・削除 ${queueState.deletedCount || 0}件・結果不明保留 ${queueState.unknownCount || 0}件`
+      : `残り候補 ${remaining}件`;
+    const status = queueState?.status;
+    if (!queueState) return `${prefix}・処理中なし`;
+    if (status === "completed") return `${prefix}・キュー完了（処理中なし）`;
+    if (status === "stopped") return `${prefix}・キュー停止（処理中なし）`;
+
+    if (status === "active") {
+      const savedEntry = queueState.entries?.[queueState.currentIndex];
+      const runtimeEntry = runtimeQueue?.entries?.[runtimeQueue.currentIndex];
+      const sameEntry = savedEntry && runtimeEntry
+        && savedEntry.candidateId === runtimeEntry.candidateId
+        && normalizeItemCode(savedEntry.itemCode) === normalizeItemCode(runtimeEntry.itemCode);
+      const matches = sameEntry && candidates.filter((candidate) =>
+        candidate.id === savedEntry.candidateId
+          && normalizeItemCode(getItemCode(candidate)) === normalizeItemCode(savedEntry.itemCode));
+      if (matches?.length === 1) {
+        const remainingQueue = Math.max(0, queueState.entries.length - queueState.currentIndex);
+        return `${prefix}・残りキュー ${remainingQueue}件・処理中 ${matches[0].title || matches[0].product?.itemName || "商品名未確認"}`;
+      }
+      return `${prefix}・保存上ACTIVE・実行状態未確認`;
+    }
+    if (status === "advance_ready") return `${prefix}・投稿結果保存済み・次候補待ち`;
+    if (status === "result_check_required") return `${prefix}・結果確認待ち`;
+    if (status === "human_action_required") return `${prefix}・人間操作待ち`;
+    return `${prefix}・保存キュー状態未確認`;
+  }
+
+  root.RoomSequentialQueue = Object.freeze({ getEligibleRoomCandidates, buildRoomSequentialQueue, resolveRoomQueueCandidate,
+    advanceRoomSequentialQueue, formatRoomSequentialProgress, formatRoomQueueSummary });
 })(typeof window !== "undefined" ? window : globalThis);

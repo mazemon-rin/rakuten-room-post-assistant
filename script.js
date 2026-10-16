@@ -3073,12 +3073,9 @@ function renderQueueProgress() {
     roomCodexBridge.QUEUE_STATUS.ADVANCE_READY, roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED,
     roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED].includes(queueState?.status);
   if (stats) {
-    const remaining = Array.isArray(queueState?.entries) ? queueState.entries.length : 0;
-    const currentEntry = queueState?.entries?.[queueState.currentIndex];
-    const currentCandidate = currentEntry && data.candidates.find((candidate) => candidate.id === currentEntry.candidateId);
-    stats.textContent = queueState?.policy === "successful_posts"
-      ? `成功 ${queueState.successCount || 0}/${queueState.requestedCount}件・失敗 ${queueState.failureCount || 0}件・削除 ${queueState.deletedCount || 0}件・結果不明保留 ${queueState.unknownCount || 0}件・残り候補 ${remaining}件・処理中 ${currentCandidate?.title || currentCandidate?.product?.itemName || "なし"}`
-      : `残り候補 ${window.RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history).length}件・処理中 ${currentCandidate?.title || currentCandidate?.product?.itemName || "なし"}`;
+    const eligibleCandidates = window.RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history);
+    stats.textContent = window.RoomSequentialQueue.formatRoomQueueSummary(
+      queueState, eligibleCandidates, activeRoomPostQueue, data.candidates);
   }
   const roomCandidates = data.candidates.filter(isRoomCandidate);
   const queue = window.RoomSequentialQueue.getEligibleRoomCandidates(roomCandidates, data.history);
