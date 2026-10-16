@@ -151,8 +151,8 @@
   function formatRoomQueueSummary(queueState, eligibleCandidates = [], runtimeQueue = null, candidates = []) {
     const remaining = Array.isArray(eligibleCandidates) ? eligibleCandidates.length : 0;
     const prefix = queueState?.policy === "successful_posts"
-      ? `成功 ${queueState.successCount || 0}/${queueState.requestedCount || 0}件・失敗 ${queueState.failureCount || 0}件・削除 ${queueState.deletedCount || 0}件・結果不明保留 ${queueState.unknownCount || 0}件`
-      : `残り候補 ${remaining}件`;
+      ? `成功 ${queueState.successCount || 0}/${queueState.requestedCount || 0}件・失敗 ${queueState.failureCount || 0}件・削除 ${queueState.deletedCount || 0}件・結果不明保留 ${queueState.unknownCount || 0}件・現在投稿可能 ${remaining}件`
+      : `現在投稿可能 ${remaining}件`;
     const status = queueState?.status;
     if (!queueState) return `${prefix}・処理中なし`;
     if (status === "completed") return `${prefix}・キュー完了（処理中なし）`;
@@ -179,6 +179,20 @@
     return `${prefix}・保存キュー状態未確認`;
   }
 
+  function formatRoomQueueProgress(queueState, eligibleCandidates = [], runtimeQueue = null, candidates = []) {
+    const summary = formatRoomQueueSummary(queueState, eligibleCandidates, runtimeQueue, candidates);
+    const unresolved = candidates.filter((candidate) => candidate.destination !== "threads_only"
+      && (candidate.roomAttempt?.status === "result_check_required" || candidate.postStatus === "結果確認待ち"));
+    if (!unresolved.length) return summary;
+
+    const names = unresolved.map((candidate) => {
+      const title = candidate.title || candidate.product?.itemName || "商品名未確認";
+      const itemCode = getItemCode(candidate);
+      return itemCode ? `${title}（${itemCode}）` : title;
+    });
+    return `${summary} / 結果確認待ち（処理中とは別・再投稿対象外）：${names.join("、")}`;
+  }
+
   root.RoomSequentialQueue = Object.freeze({ getEligibleRoomCandidates, buildRoomSequentialQueue, resolveRoomQueueCandidate,
-    advanceRoomSequentialQueue, formatRoomSequentialProgress, formatRoomQueueSummary });
+    advanceRoomSequentialQueue, formatRoomSequentialProgress, formatRoomQueueSummary, formatRoomQueueProgress });
 })(typeof window !== "undefined" ? window : globalThis);

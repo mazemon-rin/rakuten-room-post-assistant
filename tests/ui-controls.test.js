@@ -58,10 +58,11 @@ if (!script.includes('startSequentialProcessing("continuous", parsed.requestedCo
 if (html.includes('room-processing-diagnostics') || html.includes('room-processing-state.js') || /data\.pendingRoomPost|completePendingRoomPost/.test(script)) throw new Error("pending state or its diagnostic UI remains active");
 if (!html.includes('src/core/room-sequential-queue.js') || !script.includes('buildRoomSequentialQueue(data.candidates, requestedCount, data.history, { successTarget })')) throw new Error("continuous queue must use saved candidates and history, independent of screen order, with a success target");
 if (!script.includes('searchResults = filterAvailableProducts(products)') || !script.includes('products.push(...filterAvailableProducts(await fetchRankingCategory(')) throw new Error("normal and ranking results must share saved-candidate exclusion");
-if (!script.includes('formatRoomSequentialProgress(active, data.roomPostQueue)') || !roomQueue.includes('function formatRoomSequentialProgress(candidate, queueState)') || script.includes('(${position} / ${roomCandidates.length}件)')) throw new Error("queue progress must use the persisted queue state, never imply that a saved ACTIVE flag proves live execution");
+if (!script.includes('formatRoomQueueProgress(') || !roomQueue.includes('function formatRoomQueueProgress(queueState, eligibleCandidates = [], runtimeQueue = null, candidates = [])') || script.includes('(${position} / ${roomCandidates.length}件)')) throw new Error("queue progress must distinguish result-check-required candidates from validated live work");
 if (!script.includes('formatRoomQueueSummary(\n      queueState, eligibleCandidates, activeRoomPostQueue, data.candidates)')
     || !roomQueue.includes('function formatRoomQueueSummary(queueState, eligibleCandidates = [], runtimeQueue = null, candidates = [])')
     || !roomQueue.includes('キュー完了（処理中なし）')
+    || !roomQueue.includes('現在投稿可能 ${remaining}件')
     || !roomQueue.includes('保存上ACTIVE・実行状態未確認')) throw new Error("queue stats must distinguish completed queues from verified live work and persisted ACTIVE state");
 if (!script.includes('prepareRoomCopyForPosting(candidate)') || !script.includes('const selected = chooseRoomIntroVariant(product, result.variants)') || !script.includes('紹介文の保存を確認できなかったため')) throw new Error("a missing ROOM introduction must be generated from verified features and saved before posting");
 if (!script.includes('let activeRoomPostMode = "continuous"') || !script.includes('let activeRoomPostQueue = null') || !script.includes('function startNextCandidate(id, mode = activeRoomPostMode)') || !script.includes('roomCodexBridge.advanceQueue(storedQueue)') || !script.includes('startCodexPost(result.entry.candidateId, nextMode, result.entry.itemCode)')) throw new Error("continuous mode must advance by candidate ID and exact itemCode");
@@ -82,8 +83,8 @@ if (!script.includes('queue.policy === "successful_posts"') || !script.includes(
   throw new Error("unknown results must remain protected, and only a verified closure may advance the fixed queue");
 }
 if (!html.includes('id="queue-stats"') || !html.includes('id="candidate-count-summary"') || !html.includes('id="stale-queue-recovery"') || !html.includes('id="refresh-latest-app"')) throw new Error("candidate and queue summaries, stale-queue recovery, and safe cache refresh controls must be present");
-if (!html.includes('src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-state-display-20261016')
-    || !html.includes('script.js?v=room-2.7.1.4-queue-state-display-20261016')) throw new Error("queue summary and rendering changes need fresh cache identifiers");
+if (!html.includes('src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-progress-separated-result-20261016')
+    || !html.includes('script.js?v=room-2.7.1.4-queue-progress-separated-result-20261016')) throw new Error("queue summary and rendering changes need fresh cache identifiers");
 if (!script.includes('function getPostableRoomCandidates()')
     || !script.includes('updateCandidateViewCounts(postableCandidates)')
     || !script.includes('getDisplayedRoomCandidates(postableCandidates)')

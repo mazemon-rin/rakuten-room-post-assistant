@@ -95,7 +95,7 @@ const completedLegacyQueue = { policy: "fixed_items", status: "completed", curre
 const postableAfterCompletion = [candidate("next", "shop:next", "紹介文未作成")];
 const completedSummary = queueApi.formatRoomQueueSummary(completedLegacyQueue, postableAfterCompletion, null,
   [candidate("posted", "shop:posted", "投稿済み"), ...postableAfterCompletion]);
-assert.strictEqual(completedSummary, "残り候補 1件・キュー完了（処理中なし）",
+assert.strictEqual(completedSummary, "現在投稿可能 1件・キュー完了（処理中なし）",
   "completed legacy entries must not be treated as a live current candidate");
 assert(!completedSummary.includes("posted"));
 const completedSuccessQueue = { policy: "successful_posts", status: "completed", requestedCount: 1, successCount: 1,
@@ -119,6 +119,24 @@ const stoppedSummary = queueApi.formatRoomQueueSummary({ ...completedLegacyQueue
   [candidate("posted", "shop:posted", "投稿済み"), ...postableAfterCompletion]);
 assert(stoppedSummary.includes("キュー停止（処理中なし）"));
 assert(!stoppedSummary.includes("処理中 next"));
+
+const pendingProgress = queueApi.formatRoomQueueProgress(completedLegacyQueue, postableAfterCompletion, null,
+  [candidate("posted", "shop:posted", "投稿済み"),
+    { ...candidate("unknown", "shop:unknown", "結果確認待ち"), roomAttempt: { status: "result_check_required" } },
+    ...postableAfterCompletion]);
+assert.match(pendingProgress, /^現在投稿可能 1件・キュー完了（処理中なし）/);
+assert.match(pendingProgress, /結果確認待ち（処理中とは別・再投稿対象外）：unknown（shop:unknown）/);
+assert.doesNotMatch(pendingProgress, /現在の処理商品：/);
+const verifiedActiveQueue = { policy: "fixed_items", status: "active", currentIndex: 0,
+  entries: [{ candidateId: "next", itemCode: "shop:next" }] };
+const verifiedRuntimeQueue = { currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] };
+const verifiedActiveProgress = queueApi.formatRoomQueueProgress(verifiedActiveQueue, postableAfterCompletion,
+  verifiedRuntimeQueue, postableAfterCompletion);
+assert.match(verifiedActiveProgress, /処理中 next/);
+const invalidIdentityProgress = queueApi.formatRoomQueueProgress(verifiedActiveQueue, postableAfterCompletion,
+  { currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:other" }] }, postableAfterCompletion);
+assert.match(invalidIdentityProgress, /保存上ACTIVE・実行状態未確認/);
+assert.doesNotMatch(invalidIdentityProgress, /処理中 next/);
 
 // Phase 2: savedAt determines posting order, never the card order or a screen filter.
 const dated = [

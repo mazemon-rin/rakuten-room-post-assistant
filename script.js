@@ -3072,35 +3072,13 @@ function renderQueueProgress() {
   if (recoveryPanel) recoveryPanel.hidden = ![roomCodexBridge.QUEUE_STATUS.ACTIVE,
     roomCodexBridge.QUEUE_STATUS.ADVANCE_READY, roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED,
     roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED].includes(queueState?.status);
+  const eligibleCandidates = window.RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history);
   if (stats) {
-    const eligibleCandidates = window.RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history);
     stats.textContent = window.RoomSequentialQueue.formatRoomQueueSummary(
       queueState, eligibleCandidates, activeRoomPostQueue, data.candidates);
   }
-  const roomCandidates = data.candidates.filter(isRoomCandidate);
-  const queue = window.RoomSequentialQueue.getEligibleRoomCandidates(roomCandidates, data.history);
-  const active = roomCandidates.find(isRoomAttemptBlocked);
-  if (active) {
-    progress.textContent = window.RoomSequentialQueue.formatRoomSequentialProgress(active, data.roomPostQueue);
-    return;
-  }
-  if (data.roomPostQueue?.status === roomCodexBridge.QUEUE_STATUS.ACTIVE) {
-    progress.textContent = window.RoomSequentialQueue.formatRoomSequentialProgress(null, data.roomPostQueue);
-    return;
-  }
-  if (data.roomPostQueue?.status === roomCodexBridge.QUEUE_STATUS.ADVANCE_READY) {
-    progress.textContent = `投稿結果を保存しました。次の商品へ進めます（${data.roomPostQueue.currentIndex + 1} / ${data.roomPostQueue.requestedCount}件）。`;
-    return;
-  }
-  if ([roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED, roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(data.roomPostQueue?.status)) {
-    progress.textContent = `連続キューを停止中です：${data.roomPostQueue.stopReason || "ROOM側の確認が必要です。"}`;
-    return;
-  }
-  if (!queue.length) {
-    progress.textContent = "処理対象の商品はありません。";
-    return;
-  }
-  progress.textContent = `投稿可能な候補 ${queue.length}件。登録日時の古い順に連続投稿します。`;
+  progress.textContent = window.RoomSequentialQueue.formatRoomQueueProgress(
+    queueState, eligibleCandidates, activeRoomPostQueue, data.candidates);
 }
 
 function getRequestedRoomQueueCount() {

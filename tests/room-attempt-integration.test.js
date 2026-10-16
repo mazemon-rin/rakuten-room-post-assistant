@@ -58,15 +58,35 @@ run("data = loadData();");
   context.uiNodes = { "#queue-progress": { textContent: "" }, "#queue-stats": { textContent: "" },
     "#stale-queue-recovery": { hidden: false } };
   run("renderQueueProgress()");
-  assert.match(context.uiNodes["#queue-stats"].textContent, /残り候補 1件/);
+  assert.match(context.uiNodes["#queue-stats"].textContent, /現在投稿可能 1件/);
   assert.match(context.uiNodes["#queue-stats"].textContent, /キュー完了/);
   assert.match(context.uiNodes["#queue-stats"].textContent, /処理中なし/);
   assert.doesNotMatch(context.uiNodes["#queue-stats"].textContent, /パンパース/,
     "a completed persisted entry must never be rendered as the current processing product");
-  assert.match(context.uiNodes["#queue-progress"].textContent, /アソートパンツ/,
-    "the unrelated result-check-required candidate remains visible as unresolved");
+  assert.match(context.uiNodes["#queue-progress"].textContent, /キュー完了（処理中なし）/,
+    "progress and summary must agree that the completed queue has no processing candidate");
+  assert.ok(context.uiNodes["#queue-progress"].textContent.startsWith(context.uiNodes["#queue-stats"].textContent),
+    "progress must repeat the exact queue status and postable count shown in the summary");
+  assert.match(context.uiNodes["#queue-progress"].textContent, /結果確認待ち（処理中とは別・再投稿対象外）：アソートパンツ（devirockstore:10031954）/,
+    "the result-check-required candidate must be shown separately from live processing");
+  assert.doesNotMatch(context.uiNodes["#queue-progress"].textContent, /現在の処理商品：アソートパンツ/);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(run("RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history).map((item) => item.id)"))), ["omutsu"],
     "the unprepared next candidate remains eligible while posted and unknown products are excluded");
+
+  // A live ACTIVE queue may name a processing product only when both saved
+  // and runtime queue entries match one unique candidate ID and itemCode.
+  const activeProgress = run(`RoomSequentialQueue.formatRoomQueueProgress(
+    { policy: "fixed_items", status: "active", currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "auc-risecreation:10005250" }] },
+    RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history),
+    { currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "auc-risecreation:10005250" }] }, data.candidates)`);
+  assert.match(activeProgress, /処理中 おむつストッカー/);
+  assert.match(activeProgress, /結果確認待ち（処理中とは別・再投稿対象外）：アソートパンツ/);
+  const mismatchedProgress = run(`RoomSequentialQueue.formatRoomQueueProgress(
+    { policy: "fixed_items", status: "active", currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "auc-risecreation:10005250" }] },
+    RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history),
+    { currentIndex: 0, entries: [{ candidateId: "omutsu", itemCode: "wrong:item" }] }, data.candidates)`);
+  assert.match(mismatchedProgress, /保存上ACTIVE・実行状態未確認/);
+  assert.doesNotMatch(mismatchedProgress, /処理中 おむつストッカー/);
 
   context.localStorage.value = JSON.stringify({ settings: {}, candidates: [candidate], history: [] });
   run("data = loadData(); activeRoomPostQueue = null;");
