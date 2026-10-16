@@ -34,6 +34,14 @@
     return !findDuplicate(product, candidates, history, ignoreId, formatDate);
   }
 
+  // Search results are hidden by exact itemCode only. No product-name or URL guess is made.
+  function isExcludedFromRoomSearch(product, candidates = [], history = []) {
+    const codes = identity.getItemCodes(product);
+    if (!codes.length) return false;
+    const matches = (record) => identity.getItemCodes(record).some((code) => codes.includes(code));
+    return history.some(matches) || candidates.filter(isRoomCandidate).some(matches);
+  }
+
   function isVisibleRoomCandidate(item, history = []) {
     return isRoomCandidate(item) && !postedHistoryMatch(item, history);
   }
@@ -47,6 +55,7 @@
     postedHistoryMatch,
     findDuplicate,
     canSaveRoomCandidate,
+    isExcludedFromRoomSearch,
     isVisibleRoomCandidate
   });
 })(typeof window !== "undefined" ? window : globalThis);

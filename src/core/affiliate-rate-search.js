@@ -83,7 +83,7 @@
     return [
       `API総件数（応答count合計）：${countLabel}`,
       `今回取得：${Number(diagnostics.fetchedCount) || 0}件 / 重複除外：${Number(diagnostics.duplicateExcludedCount) || 0}件`,
-      `販売終了除外：${Number(diagnostics.unavailableExcludedCount) || 0}件 / 投稿済み除外：${Number(diagnostics.postedExcludedCount) || 0}件`,
+      `販売終了除外：${Number(diagnostics.unavailableExcludedCount) || 0}件 / 既存商品除外：${Number(diagnostics.postedExcludedCount) || 0}件`,
       `API参考料率未取得（重複除外後）：${Number(diagnostics.rateMissingCount) || 0}件`,
       `最終表示：${Number(diagnostics.displayedCount) || 0}件`
     ].join("\n");
@@ -92,7 +92,7 @@
   function getHighRateSearchState(diagnostics = {}, successfulResponseCount = 0, minimumRate = 5) {
     if (!successfulResponseCount) return "検索失敗（API応答を取得できませんでした）";
     if (diagnostics.displayedCount === 0 && diagnostics.fetchedCount === 0) return "検索成功（API応答は正常ですが、該当商品は0件です）";
-    if (diagnostics.displayedCount === 0) return "API商品を取得しましたが、販売終了・投稿済み除外後の表示商品は0件です";
+    if (diagnostics.displayedCount === 0) return "API商品を取得しましたが、販売終了・既存商品除外後の表示商品は0件です";
     return `検索成功：API参考料率${minimumRate}%以上の商品を表示しています`;
   }
 

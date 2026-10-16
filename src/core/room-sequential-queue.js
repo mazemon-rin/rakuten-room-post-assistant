@@ -1,15 +1,57 @@
 (function exposeRoomSequentialQueue(root) {
   function getItemCode(candidate = {}) {
-    return String(candidate.itemCode || candidate.product?.itemCode || "").trim();
+    const top = String(candidate.itemCode || "").trim();
+    const nested = String(candidate.product?.itemCode || "").trim();
+    return top && nested && top !== nested ? "" : top || nested;
   }
 
-  function buildRoomSequentialQueue(displayedCandidates = [], requestedCount) {
+  function savedTime(candidate) {
+    const raw = String(candidate.savedAt || "").trim();
+    const parsed = raw ? Date.parse(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function isEligible(candidate, postedCodes, normalizeCode) {
+    const code = getItemCode(candidate);
+    return candidate.destination !== "threads_only"
+      && ["投稿待ち", "紹介文作成済み", "紹介文未作成"].includes(candidate.postStatus)
+      && !["投稿済み", "保留", "対象外"].includes(candidate.status)
+      && !candidate.postedAt && code && !postedCodes.has(normalizeCode(code))
+      && !["processing", "result_check_required", "posted_confirmed", "duplicate_confirmed"].includes(candidate.roomAttempt?.status);
+  }
+
+  function getEligibleRoomCandidates(candidates = [], history = []) {
+    const normalizeCode = (code) => root.ProductIdentity?.normalizeItemCode
+      ? root.ProductIdentity.normalizeItemCode(code) : String(code || "").trim().toLowerCase();
+    const postedCodes = new Set(history.flatMap((entry) => [entry.itemCode, entry.product?.itemCode]
+      .map(normalizeCode).filter(Boolean)));
+    const blockedCodes = new Set(candidates.filter((candidate) => {
+      const status = candidate.roomAttempt?.status;
+      return ["投稿済み", "ROOM重複確認済み"].includes(candidate.postStatus)
+        || ["processing", "result_check_required", "posted_confirmed", "duplicate_confirmed"].includes(status);
+    }).map((candidate) => normalizeCode(getItemCode(candidate))).filter(Boolean));
+    // Missing/invalid dates stay missing. They follow dated candidates, then use ID as a stable tie-breaker.
+    return candidates.filter((candidate) => {
+      const normalizedCode = normalizeCode(getItemCode(candidate));
+      return isEligible(candidate, postedCodes, normalizeCode) && normalizedCode && !blockedCodes.has(normalizedCode);
+    }).sort((a, b) => {
+      const left = savedTime(a);
+      const right = savedTime(b);
+      if (left !== null && right !== null && left !== right) return left - right;
+      if (left === null && right !== null) return 1;
+      if (left !== null && right === null) return -1;
+      return String(a.id || "").localeCompare(String(b.id || ""), "ja", { numeric: true })
+        || getItemCode(a).localeCompare(getItemCode(b));
+    });
+  }
+
+  function buildRoomSequentialQueue(candidates = [], requestedCount, history = []) {
     if (!Number.isInteger(requestedCount) || requestedCount < 1) {
       return { ok: false, error: "処理件数は1以上の整数で指定してください。" };
     }
-    const eligible = displayedCandidates.filter((candidate) => candidate.postStatus === "投稿待ち");
+    const eligible = getEligibleRoomCandidates(candidates, history);
     if (eligible.length < requestedCount) {
-      return { ok: false, error: `指定件数 ${requestedCount}件に対して、表示中の投稿待ちは${eligible.length}件です。件数を調整してください。` };
+      return { ok: false, error: `指定件数 ${requestedCount}件に対して、投稿可能な保存済み候補は${eligible.length}件です。件数を調整してください。` };
     }
     const entries = [];
     const ids = new Set();
@@ -52,8 +94,8 @@
     const nextEntry = queue[nextIndex];
     const nextResult = resolveRoomQueueCandidate(nextEntry, candidates);
     if (!nextResult.ok) return nextResult;
-    if (nextResult.candidate.postStatus !== "投稿待ち") {
-      return { ok: false, error: "次候補が投稿待ちではないため連続処理を停止しました。" };
+    if (!isEligible(nextResult.candidate, new Set(), (code) => String(code || "").trim().toLowerCase())) {
+      return { ok: false, error: "次候補が投稿可能な状態ではないため連続処理を停止しました。" };
     }
     return { ok: true, done: false, nextIndex, entry: nextEntry, candidate: nextResult.candidate };
   }
@@ -67,5 +109,5 @@
     return `現在の処理商品：${candidate.title || candidate.product?.itemName || "商品名未確認"} / 状態：${candidate.postStatus || "未確認"}（開始時のキュー件数は復元できません）`;
   }
 
-  root.RoomSequentialQueue = Object.freeze({ buildRoomSequentialQueue, resolveRoomQueueCandidate, advanceRoomSequentialQueue, formatRoomSequentialProgress });
+  root.RoomSequentialQueue = Object.freeze({ getEligibleRoomCandidates, buildRoomSequentialQueue, resolveRoomQueueCandidate, advanceRoomSequentialQueue, formatRoomSequentialProgress });
 })(typeof window !== "undefined" ? window : globalThis);

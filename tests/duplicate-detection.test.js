@@ -39,4 +39,22 @@ assert(duplicate.isVisibleRoomCandidate({ itemCode: "new-room", destination: "ro
 assert(!duplicate.isVisibleRoomCandidate({ itemCode: "top-code", destination: "room" }, history), "posted ROOM candidate is hidden");
 assert(!duplicate.isVisibleRoomCandidate({ itemCode: "new-threads", destination: "threads_only" }, history), "Threads-only candidate is hidden from ROOM");
 
+// Phase 2 search exclusion uses exact normalized itemCode for all ROOM candidate states.
+const searchCandidates = [
+  { id: "waiting", itemCode: "shop:waiting", postStatus: "結果確認待ち" },
+  { id: "processing", product: { itemCode: "shop:processing" }, postStatus: "Codex処理中" },
+  { id: "posted", itemCode: "shop:posted", postStatus: "投稿済み" },
+  { id: "duplicate", itemCode: "shop:duplicate", postStatus: "ROOM重複確認済み" },
+  { id: "unposted", itemCode: "shop:unposted", postStatus: "投稿待ち" },
+  { id: "threads", itemCode: "shop:threads", destination: "threads_only" }
+];
+for (const code of ["waiting", "processing", "posted", "duplicate", "unposted"]) {
+  assert(duplicate.isExcludedFromRoomSearch({ itemCode: ` shop:${code} ` }, searchCandidates, []), `exclude ${code}`);
+}
+assert(duplicate.isExcludedFromRoomSearch({ itemCode: "shop:history" }, [], [{ product: { itemCode: "shop:history" }, repostRequested: true }]), "history remains excluded even if repost was requested");
+assert(!duplicate.isExcludedFromRoomSearch({ itemCode: "shop:threads" }, searchCandidates, []), "Threads-only candidate does not block ROOM search");
+assert(!duplicate.isExcludedFromRoomSearch({ itemCode: "shop:unposted-extra", itemName: "same name" }, searchCandidates, []), "itemCode must match completely");
+assert(!duplicate.isExcludedFromRoomSearch({ itemName: "same name" }, searchCandidates, []), "missing itemCode is not guessed from name");
+assert(searchCandidates.length === 6, "search exclusion must not delete saved candidates");
+
 console.log("duplicate detection regression cases: passed");

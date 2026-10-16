@@ -158,6 +158,33 @@ h1 {
   background: #f2f8f4;
 }
 
+.codex-room-command-panel {
+  margin: 0 0 1rem;
+}
+
+.codex-room-command-panel textarea {
+  width: 100%;
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.codex-room-command-panel p {
+  color: var(--muted, #626b68);
+}
+
+.room-operation-closure {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid var(--border, #d7d0c4);
+  border-radius: 8px;
+}
+
+.room-operation-closure input {
+  width: 100%;
+}
+
 .queue-control-panel p {
   margin: 4px 0 0;
   color: var(--muted);
@@ -723,6 +750,51 @@ textarea {
   background: #eee5d9;
 }
 
+.candidate-card-compact {
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.candidate-card-compact > img {
+  width: 76px;
+  border-radius: 7px;
+}
+
+.candidate-card-main { min-width: 0; }
+.candidate-card-main h3 { margin: 2px 0 6px; font-size: 1rem; line-height: 1.4; }
+.candidate-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; color: var(--muted); font-size: 0.86rem; }
+.candidate-card-meta .badge { padding: 3px 8px; }
+.candidate-detail { margin-top: 7px; }
+.candidate-detail > summary,
+.candidate-detail-section > summary,
+.candidate-detail-section summary {
+  cursor: pointer;
+  color: var(--green);
+  font-weight: 700;
+}
+.candidate-detail-content { display: grid; gap: 8px; margin-top: 10px; overflow-wrap: anywhere; }
+.candidate-detail-content,
+.candidate-detail-content > *,
+.candidate-detail-section,
+.combined-content-generator,
+.codex-room-command-panel { min-width: 0; max-width: 100%; }
+.candidate-detail-content textarea,
+.candidate-detail-content input,
+.candidate-detail-content select,
+.codex-room-command-panel textarea { width: 100%; max-width: 100%; }
+.candidate-detail-content > p { margin: 2px 0; }
+.candidate-detail-section { padding: 9px 0; border-top: 1px solid var(--line); }
+.candidate-detail-section label { margin: 8px 0; }
+.candidate-manual-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.candidate-toolbar { grid-template-columns: minmax(200px, 1fr) minmax(160px, 240px); }
+.candidate-toolbar label { display: grid; gap: 5px; }
+.codex-room-command-panel > summary,
+.collection-panel > summary,
+.codex-result-panel > summary { cursor: pointer; font-weight: 800; }
+.codex-room-command-panel[open] > summary { margin-bottom: 10px; color: var(--green); }
+
 .history-product-identifiers {
   overflow-wrap: anywhere;
   padding: 8px 10px;
@@ -740,6 +812,19 @@ textarea {
   gap: 8px;
   margin-top: 10px;
 }
+
+.candidate-delete-confirmation {
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 10px;
+  border: 1px solid #d85c38;
+  border-radius: 8px;
+  background: #fff6f1;
+}
+
+.candidate-delete-confirmation p { margin: 0; overflow-wrap: anywhere; }
+.candidate-delete-confirmation button { white-space: normal; overflow-wrap: anywhere; }
 
 .candidate-primary-actions {
   padding: 10px;
@@ -992,6 +1077,26 @@ textarea {
   .record-card img {
     width: 100%;
   }
+
+  .candidate-card-compact {
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: 9px;
+    padding: 9px;
+  }
+
+  .candidate-card-compact > img { width: 58px; }
+  .candidate-card-meta { gap: 5px; font-size: 0.8rem; }
+  .candidate-toolbar { grid-template-columns: 1fr; }
+  .candidate-detail-content .record-actions > *,
+  .candidate-delete-confirmation .record-actions > * { min-width: 0; max-width: 100%; }
+  .candidate-card-compact .candidate-detail-content .record-actions > * {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .candidate-detail-content textarea { min-height: 8rem; }
 }
 
 .chart-panel {

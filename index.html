@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <title>楽天ROOM投稿アシスタント</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=room-2.7.1.3-20261016">
   <link rel="stylesheet" href="src/sns-trend.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
     <div>
       <p class="eyebrow">ROOMらくらく投稿メーカー</p>
       <h1>楽天ROOM投稿アシスタント</h1>
-      <p class="app-version" aria-label="アプリバージョン">Ver.2-7.1.2</p>
+      <p class="app-version" aria-label="アプリバージョン">Ver.2-7.1.3</p>
       <p class="lead">商品探し、紹介文づくり、投稿履歴管理をまとめて支える静的Webアプリです。</p>
     </div>
     <div class="header-note">
@@ -128,50 +128,40 @@
         <button class="candidate-view-tab active" id="candidate-room-tab" type="button" role="tab" aria-selected="true" aria-controls="candidate-room-view" data-candidate-view="room">投稿候補 (<span id="roomCandidateCount">0</span>)</button>
         <button class="candidate-view-tab" id="candidate-threads-tab" type="button" role="tab" aria-selected="false" aria-controls="candidate-threads-view" data-candidate-view="threads">Threads投稿 (<span id="threadsCandidateCount">0</span>)</button>
       </div>
-      <div class="toolbar">
-        <input id="candidateFilter" type="search" placeholder="商品名・ショップ名・メモで検索">
-        <select id="candidateStatusFilter">
-          <option value="">すべてのステータス</option>
-          <option>未作成</option>
-          <option>文章作成待ち</option>
-          <option>Threads候補</option>
-          <option>Threads限定</option>
-          <option>文章作成済み</option>
-          <option>投稿待ち</option>
-          <option>Codex処理中</option>
-          <option>確認待ち</option>
-          <option>投稿済み</option>
-          <option>スキップ</option>
-          <option>エラー</option>
-          <option>保留</option>
-          <option>対象外</option>
-        </select>
-        <button id="reset-room-candidates" class="secondary-button" type="button">ROOM投稿候補をリセット</button>
-      </div>
       <section id="candidate-room-view" class="candidate-view-panel active" role="tabpanel" aria-labelledby="candidate-room-tab">
-       <div class="queue-control-panel panel">
-        <div>
-          <strong>Chrome固定タブ運用</strong>
-          <p>開始前に、同じChromeプロフィールで楽天ROOMタブを1枚開いてください。ROOM用の新規タブは作成しません。</p>
-        </div>
-        <label for="sequential-processing-count">今回処理する件数
-          <input id="sequential-processing-count" type="number" min="1" step="1" value="1" inputmode="numeric">
+       <div class="candidate-toolbar toolbar">
+        <input id="candidateFilter" type="search" placeholder="商品名・ショップ名で検索" aria-label="商品候補を検索">
+        <label for="candidateStatusFilter">表示
+         <select id="candidateStatusFilter">
+          <option value="unposted" selected>未投稿</option>
+          <option value="review">確認待ち</option>
+          <option value="all">すべて</option>
+         </select>
         </label>
-        <button id="start-sequential-posting" class="primary-button" type="button">連続実投稿を開始</button>
-        <button id="start-sequential-processing" class="secondary-button" type="button">確認モードで準備</button>
-        <p id="queue-progress" class="queue-progress" role="status" aria-live="polite"></p>
-      </div>
-      <section class="panel collection-panel">
-        <h3>コレクション管理</h3>
+       </div>
+       <p id="queue-progress" class="queue-progress" role="status" aria-live="polite"></p>
+       <details class="panel codex-room-command-panel" aria-labelledby="codex-room-command-title">
+        <summary id="codex-room-command-title">Codex連携を開く</summary>
+        <p>投稿件数を含む自然言語の指示を貼り付け、Control＋Enter（MacはCommand＋Enter）で受け付けます。候補ID・itemCodeは開始時に固定され、指定件数で停止します。</p>
+        <form id="codex-room-command-form">
+          <label for="codex-room-command">今回の自然言語指示
+            <textarea id="codex-room-command" rows="3" autocomplete="off" placeholder="例：楽天ROOMの投稿候補から3件、正式Skillに従って連続実投稿してください。"></textarea>
+          </label>
+          <p id="codex-room-command-message" class="message" role="status" aria-live="polite"></p>
+        </form>
+       </details>
+       <details class="panel collection-panel">
+        <summary>コレクション管理</summary>
         <p>アルゴリズムの推奨を確認し、必要なら選択コレクションを手動で変更します。</p>
         <div id="collectionSummary" class="compact-list"></div>
-      </section>
-      <div class="codex-result-panel">
+       </details>
+       <details class="codex-result-panel">
+        <summary>Codex結果の手動反映</summary>
         <label for="codex-result-input">Codex結果受け取り欄</label>
         <textarea id="codex-result-input" rows="8" placeholder="ITEM_CODE:\n商品コード\n\n紹介文:\n\nハッシュタグ:\n\n状態:\n確認待ち"></textarea>
         <button id="apply-codex-result" class="primary-button" type="button">Codex結果を反映</button>
         <p id="codex-result-message" class="message" role="status" aria-live="polite"></p>
-      </div>
+       </details>
       <div id="candidateList" class="record-list"></div>
       </section>
       <section id="candidate-threads-view" class="candidate-view-panel" role="tabpanel" aria-labelledby="candidate-threads-tab" hidden>
@@ -478,18 +468,21 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="src/core/product-identity.js"></script>
-  <script src="src/core/duplicate-detection.js"></script>
-  <script src="src/core/room-sequential-queue.js"></script>
+  <script src="src/core/duplicate-detection.js?v=room-2.7.1.3-20261016"></script>
+  <script src="src/core/candidate-list-view.js?v=room-2.7.1.3-20261016"></script>
+  <script src="src/core/room-sequential-queue.js?v=room-2.7.1.3-20261016"></script>
+  <script src="src/core/room-codex-bridge.js?v=room-2.7.1.3-20261016"></script>
+  <script src="src/core/room-attempt.js?v=room-2.7.1.3-20261016"></script>
   <script src="src/core/discount-rules.js"></script>
   <script src="src/core/utils.js"></script>
   <script src="src/core/affiliate-sales.js"></script>
   <script src="src/core/history-display.js"></script>
   <script src="src/core/product-normalization.js"></script>
-  <script src="src/core/affiliate-rate-search.js"></script>
+  <script src="src/core/affiliate-rate-search.js?v=room-2.7.1.3-20261016"></script>
   <script src="src/core/affiliate-rate-diagnostic.js"></script>
   <script src="src/core/ranking-rules.js"></script>
   <script src="src/core/trend-rules.js"></script>
-  <script src="script.js?v=room-pending-removal-20261016-r1"></script>
+  <script src="script.js?v=room-2.7.1.3-20261016"></script>
   <script src="src/sns-trend.js"></script>
   <script src="src/sns-trend-discovery.js?v=adoption-feedback-20260929"></script>
 </body>

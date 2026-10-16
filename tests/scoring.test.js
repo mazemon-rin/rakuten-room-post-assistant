@@ -5,7 +5,10 @@ const source = fs.readFileSync(path.join(__dirname, "..", "script.js"), "utf8");
 
 const identitySource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "product-identity.js"), "utf8");
 const duplicateSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "duplicate-detection.js"), "utf8");
+const candidateListViewSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "candidate-list-view.js"), "utf8");
 const roomSequentialQueueSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "room-sequential-queue.js"), "utf8");
+const roomCodexBridgeSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "room-codex-bridge.js"), "utf8");
+const roomAttemptSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "room-attempt.js"), "utf8");
 const discountRulesSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "discount-rules.js"), "utf8");
 const utilsSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "utils.js"), "utf8");
 const affiliateSalesSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "affiliate-sales.js"), "utf8");
@@ -41,6 +44,9 @@ const context = {
 context.window = context;
 vm.createContext(context);
 vm.runInContext(roomSequentialQueueSource, context);
+vm.runInContext(roomCodexBridgeSource, context);
+vm.runInContext(roomAttemptSource, context);
+vm.runInContext(`${identitySource}\n${duplicateSource}\n${candidateListViewSource}`, context);
 vm.runInContext(discountRulesSource, context);
 vm.runInContext(utilsSource, context);
 vm.runInContext(affiliateSalesSource, context);
@@ -573,6 +579,16 @@ assert(scoring.postedHistoryMatch(postedProduct), "Posted filter A: exact ITEM_C
 assert(scoring.filterAvailableProducts([postedProduct, { itemCode: "candidate-1", itemName: "候補商品" }]).length === 1, "Posted filter B: only history item is excluded");
 scoring.data.history.pop();
 assert(!scoring.postedHistoryMatch({ itemName: "投稿済み商品" }), "Posted filter C: name-only match is not automatically excluded");
+const phaseTwoSaved = { id: "phase-two-waiting", itemCode: "shop:waiting", postStatus: "結果確認待ち" };
+scoring.data.candidates.push(phaseTwoSaved);
+const phaseTwoStoredBytes = scoring.getSerializedDataSnapshot(scoring.data).bytes;
+assert(scoring.filterAvailableProducts([
+  { itemCode: " shop:waiting ", itemName: "保存済み" },
+  { itemCode: "shop:new", itemName: "新商品" }
+]).map((product) => product.itemCode).join() === "shop:new", "Normal/ranking shared filter excludes a result-check candidate by exact itemCode");
+assert(scoring.data.candidates.includes(phaseTwoSaved), "Search filtering preserves the saved candidate");
+assert(scoring.getSerializedDataSnapshot(scoring.data).bytes === phaseTwoStoredBytes, "Search filtering does not increase saved data size");
+scoring.data.candidates.pop();
 const roomCandidate = { id: "room-candidate", destination: "room", itemCode: "room-visible", product: { itemCode: "room-visible", itemName: "未投稿商品" }, status: "投稿待ち" };
 const postedTopLevel = { id: "posted-top-level", itemCode: "posted-top-level", product: { itemName: "投稿済み商品A" }, postedAt: "2026-09-26T00:00:00.000Z" };
 const postedNested = { id: "posted-nested", product: { itemCode: "posted-nested", itemName: "投稿済み商品B" }, postedAt: "2026-09-26T00:00:00.000Z" };
