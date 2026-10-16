@@ -3861,7 +3861,7 @@ function updateRoomUrlInputState(id, value) {
 
 function registerRoomUrl(id) {
   const candidate = data.candidates.find((item) => item.id === id);
-  const item = candidate || data.history.find((historyItem) => historyItem.id === id);
+  let item = candidate || data.history.find((historyItem) => historyItem.id === id);
   if (!item) return;
   const input = document.querySelector(`#room-url-input-${id}`);
   const roomUrl = String(input?.value || "").trim();
@@ -3869,13 +3869,32 @@ function registerRoomUrl(id) {
     toast("ROOM個別URLを入力してください。");
     return;
   }
-  item.roomUrl = roomUrl;
-  item.snsPosts = createSnsPosts(item.snsPosts);
-  item.snsPosts.x.prompt = buildSnsPrompt(item, "x", item.snsPosts.x.postType);
-  item.snsPosts.threads.prompt = buildSnsPrompt(item, "threads", item.snsPosts.threads.postType);
-  item.snsPosts.x.generatedAt = item.snsPosts.threads.generatedAt = new Date().toISOString();
-  if (candidate) recordRoomPosting(candidate, { roomUrl });
-  saveData();
+  if (candidate) {
+    if (!findAnyHistoryRecord(candidate) && !window.confirm(`ROOM側で「コレ！完了」と投稿成功を確認しましたか？\n\n${candidate.title || candidate.product?.itemName || "商品"}\n${candidate.itemCode || candidate.product?.itemCode || ""}\n\n成功を確認した場合だけ履歴を記録し、候補一覧から取り除きます。`)) return false;
+    const result = saveRoomPostingAndRemoveCandidate(id, {
+      roomUrl,
+      prepareCandidate: (target) => {
+        target.roomUrl = roomUrl;
+        target.snsPosts = createSnsPosts(target.snsPosts);
+        target.snsPosts.x.prompt = buildSnsPrompt(target, "x", target.snsPosts.x.postType);
+        target.snsPosts.threads.prompt = buildSnsPrompt(target, "threads", target.snsPosts.threads.postType);
+        target.snsPosts.x.generatedAt = target.snsPosts.threads.generatedAt = new Date().toISOString();
+      }
+    });
+    if (!result.ok) {
+      toast(`履歴保存に失敗したため候補は保持しています。${result.error}`);
+      return false;
+    }
+    item = data.history.find((historyItem) => historyItem.id === id);
+  } else {
+    item.roomUrl = roomUrl;
+    item.snsPosts = createSnsPosts(item.snsPosts);
+    item.snsPosts.x.prompt = buildSnsPrompt(item, "x", item.snsPosts.x.postType);
+    item.snsPosts.threads.prompt = buildSnsPrompt(item, "threads", item.snsPosts.threads.postType);
+    item.snsPosts.x.generatedAt = item.snsPosts.threads.generatedAt = new Date().toISOString();
+    const result = saveData();
+    if (!result.ok) return false;
+  }
   const snsEditor = document.querySelector(`#sns-editor-${id}`);
   if (snsEditor) {
     snsEditor.open = true;
@@ -4521,6 +4540,71 @@ function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "", 
   return existingHistory || historySnapshot;
 }
 
+function saveRoomPostingAndRemoveCandidate(candidateId, { roomUrl = "", postedAt = "", introText = "", prepareCandidate = null } = {}) {
+  const matches = data.candidates.filter((candidate) => candidate.id === candidateId);
+  if (matches.length !== 1) return { ok: false, error: "候補IDを一意に確認できません。" };
+  const current = matches[0];
+  const itemCode = String(current.itemCode || current.product?.itemCode || "").trim();
+  const productItemCode = String(current.product?.itemCode || "").trim();
+  if (!itemCode || (productItemCode && productItemCode !== itemCode)) return { ok: false, error: "候補IDと商品コードが一致しません。" };
+  if (!canRecordRoomPosting(current, data.pendingRoomPost, data.candidates)) return { ok: false, error: "候補ID・商品コード、または別候補の確認待ち状態を照合できません。" };
+
+  const nextData = structuredClone(data);
+  const candidate = nextData.candidates.find((entry) => entry.id === candidateId);
+  if (!candidate || String(candidate.itemCode || candidate.product?.itemCode || "").trim() !== itemCode) {
+    return { ok: false, error: "保存対象の候補ID・商品コードが一致しません。" };
+  }
+  if (typeof prepareCandidate === "function") prepareCandidate(candidate);
+  const preparedItemCode = String(candidate.itemCode || candidate.product?.itemCode || "").trim();
+  const preparedProductItemCode = String(candidate.product?.itemCode || "").trim();
+  if (preparedItemCode !== itemCode || (preparedProductItemCode && preparedProductItemCode !== itemCode)) {
+    return { ok: false, error: "保存準備中に商品コードが変わったため、記録を中止しました。" };
+  }
+
+  const historyById = nextData.history.find((entry) => entry.id === candidateId);
+  const historyByCode = nextData.history.find((entry) => String(entry.itemCode || entry.product?.itemCode || "").trim() === itemCode);
+  if (historyById && String(historyById.itemCode || historyById.product?.itemCode || "").trim() && String(historyById.itemCode || historyById.product?.itemCode || "").trim() !== itemCode) {
+    return { ok: false, error: "同じ候補IDの投稿履歴に異なる商品コードがあるため、記録を中止しました。" };
+  }
+  if (historyByCode && historyByCode.id !== candidateId) {
+    return { ok: false, error: "同じ商品コードが別の候補IDの履歴にあります。二重登録を避けるため変更しませんでした。" };
+  }
+
+  const existingHistory = historyById || historyByCode;
+  if (existingHistory) {
+    if (String(existingHistory.itemCode || existingHistory.product?.itemCode || "").trim() !== itemCode || !existingHistory.postedAt) {
+      return { ok: false, error: "既存履歴の商品コードまたは投稿日時が不足しているため、候補を削除しませんでした。" };
+    }
+    if (roomUrl) existingHistory.roomUrl = roomUrl;
+    existingHistory.repostRequested = false;
+  } else {
+    const historyRecord = createHistoryRecord(candidate, {
+      roomUrl: roomUrl || candidate.roomUrl || "",
+      postedAt: postedAt || candidate.postedAt || new Date().toISOString(),
+      introText: introText || candidate.introText || ""
+    });
+    historyRecord.id = candidateId;
+    nextData.history.unshift(historyRecord);
+  }
+  nextData.candidates = nextData.candidates.filter((entry) => entry.id !== candidateId);
+  const pending = nextData.pendingRoomPost;
+  if (pending?.candidateId === candidateId && pending.itemCode === itemCode) nextData.pendingRoomPost = null;
+  const savedHistoryCandidate = nextData.history.find((entry) => entry.id === candidateId);
+  if (!savedHistoryCandidate || String(savedHistoryCandidate.itemCode || savedHistoryCandidate.product?.itemCode || "").trim() !== itemCode || !savedHistoryCandidate.postedAt || nextData.candidates.some((entry) => entry.id === candidateId)) {
+    return { ok: false, error: "履歴と候補削除の保存内容を検証できません。" };
+  }
+
+  // One roomAssistantDataV1 snapshot contains both the history record and candidate removal.
+  // saveData writes it once and reads the exact JSON back; on failure it reloads the old saved data.
+  const saveResult = saveData(nextData, { render: false });
+  if (!saveResult.ok) {
+    renderAll();
+    return { ok: false, error: "履歴保存に失敗しました。候補は保持されています。" };
+  }
+  renderAll();
+  return { ok: true, history: savedHistoryCandidate };
+}
+
 function completePendingRoomPost() {
   const pending = data.pendingRoomPost;
   if (!pending?.itemCode) {
@@ -4532,60 +4616,41 @@ function completePendingRoomPost() {
     toast("投稿開始時の商品を候補から特定できません。pending情報を保持したまま停止しました。");
     return false;
   }
-  if (findPostedHistoryRecord(item)) {
-    const previousState = structuredClone(data);
-    data.pendingRoomPost = null;
-    const result = saveData();
-    if (!result.ok) {
-      data = previousState;
-      renderAll();
-      toast("ROOMへの投稿は完了していますが、アプリの履歴保存に失敗しました。同じ商品を再投稿しないよう注意してください。");
-      return false;
-    }
-    toast("この商品はすでに投稿履歴にあります。重複登録は行いません。");
-    return true;
-  }
-  const previousState = structuredClone(data);
-  const previousSnapshot = getSerializedDataSnapshot(data);
-  try {
-    if (String(pending.itemCode || "").trim() !== String(item.itemCode || item.product?.itemCode || "").trim()) {
-      toast("投稿開始時と現在の商品itemCodeが一致しないため、投稿完了を記録せず停止しました。");
-      return false;
-    }
-    const pendingTitle = String(pending.title || "").trim();
-    const currentTitle = String(item.title || item.product?.itemName || "").trim();
-    if (pendingTitle && currentTitle && pendingTitle !== currentTitle) {
-      toast("投稿開始時と現在の商品名が一致しないため、投稿完了を記録せず停止しました。");
-      return false;
-    }
-    const payload = validateRoomPostingPayload(item, pending.introText || item.introText);
-    if (!payload.ok) {
-      toast(payload.error);
-      return false;
-    }
-    recordRoomPosting(item, { postedAt: new Date().toISOString(), introText: payload.introText });
-    compactPostedCandidate(item, data.history);
-    data.pendingRoomPost = null;
-    const savedResult = saveData(data, { render: false });
-    if (!savedResult.ok) {
-      data = previousState;
-      renderAll();
-      toast("ROOMへの投稿は完了していますが、アプリの履歴保存に失敗しました。同じ商品を再投稿しないよう注意してください。");
-      return false;
-    }
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    const savedHistory = (saved.history || []).find((entry) => (entry.itemCode || entry.product?.itemCode || "") === pending.itemCode);
-    if (!savedHistory?.postedAt) throw new Error("投稿履歴の保存確認に失敗しました。");
-    renderAll();
-    toast("ROOM投稿完了をアプリへ記録しました。");
-    return true;
-  } catch (error) {
-    try { localStorage.setItem(STORAGE_KEY, previousSnapshot.json); } catch (restoreError) { console.warn("投稿完了処理の検証失敗時に元データを復元できませんでした。", restoreError); }
-    data = previousState;
-    renderAll();
-    toast(`ROOMへの投稿は完了していますが、アプリの履歴保存に失敗しました。同じ商品を再投稿しないよう注意してください。${error.message ? ` ${error.message}` : ""}`);
+  if (pending.candidateId && pending.candidateId !== item.id) {
+    toast("投稿開始時の候補IDと現在の商品が一致しないため、記録を中止しました。");
     return false;
   }
+  if (String(pending.itemCode || "").trim() !== String(item.itemCode || item.product?.itemCode || "").trim()) {
+    toast("投稿開始時と現在の商品コードが一致しないため、記録を中止しました。");
+    return false;
+  }
+  const pendingTitle = String(pending.title || "").trim();
+  const currentTitle = String(item.title || item.product?.itemName || "").trim();
+  if (pendingTitle && currentTitle && pendingTitle !== currentTitle) {
+    toast("投稿開始時と現在の商品名が一致しないため、投稿完了を記録せず停止しました。");
+    return false;
+  }
+  if (findAnyHistoryRecord(item)) {
+    const existingResult = saveRoomPostingAndRemoveCandidate(item.id);
+    if (!existingResult.ok) {
+      toast(`既存の履歴を確認しましたが、候補を安全に整理できませんでした。${existingResult.error}`);
+      return false;
+    }
+    toast("登録済みの投稿履歴を維持し、重複記録なしで候補を取り除きました。");
+    return true;
+  }
+  const payload = validateRoomPostingPayload(item, pending.introText || item.introText);
+  if (!payload.ok) {
+    toast(payload.error);
+    return false;
+  }
+  const result = saveRoomPostingAndRemoveCandidate(item.id, { postedAt: new Date().toISOString(), introText: payload.introText });
+  if (!result.ok) {
+    toast(`ROOMへの投稿は完了していますが、${result.error} 同じ商品を再投稿しないよう注意してください。`);
+    return false;
+  }
+  toast("ROOM投稿完了を履歴に記録し、候補一覧から取り除きました。");
+  return true;
 }
 
 function markPosted(id) {
@@ -4597,20 +4662,22 @@ function markPosted(id) {
     toast("対象候補のID・itemCode、または別候補の確認待ち状態を照合できないため、投稿済みには変更しませんでした。");
     return false;
   }
-  if (!window.confirm(`ROOM側で投稿成功を確認しましたか？\n\n${item.title || item.product?.itemName || "商品"}\n${itemCode}\n\n成功を確認した場合だけ投稿済み履歴を記録します。`)) return false;
-  const existingHistory = findPostedHistoryRecord(item);
-  if ((item.status === "投稿済み" || item.postStatus === "投稿済み") && existingHistory) {
-    toast("この商品はすでに投稿済みです。");
+  const existingHistory = findAnyHistoryRecord(item);
+  if (existingHistory) {
+    if (existingHistory.id !== item.id || String(existingHistory.itemCode || existingHistory.product?.itemCode || "").trim() && String(existingHistory.itemCode || existingHistory.product?.itemCode || "").trim() !== String(itemCode).trim()) {
+      toast("同じ商品コードまたは候補IDの履歴が別の識別情報と結び付いています。重複登録を避けるため変更しませんでした。");
+      return false;
+    }
+  } else if (!window.confirm(`ROOM側で「コレ！完了」と投稿成功を確認しましたか？\n\n${item.title || item.product?.itemName || "商品"}\n${itemCode}\n\n成功を確認した場合だけ履歴を記録し、候補一覧から取り除きます。`)) {
     return false;
   }
-  // URL取得前の従来運用でもROOM投稿完了を記録できる。後のURL登録時は同じ履歴を更新する。
-  recordRoomPosting(item);
-  compactPostedCandidate(item, data.history);
-  if (data.pendingRoomPost?.candidateId === item.id && data.pendingRoomPost.itemCode === itemCode) data.pendingRoomPost = null;
-  const result = saveData();
-  if (!result.ok) return false;
+  const result = saveRoomPostingAndRemoveCandidate(id);
+  if (!result.ok) {
+    toast(`投稿履歴を保存できなかったため、候補は削除していません。${result.error}`);
+    return false;
+  }
   showTab("history");
-  toast("投稿履歴に記録しました。");
+  toast("投稿履歴を保存し、候補一覧から取り除きました。");
   return true;
 }
 
