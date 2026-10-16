@@ -5,6 +5,8 @@ const discovery = fs.readFileSync("src/sns-trend-discovery.js", "utf8");
 const css = fs.readFileSync("src/sns-trend.css", "utf8");
 const appCss = fs.readFileSync("style.css", "utf8");
 
+if (!html.includes('script.js?v=room-unposted-reset-20261017-r1')) throw new Error("Main script cache identifier must be updated for the current release source");
+
 if (!html.includes('id="clearSearchConditions"') || !html.includes('id="clearSearchConditions" class="secondary-button" type="button">クリア')) {
   throw new Error("search clear button is missing or mislabeled");
 }

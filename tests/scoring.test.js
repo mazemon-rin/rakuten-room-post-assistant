@@ -708,6 +708,12 @@ assert(unpostedFixture.pendingRoomPost !== null && unpostedSavedFixture.pendingR
 assert(unpostedSavedYakeanu.postStatus === "投稿待ち" && unpostedSavedYakeanu.introText === "保存済み" && unpostedSavedYakeanu.hashTags === "#保持", "ROOM status: reset preserves the target's saved introduction and tags");
 const unpostedSavedDevirock = unpostedSavedFixture.candidates.find((item) => item.id === "devirock-confirmation-protected");
 assert(unpostedSavedDevirock?.postStatus === "確認待ち" && unpostedSavedDevirock.roomAttempt?.status === "result_check_required", "ROOM status: reset leaves devirock result-check state unchanged");
+const unpostedReloadedFixture = scoring.reloadData();
+const reloadedYakeanu = unpostedReloadedFixture.candidates.find((item) => item.id === "yakeanu-test");
+const reloadedDevirock = unpostedReloadedFixture.candidates.find((item) => item.id === "devirock-confirmation-protected");
+assert(!unpostedReloadedFixture.pendingRoomPost && reloadedYakeanu?.postStatus === "投稿待ち", "ROOM status: reload keeps the confirmed pending reset");
+assert(reloadedYakeanu?.introText === "保存済み" && reloadedYakeanu?.hashTags === "#保持", "ROOM status: reload preserves Yakeanu copy and tags");
+assert(reloadedDevirock?.postStatus === "確認待ち" && reloadedDevirock.roomAttempt?.status === "result_check_required", "ROOM status: reload preserves devirock result-check state");
 
 // A quota/save error must keep the existing pending state and copy in storage.
 const unpostedFailureFixture = structuredClone(unpostedFixture);
