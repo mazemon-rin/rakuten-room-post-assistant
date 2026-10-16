@@ -45,28 +45,37 @@
     });
   }
 
-  function buildRoomSequentialQueue(candidates = [], requestedCount, history = []) {
+  function buildRoomSequentialQueue(candidates = [], requestedCount, history = [], options = {}) {
     if (!Number.isInteger(requestedCount) || requestedCount < 1) {
       return { ok: false, error: "処理件数は1以上の整数で指定してください。" };
     }
     const eligible = getEligibleRoomCandidates(candidates, history);
-    if (eligible.length < requestedCount) {
+    const successTarget = options.successTarget === true;
+    if (!successTarget && eligible.length < requestedCount) {
       return { ok: false, error: `指定件数 ${requestedCount}件に対して、投稿可能な保存済み候補は${eligible.length}件です。件数を調整してください。` };
     }
     const entries = [];
     const ids = new Set();
     const itemCodes = new Set();
-    for (const candidate of eligible.slice(0, requestedCount)) {
+    const normalizeCode = (value) => root.ProductIdentity?.normalizeItemCode
+      ? root.ProductIdentity.normalizeItemCode(value) : String(value || "").trim().toLowerCase();
+    // A success-target queue must be able to pass confirmed failures without
+    // counting them toward the requested number of successful ROOM posts.
+    const selected = successTarget ? eligible : eligible.slice(0, requestedCount);
+    for (const candidate of selected) {
       const id = String(candidate.id || "").trim();
       const itemCode = getItemCode(candidate);
       if (!id || !itemCode) return { ok: false, error: "候補IDまたはitemCodeがない候補があるため連続処理を開始できません。" };
       if (ids.has(id)) return { ok: false, error: "候補IDが重複しているため連続処理を開始できません。" };
-      if (itemCodes.has(itemCode)) return { ok: false, error: "itemCodeが重複しているため連続処理を開始できません。" };
+      if (itemCodes.has(normalizeCode(itemCode))) {
+        if (successTarget) continue;
+        return { ok: false, error: "itemCodeが重複しているため連続処理を開始できません。" };
+      }
       ids.add(id);
-      itemCodes.add(itemCode);
+      itemCodes.add(normalizeCode(itemCode));
       entries.push(Object.freeze({ candidateId: id, itemCode }));
     }
-    return { ok: true, entries: Object.freeze(entries) };
+    return { ok: true, entries: Object.freeze(entries), successTarget, eligibleCount: eligible.length };
   }
 
   function resolveRoomQueueCandidate(entry, candidates = []) {
@@ -108,6 +117,10 @@
       ? " / キュー：保存上ACTIVE・実行状態未確認"
       : queueState?.status ? ` / 保存キュー状態：${queueState.status}` : "";
     const entry = queueState?.entries?.[queueState.currentIndex];
+    if (queueState?.policy === "successful_posts") {
+      const matches = entry?.candidateId === candidate.id && entry.itemCode === getItemCode(candidate);
+      return `投稿成功目標：${queueState.successCount || 0} / ${queueState.requestedCount}件・失敗 ${queueState.failureCount || 0}件・削除 ${queueState.deletedCount || 0}件・結果不明保留 ${queueState.unknownCount || 0}件・残り候補 ${queueState.entries?.length || 0}件 / 現在：${matches ? candidate.title || candidate.product?.itemName || "商品名未確認" : "候補ID・itemCode未確認"}（${candidate.postStatus || "未確認"}）${queueStateLabel}`;
+    }
     if (entry?.candidateId === candidate.id && entry.itemCode === getItemCode(candidate)) {
       return `現在の処理商品：${candidate.title || candidate.product?.itemName || "商品名未確認"}（${queueState.currentIndex + 1} / ${queueState.entries.length}件） / 状態：${candidate.postStatus || "未確認"}${queueStateLabel}`;
     }

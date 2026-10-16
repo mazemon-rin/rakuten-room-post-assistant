@@ -47,6 +47,15 @@ assert.strictEqual(afterTwo.done, true);
 assert.strictEqual(twoItems.entries.length, 2);
 
 assert.strictEqual(queueApi.buildRoomSequentialQueue([candidate("a", "shop:duplicate"), candidate("b", "shop:duplicate")], 2).ok, false);
+const successTarget = queueApi.buildRoomSequentialQueue([
+  { ...candidate("dup-first", "shop:repeat", "投稿待ち"), savedAt: "2026-10-01" },
+  { ...candidate("dup-later", "SHOP:REPEAT", "投稿待ち"), savedAt: "2026-10-02" },
+  { ...candidate("after-duplicate", "shop:unique", "投稿待ち"), savedAt: "2026-10-03" }
+], 2, [], { successTarget: true });
+assert.strictEqual(successTarget.ok, true);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(successTarget.entries.map((entry) => entry.candidateId))), ["dup-first", "after-duplicate"]);
+assert.strictEqual(queueApi.buildRoomSequentialQueue([candidate("few", "shop:few")], 3, [], { successTarget: true }).ok, true,
+  "a success target may start with fewer candidates and end when candidates are exhausted");
 
 // 7: a requested limit is a hard boundary even when hundreds of candidates exist.
 const manyCandidates = Array.from({ length: 371 }, (_, index) => candidate(`item-${index + 1}`, `shop:item-${index + 1}`));

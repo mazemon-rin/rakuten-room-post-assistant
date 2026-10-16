@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <title>楽天ROOM投稿アシスタント</title>
-  <link rel="stylesheet" href="style.css?v=room-2.7.1.4-20261016">
-  <link rel="stylesheet" href="src/sns-trend.css">
+  <link rel="stylesheet" href="style.css?v=room-2.7.1.4-queue-recovery-20261016">
+  <link rel="stylesheet" href="src/sns-trend.css?v=room-2.7.1.4-queue-recovery-20261016">
 </head>
 <body>
   <header class="app-header">
@@ -14,6 +14,8 @@
       <p class="eyebrow">ROOMらくらく投稿メーカー</p>
       <h1>楽天ROOM投稿アシスタント</h1>
       <p class="app-version" aria-label="アプリバージョン">Ver.2-7.1.4</p>
+      <button id="refresh-latest-app" class="secondary-button refresh-app-button" type="button">最新版を読み直す</button>
+      <span id="app-refresh-message" class="visually-hidden" role="status" aria-live="polite"></span>
       <p class="lead">商品探し、紹介文づくり、投稿履歴管理をまとめて支える静的Webアプリです。</p>
     </div>
     <div class="header-note">
@@ -125,7 +127,7 @@
         <p>採用商品を1件ずつ準備します。確認モードは完了前に停止し、連続実投稿は現在の依頼で明示許可された場合だけ行います。</p>
       </div>
       <div class="candidate-view-tabs" role="tablist" aria-label="候補の種類">
-        <button class="candidate-view-tab active" id="candidate-room-tab" type="button" role="tab" aria-selected="true" aria-controls="candidate-room-view" data-candidate-view="room">投稿候補 (<span id="roomCandidateCount">0</span>)</button>
+        <button class="candidate-view-tab active" id="candidate-room-tab" type="button" role="tab" aria-selected="true" aria-controls="candidate-room-view" data-candidate-view="room">投稿候補・投稿可能 (<span id="roomCandidateCount">0</span>)</button>
         <button class="candidate-view-tab" id="candidate-threads-tab" type="button" role="tab" aria-selected="false" aria-controls="candidate-threads-view" data-candidate-view="threads">Threads投稿 (<span id="threadsCandidateCount">0</span>)</button>
       </div>
       <section id="candidate-room-view" class="candidate-view-panel active" role="tabpanel" aria-labelledby="candidate-room-tab">
@@ -139,10 +141,22 @@
          </select>
         </label>
        </div>
-       <p id="queue-progress" class="queue-progress" role="status" aria-live="polite"></p>
+       <p id="candidate-count-summary" class="candidate-count-summary" aria-live="polite"></p>
+       <div class="queue-status-panel" role="status" aria-live="polite">
+        <p id="queue-progress" class="queue-progress"></p>
+        <p id="queue-stats" class="queue-stats"></p>
+       </div>
+       <details id="stale-queue-recovery" class="panel queue-recovery-panel">
+        <summary>古い保存キューのROOM操作終了を記録</summary>
+        <p>再読み込み後の「保存上ACTIVE」は実行中を意味しません。ROOM画面・投稿操作が終了していることを実際に確認した場合のみ使用してください。投稿結果不明の商品は結果確認待ち・同一itemCode再投稿禁止のまま保持し、成功数に含めません。保存済みキューの候補ID・itemCodeが一致すれば、その固定キュー内の別商品へ進みます。次候補が特定できない場合は停止します。</p>
+        <label for="stale-queue-close-reason">ROOM操作終了の確認根拠</label>
+        <input id="stale-queue-close-reason" type="text" autocomplete="off" placeholder="例：ROOM投稿画面を閉じ、処理が継続していないことを確認">
+        <label><input id="stale-queue-close-confirmed" type="checkbox"> ROOM操作が終了したことを確認しました。投稿結果は確定しません。</label>
+        <button id="end-stale-queue" class="secondary-button" type="button">終了を記録して固定キューの次候補へ</button>
+       </details>
        <details class="panel codex-room-command-panel" aria-labelledby="codex-room-command-title">
         <summary id="codex-room-command-title">Codex連携を開く</summary>
-        <p>投稿件数を含む自然言語の指示を貼り付け、Control＋Enter（MacはCommand＋Enter）で受け付けます。候補ID・itemCodeは開始時に固定され、指定件数で停止します。</p>
+        <p>投稿成功件数を含む自然言語の指示を貼り付け、Control＋Enter（MacはCommand＋Enter）で受け付けます。候補ID・itemCodeは開始時に固定され、成功目標に達するか候補がなくなると終了します。</p>
         <form id="codex-room-command-form">
           <label for="codex-room-command">今回の自然言語指示
             <textarea id="codex-room-command" rows="3" autocomplete="off" placeholder="例：楽天ROOMの投稿候補から3件、正式Skillに従って連続実投稿してください。"></textarea>
@@ -467,23 +481,23 @@
   </footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="src/core/product-identity.js"></script>
-  <script src="src/core/duplicate-detection.js?v=room-2.7.1.4-20261016"></script>
-  <script src="src/core/candidate-list-view.js?v=room-2.7.1.4-20261016"></script>
-  <script src="src/core/room-sequential-queue.js?v=room-2.7.1.4-20261016"></script>
-  <script src="src/core/room-codex-bridge.js?v=room-2.7.1.4-20261016"></script>
-  <script src="src/core/room-attempt.js?v=room-2.7.1.4-20261016"></script>
-  <script src="src/core/discount-rules.js"></script>
-  <script src="src/core/utils.js"></script>
-  <script src="src/core/affiliate-sales.js"></script>
-  <script src="src/core/history-display.js"></script>
-  <script src="src/core/product-normalization.js"></script>
-  <script src="src/core/affiliate-rate-search.js?v=room-2.7.1.4-20261016"></script>
-  <script src="src/core/affiliate-rate-diagnostic.js"></script>
-  <script src="src/core/ranking-rules.js"></script>
-  <script src="src/core/trend-rules.js"></script>
-  <script src="script.js?v=room-2.7.1.4-20261016"></script>
-  <script src="src/sns-trend.js"></script>
-  <script src="src/sns-trend-discovery.js?v=adoption-feedback-20260929"></script>
+  <script src="src/core/product-identity.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/duplicate-detection.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/candidate-list-view.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/room-codex-bridge.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/room-attempt.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/discount-rules.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/utils.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/affiliate-sales.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/history-display.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/product-normalization.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/affiliate-rate-search.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/affiliate-rate-diagnostic.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/ranking-rules.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/trend-rules.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="script.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/sns-trend.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/sns-trend-discovery.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
 </body>
 </html>

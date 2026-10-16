@@ -627,6 +627,102 @@ function bindForms() {
   on("#clearData", "click", clearData);
   on("#previewPostedCandidateCleanup", "click", previewPostedCandidateCleanup);
   on("#executePostedCandidateCleanup", "click", executePostedCandidateCleanup);
+  on("#refresh-latest-app", "click", reloadLatestAppWithoutClearingData);
+  on("#end-stale-queue", "click", endStaleRoomQueue);
+}
+
+function reloadLatestAppWithoutClearingData() {
+  const status = $("#app-refresh-message");
+  if (status) status.textContent = "保存データは消去せず、最新版を再読み込みします。";
+  const url = new URL(window.location.href);
+  url.searchParams.set("app-refresh", `${APP_VERSION}-${Date.now()}`);
+  window.location.replace(url.toString());
+}
+
+function endStaleRoomQueue() {
+  const queue = data.roomPostQueue;
+  const reason = String($("#stale-queue-close-reason")?.value || "").trim();
+  const confirmed = $("#stale-queue-close-confirmed")?.checked === true;
+  if (activeRoomPostQueue || !queue || ![roomCodexBridge.QUEUE_STATUS.ACTIVE,
+      roomCodexBridge.QUEUE_STATUS.ADVANCE_READY, roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED,
+      roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED].includes(queue.status) || !confirmed || !reason) {
+    toast("保存キューの状態、ROOM操作終了の確認、根拠を確認できません。変更していません。");
+    return false;
+  }
+  const entry = queue.entries?.[queue.currentIndex];
+  const candidate = entry && data.candidates.find((item) => item.id === entry.candidateId);
+  const match = candidate && roomCodexBridge.matchStaleQueueCurrent(queue, candidate);
+  if (!match?.ok || roomAttemptApi.getItemCode(candidate) !== entry?.itemCode) {
+    toast("現在候補のID・itemCodeを一致確認できません。保存キューを変更していません。");
+    return false;
+  }
+  const nextData = structuredClone(data);
+  const nextCandidate = nextData.candidates.find((item) => item.id === entry.candidateId);
+  if (roomAttemptApi.isLegacyProcessingState(nextCandidate)) {
+    nextCandidate.roomAttempt = roomAttemptApi.protectLegacyResultUnknown(nextCandidate, {
+      attemptId: crypto.randomUUID(), confirmedAt: new Date().toISOString(),
+      confirmedItemCode: entry.itemCode, reason, explicitlyConfirmed: true
+    });
+    if (!nextCandidate.roomAttempt) {
+      toast("旧処理状態を結果不明として保護できません。変更していません。");
+      return false;
+    }
+    nextCandidate.postStatus = "結果確認待ち";
+  } else if (nextCandidate.roomAttempt?.status === roomAttemptApi.STATUS.PROCESSING) {
+    const interrupted = roomAttemptApi.interrupt(nextCandidate);
+    if (!interrupted) {
+      toast("試行記録の候補ID・itemCodeが一致しません。変更していません。");
+      return false;
+    }
+    nextCandidate.roomAttempt = interrupted;
+    nextCandidate.postStatus = "結果確認待ち";
+  } else if (nextCandidate.roomAttempt?.status !== roomAttemptApi.STATUS.RESULT_CHECK_REQUIRED) {
+    toast("現在候補に未完了のROOM試行状態がありません。キューは変更していません。");
+    return false;
+  }
+  nextCandidate.roomAttempt = { ...nextCandidate.roomAttempt,
+    roomOperationClosedAt: new Date().toISOString(), roomOperationCloseReason: reason };
+  nextCandidate.postStatus = "結果確認待ち";
+  const unknownTransition = roomCodexBridge.recordOutcome(nextData.roomPostQueue, entry.candidateId, entry.itemCode, "unknown", {
+    operationClosedAt: nextCandidate.roomAttempt.roomOperationClosedAt,
+    closeReason: reason
+  });
+  if (!unknownTransition.ok) {
+    toast(`${unknownTransition.error} 候補と旧キューは変更していません。`);
+    return false;
+  }
+  const transition = roomCodexBridge.releaseClosedUnknown(unknownTransition.queue, entry.candidateId, entry.itemCode,
+    nextCandidate.roomAttempt, { evidence: reason, operationClosedAt: nextCandidate.roomAttempt.roomOperationClosedAt });
+  if (!transition.ok) {
+    toast(`${transition.error} 候補と旧キューは変更していません。`);
+    return false;
+  }
+  nextData.roomPostQueue = transition.queue;
+  const saved = saveData(nextData);
+  if (!saved.ok) return false;
+  const persisted = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { return null; } })();
+  if (persisted?.roomPostQueue?.queueId !== transition.queue.queueId
+      || persisted.roomPostQueue.status !== transition.queue.status
+      || !persisted.candidates?.some((item) => item.id === entry.candidateId
+        && roomAttemptApi.getItemCode(item) === entry.itemCode
+        && item.roomAttempt?.status === roomAttemptApi.STATUS.RESULT_CHECK_REQUIRED)) {
+    activeRoomPostQueue = null;
+    toast("終了確認と結果確認待ちの保存を検証できないため停止しました。候補と履歴は追加変更していません。");
+    return false;
+  }
+  activeRoomPostQueue = null;
+  const nextEntry = transition.queue.entries[0];
+  const persistedNext = nextEntry && persisted.candidates.find((item) => item.id === nextEntry.candidateId);
+  if (nextEntry && (!persistedNext || roomAttemptApi.getItemCode(persistedNext) !== nextEntry.itemCode)) {
+    toast("次候補のID・itemCodeを保存後に確認できません。旧商品は結果不明のまま保護し、キューを開始しませんでした。");
+    return false;
+  }
+  if (transition.queue.status === roomCodexBridge.QUEUE_STATUS.ACTIVE && nextEntry) {
+    return startSuccessTargetNextEntry(nextEntry,
+      "ROOM操作終了を確認しました。前商品は結果確認待ち・再投稿禁止のまま、固定キューの別候補へ進みます。");
+  }
+  toast("ROOM操作終了を記録しました。投稿結果不明の商品は保持し、固定キューは完了しました。");
+  return true;
 }
 
 function resetRoomCandidates() {
@@ -2812,19 +2908,38 @@ function renderCandidates() {
 function getDisplayedRoomCandidates() {
   const keyword = $("#candidateFilter")?.value?.trim().toLowerCase() || "";
   const mode = $("#candidateStatusFilter")?.value || "unposted";
+  const postableCandidateIds = new Set(window.RoomSequentialQueue
+    .getEligibleRoomCandidates(data.candidates.filter(isRoomCandidate), data.history)
+    .map((candidate) => String(candidate.id || "")));
   return window.CandidateListView.filterRoomCandidates(data.candidates, {
     mode,
     keyword,
     history: data.history,
-    isRoomCandidate
+    isRoomCandidate,
+    postableCandidateIds
   });
 }
 
 function updateCandidateViewCounts() {
-  const roomCount = data.candidates.filter(isRoomCandidate).length;
+  const roomCandidates = data.candidates.filter(isRoomCandidate);
+  const eligible = window.RoomSequentialQueue.getEligibleRoomCandidates(roomCandidates, data.history);
+  const postableCandidateIds = new Set(eligible.map((candidate) => String(candidate.id || "")));
+  const counts = window.CandidateListView.summarizeRoomCandidates(roomCandidates, {
+    history: data.history, isRoomCandidate, postableCandidateIds
+  });
   const threadsCount = data.candidates.filter(isThreadsOnlyItem).length;
-  if ($("#roomCandidateCount")) $("#roomCandidateCount").textContent = roomCount;
+  if ($("#roomCandidateCount")) $("#roomCandidateCount").textContent = eligible.length;
   if ($("#threadsCandidateCount")) $("#threadsCandidateCount").textContent = threadsCount;
+  const filter = $("#candidateStatusFilter");
+  if (filter) {
+    const values = { unposted: counts.postable, review: counts.review, all: counts.total };
+    const labels = { unposted: "未投稿", review: "確認待ち", all: "すべて" };
+    for (const option of filter.options || []) {
+      if (Object.hasOwn(values, option.value)) option.textContent = `${labels[option.value]} (${values[option.value]})`;
+    }
+  }
+  const summary = $("#candidate-count-summary");
+  if (summary) summary.textContent = `保存候補 ${counts.total}件 / 投稿可能 ${counts.postable}件 / 確認待ち ${counts.review}件 / 投稿済み ${counts.posted}件 / その他 ${counts.other}件`;
 }
 
 function renderThreadsOnlyCandidates() {
@@ -2950,7 +3065,21 @@ function renderCollectionSummary() {
 
 function renderQueueProgress() {
   const progress = $("#queue-progress");
+  const stats = $("#queue-stats");
   if (!progress) return;
+  const queueState = data.roomPostQueue;
+  const recoveryPanel = $("#stale-queue-recovery");
+  if (recoveryPanel) recoveryPanel.hidden = ![roomCodexBridge.QUEUE_STATUS.ACTIVE,
+    roomCodexBridge.QUEUE_STATUS.ADVANCE_READY, roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED,
+    roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED].includes(queueState?.status);
+  if (stats) {
+    const remaining = Array.isArray(queueState?.entries) ? queueState.entries.length : 0;
+    const currentEntry = queueState?.entries?.[queueState.currentIndex];
+    const currentCandidate = currentEntry && data.candidates.find((candidate) => candidate.id === currentEntry.candidateId);
+    stats.textContent = queueState?.policy === "successful_posts"
+      ? `成功 ${queueState.successCount || 0}/${queueState.requestedCount}件・失敗 ${queueState.failureCount || 0}件・削除 ${queueState.deletedCount || 0}件・結果不明保留 ${queueState.unknownCount || 0}件・残り候補 ${remaining}件・処理中 ${currentCandidate?.title || currentCandidate?.product?.itemName || "なし"}`
+      : `残り候補 ${window.RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history).length}件・処理中 ${currentCandidate?.title || currentCandidate?.product?.itemName || "なし"}`;
+  }
   const roomCandidates = data.candidates.filter(isRoomCandidate);
   const queue = window.RoomSequentialQueue.getEligibleRoomCandidates(roomCandidates, data.history);
   const active = roomCandidates.find(isRoomAttemptBlocked);
@@ -3386,6 +3515,15 @@ function candidateCardCompact(item) {
       <label><input id="legacy-room-protection-confirmed-${escapeAttr(item.id)}" type="checkbox"> 投稿結果を変更せず、操作終了も未確認として保護することを確認しました</label>
       <button class="secondary-button" type="button" onclick="protectLegacyRoomProcessing('${item.id}')">旧処理を結果確認待ちとして保護</button>
     </div>` : "";
+  const queueEntry = data.roomPostQueue?.entries?.[data.roomPostQueue.currentIndex];
+  const isSuccessQueueCurrent = data.roomPostQueue?.policy === "successful_posts"
+    && queueEntry?.candidateId === item.id && queueEntry.itemCode === itemCode;
+  const queueFailureControls = isSuccessQueueCurrent && data.roomPostQueue.status === roomCodexBridge.QUEUE_STATUS.ACTIVE
+    ? `<div class="queue-failure-controls"><strong>投稿不能を確認した場合</strong>
+      <label>理由<select id="queue-failure-reason-${escapeAttr(item.id)}"><option value="">選択してください</option><option value="product_missing">商品ページが存在しない</option><option value="duplicate">ROOMで重複を確認</option><option value="identity_mismatch">商品情報の不一致を確認</option><option value="discontinued">販売終了を確認</option><option value="confirmed_unposted_error">ROOMエラー後、未投稿を確認</option></select></label>
+      <label>確認根拠<input id="queue-failure-evidence-${escapeAttr(item.id)}" type="text" placeholder="画面で確認した事実を記入"></label>
+      <label><input id="queue-failure-closed-${escapeAttr(item.id)}" type="checkbox"> ROOM操作は未開始または終了済み</label>
+      <button class="secondary-button" type="button" onclick="confirmQueueCandidateUnpostable('${escapeAttr(item.id)}')">確認済み候補を除外して次へ</button></div>` : "";
   const reviewControls = unresolved ? `
     <p class="warning">結果確認待ちの商品は再投稿できません。ROOM側の結果を確認してから状態を整理してください。</p>
     ${legacyProtectionControls}
@@ -3395,9 +3533,10 @@ function candidateCardCompact(item) {
       <button class="secondary-button" type="button" onclick="confirmRoomAttemptResult('${item.id}', 'not_posted_confirmed')">ROOM未投稿を確認</button>
       <button class="secondary-button" type="button" onclick="confirmRoomAttemptResult('${item.id}', 'duplicate_confirmed')">ROOM重複を確認</button>
     </div>
-    ${roomCodexBridge.isOperationClosed(item.roomAttempt) ? `<p class="message">ROOM操作終了：${escapeHtml(item.roomAttempt.roomOperationClosedAt)} / ${escapeHtml(item.roomAttempt.roomOperationCloseReason)}</p>` : `<div class="room-operation-closure"><label>ROOM操作終了の確認根拠<input id="room-operation-close-reason-${escapeAttr(item.id)}" type="text" placeholder="ROOM操作が終了していることを確認した根拠"></label><button class="secondary-button" type="button" onclick="confirmRoomOperationClosed('${item.id}')">操作終了を記録</button></div>`}`
+    ${roomCodexBridge.isOperationClosed(item.roomAttempt) ? `<p class="message">ROOM操作終了：${escapeHtml(item.roomAttempt.roomOperationClosedAt)} / ${escapeHtml(item.roomAttempt.roomOperationCloseReason)}。投稿結果は未確定のままです。結果を確認・記録するまで同じキューの続行・新しいキューの開始はできません。</p>` : `<div class="room-operation-closure"><label>ROOM操作終了の確認根拠<input id="room-operation-close-reason-${escapeAttr(item.id)}" type="text" placeholder="ROOM操作が終了していることを確認した根拠"></label><button class="secondary-button" type="button" onclick="confirmRoomOperationClosed('${item.id}')">操作終了を記録</button></div>`}
+    ${queueFailureControls}`
     : `<label>確認根拠<select id="room-confirmation-source-${escapeAttr(item.id)}">${roomEvidenceOptions}</select></label>
-      <div class="record-actions"><button class="secondary-button" type="button" onclick="markPosted('${item.id}')">ROOM投稿済みを記録</button><button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '要手動確認')">要手動確認</button><button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button></div>`;
+      <div class="record-actions"><button class="secondary-button" type="button" onclick="markPosted('${item.id}')">ROOM投稿済みを記録</button><button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '要手動確認')">要手動確認</button><button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button></div>${queueFailureControls}`;
 
   return `<article class="record-card candidate-card candidate-card-compact" data-candidate-id="${escapeAttr(item.id)}" data-item-code="${escapeAttr(itemCode)}">
     <img src="${escapeAttr(image)}" alt="">
@@ -4688,6 +4827,10 @@ function markRoomResultUnknown(id) {
 }
 
 function confirmRoomOperationClosed(id) {
+  if (activeRoomPostQueue) {
+    toast("現在のROOM投稿キューが実行中のため、別の処理終了を記録できません。現在の操作結果を確認してから整理してください。");
+    return false;
+  }
   const candidate = data.candidates.find((item) => item.id === id && isRoomCandidate(item));
   const reasonInput = document.querySelector(`#room-operation-close-reason-${id}`);
   const reason = String(reasonInput?.value || "").trim();
@@ -4696,25 +4839,121 @@ function confirmRoomOperationClosed(id) {
     toast("結果確認待ちの商品を特定し、ROOM操作終了の確認根拠を入力してください。状態は変更していません。");
     return false;
   }
-  candidate.roomAttempt = {
-    ...candidate.roomAttempt,
+  const nextData = structuredClone(data);
+  const nextCandidate = nextData.candidates.find((item) => item.id === id);
+  nextCandidate.roomAttempt = {
+    ...nextCandidate.roomAttempt,
     roomOperationClosedAt: new Date().toISOString(),
     roomOperationCloseReason: reason
   };
-  const queueEntry = data.roomPostQueue?.entries?.[data.roomPostQueue.currentIndex];
-  if (queueEntry?.candidateId === candidate.id && queueEntry.itemCode === candidate.roomAttempt.itemCode) {
-    data.roomPostQueue.operationClosedAt = candidate.roomAttempt.roomOperationClosedAt;
-    data.roomPostQueue.operationCloseReason = reason;
-    if (data.roomPostQueue.status === roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED) {
-      data.roomPostQueue.status = roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED;
-      data.roomPostQueue.stopReason = "ROOM操作終了を確認しました。投稿結果は別途ROOM側で確認してください。";
-      queueEntry.outcome = "result_check_required";
+  const queueEntry = nextData.roomPostQueue?.entries?.[nextData.roomPostQueue.currentIndex];
+  let transition = null;
+  if (queueEntry?.candidateId === nextCandidate.id
+      && queueEntry.itemCode === nextCandidate.roomAttempt.itemCode) {
+    let queue = nextData.roomPostQueue;
+    if (queue.status !== roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED) {
+      const unknown = roomCodexBridge.recordOutcome(queue, nextCandidate.id, queueEntry.itemCode, "unknown");
+      if (!unknown.ok) { toast(unknown.error); return false; }
+      queue = unknown.queue;
     }
+    transition = roomCodexBridge.releaseClosedUnknown(queue, nextCandidate.id, queueEntry.itemCode,
+      nextCandidate.roomAttempt, { evidence: reason, operationClosedAt: nextCandidate.roomAttempt.roomOperationClosedAt });
+    if (!transition.ok) { toast(transition.error); return false; }
+    nextData.roomPostQueue = transition.queue;
   }
-  const result = saveData();
+  const result = saveData(nextData);
   if (!result.ok) return false;
-  toast("ROOM操作が終了した確認日時と根拠を保存しました。商品結果の不明状態は維持しています。");
+  if (transition?.queue.status === roomCodexBridge.QUEUE_STATUS.ACTIVE && transition.entry) {
+    return startSuccessTargetNextEntry(transition.entry,
+      "ROOM操作終了を確認しました。結果不明の商品は保留し、固定キューの別候補へ進みます。");
+  }
+  toast("ROOM操作終了を保存しました。投稿結果不明の商品は未確定・再投稿禁止のまま保持しました。");
   return true;
+}
+
+function startSuccessTargetNextEntry(entry, message = "") {
+  const candidate = entry && data.candidates.find((item) => item.id === entry.candidateId && isRoomCandidate(item));
+  if (!candidate || roomAttemptApi.getItemCode(candidate) !== entry.itemCode) {
+    activeRoomPostQueue = null;
+    toast("次候補のID・itemCodeが一致しないため停止しました。");
+    return false;
+  }
+  activeRoomPostQueue = { entries: data.roomPostQueue.entries, currentIndex: 0, mode: "continuous" };
+  renderAll();
+  if (message) toast(message);
+  void startCodexPost(entry.candidateId, "continuous", entry.itemCode).then((started) => {
+    if (started || data.roomPostQueue?.policy !== "successful_posts"
+        || data.roomPostQueue.status !== roomCodexBridge.QUEUE_STATUS.ACTIVE
+        || data.roomPostQueue.entries?.[0]?.candidateId !== entry.candidateId
+        || data.roomPostQueue.entries?.[0]?.itemCode !== entry.itemCode) return;
+    activeRoomPostQueue = null;
+    data.roomPostQueue.status = roomCodexBridge.QUEUE_STATUS.STOPPED;
+    data.roomPostQueue.stopReason = "次候補を安全に開始できませんでした。保存済みキューを停止しました。";
+    saveData();
+  }).catch(() => {
+    if (data.roomPostQueue?.policy !== "successful_posts"
+        || data.roomPostQueue.status !== roomCodexBridge.QUEUE_STATUS.ACTIVE) return;
+    activeRoomPostQueue = null;
+    data.roomPostQueue.status = roomCodexBridge.QUEUE_STATUS.STOPPED;
+    data.roomPostQueue.stopReason = "次候補の開始処理でエラーが発生しました。保存済みキューを停止しました。";
+    saveData();
+  });
+  return true;
+}
+
+function confirmQueueCandidateUnpostable(id) {
+  const queue = data.roomPostQueue;
+  const entry = queue?.entries?.[queue.currentIndex];
+  const candidate = data.candidates.find((item) => item.id === id && isRoomCandidate(item));
+  const reasonCode = String($(`#queue-failure-reason-${id}`)?.value || "");
+  const evidence = String($(`#queue-failure-evidence-${id}`)?.value || "").trim();
+  const closed = $(`#queue-failure-closed-${id}`)?.checked === true;
+  if (queue?.policy !== "successful_posts" || queue.status !== roomCodexBridge.QUEUE_STATUS.ACTIVE
+      || !candidate || entry?.candidateId !== id || entry.itemCode !== roomAttemptApi.getItemCode(candidate)
+      || !evidence || !closed) {
+    toast("成功目標キューの現在商品、itemCode、投稿不能の根拠、ROOM操作の終了を確認できません。変更していません。");
+    return false;
+  }
+  if (candidate.roomAttempt && roomAttemptApi.isUnresolved(candidate.roomAttempt)) {
+    toast("ROOM試行が結果確認待ちです。ROOM操作終了を記録した後、ROOM側の結果を人間が確認して正規UIで確定してください。結果不明のままキューから除外できません。");
+    return false;
+  }
+  const transition = roomCodexBridge.recordConfirmedFailure(queue, id, entry.itemCode, reasonCode, {
+    confirmedAt: new Date().toISOString(), evidence, roomOperationMayBeActive: false,
+    operationClosedAt: new Date().toISOString(), closeReason: "ROOM操作は未開始または終了済みであることを確認"
+  });
+  if (!transition.ok) {
+    toast(transition.error);
+    return false;
+  }
+  const nextData = structuredClone(data);
+  nextData.candidates = nextData.candidates.filter((item) => item.id !== id);
+  nextData.roomPostQueue = transition.queue;
+  const saved = saveData(nextData, { render: false });
+  if (!saved.ok) { activeRoomPostQueue = null; return false; }
+  let persisted;
+  try { persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { persisted = null; }
+  if (persisted?.roomPostQueue?.queueId !== transition.queue.queueId
+      || persisted.roomPostQueue.failureCount !== transition.queue.failureCount
+      || persisted.candidates?.some((item) => item.id === id)) {
+    activeRoomPostQueue = null;
+    toast("候補削除または進捗の保存を確認できません。次へは進みません。");
+    return false;
+  }
+  if (transition.queue.status === roomCodexBridge.QUEUE_STATUS.COMPLETED) {
+    activeRoomPostQueue = null;
+    renderAll();
+    toast(`投稿不能候補を除外しました。成功 ${transition.queue.successCount}/${transition.queue.requestedCount}件、失敗 ${transition.queue.failureCount}件で終了します。`);
+    return true;
+  }
+  const nextEntry = transition.queue.entries[0];
+  const nextCandidate = nextEntry && data.candidates.find((item) => item.id === nextEntry.candidateId);
+  if (!nextCandidate || roomAttemptApi.getItemCode(nextCandidate) !== nextEntry.itemCode) {
+    activeRoomPostQueue = null;
+    toast("次候補のID・itemCodeが一致しないため停止しました。");
+    return false;
+  }
+  return startSuccessTargetNextEntry(nextEntry, "確認済みの投稿不能候補を除外しました。成功数には含めず、次の商品へ進みます。");
 }
 
 function getRoomConfirmationSource(id) {
@@ -4725,6 +4964,22 @@ function confirmRoomAttemptResult(id, outcome, source = getRoomConfirmationSourc
   const candidate = data.candidates.find((item) => item.id === id && isRoomCandidate(item));
   if (!candidate) return false;
   if (outcome === roomAttemptApi.STATUS.POSTED_CONFIRMED) return markPosted(id, source);
+  const storedQueue = data.roomPostQueue;
+  const storedEntry = storedQueue?.entries?.[storedQueue.currentIndex];
+  const resolvingUnknownQueue = storedQueue?.status === roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED
+    && storedEntry?.candidateId === candidate.id
+    && storedEntry.itemCode === roomAttemptApi.getItemCode(candidate)
+    && candidate.roomAttempt?.status === roomAttemptApi.STATUS.RESULT_CHECK_REQUIRED;
+  if (storedQueue?.status === roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED
+      && (!resolvingUnknownQueue || !roomCodexBridge.isSavedQueueConsistent(storedQueue, data.candidates))) {
+    toast("結果不明キューの候補ID・itemCodeを照合できません。状態は変更していません。");
+    return false;
+  }
+  if (candidate.roomAttempt?.status === roomAttemptApi.STATUS.RESULT_CHECK_REQUIRED
+      && !roomCodexBridge.isOperationClosed(candidate.roomAttempt)) {
+    toast("投稿結果の確認前にROOM操作終了を確認してください。状態は変更していません。");
+    return false;
+  }
   const attempt = roomAttemptApi.confirm(candidate, outcome, source, new Date().toISOString(), crypto.randomUUID());
   if (!attempt || ![roomAttemptApi.STATUS.NOT_POSTED_CONFIRMED, roomAttemptApi.STATUS.DUPLICATE_CONFIRMED].includes(outcome)) {
     toast("ROOM側の確認結果と確認根拠を選択してください。状態は変更していません。");
@@ -4752,16 +5007,54 @@ function confirmRoomAttemptResult(id, outcome, source = getRoomConfirmationSourc
       return false;
     }
     data.roomPostQueue = transition.queue;
-  } else if (outcome === roomAttemptApi.STATUS.NOT_POSTED_CONFIRMED
-      && data.roomPostQueue?.status === roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED) {
-    data.roomPostQueue.status = roomCodexBridge.QUEUE_STATUS.STOPPED;
-    data.roomPostQueue.stopReason = "ROOM側で未投稿を確認しました。新しいキューは別操作で開始してください。";
+    if (transition.queue.policy === "successful_posts") {
+      data.candidates = data.candidates.filter((item) => item.id !== candidate.id);
+    }
+  } else if (outcome === roomAttemptApi.STATUS.NOT_POSTED_CONFIRMED && resolvingUnknownQueue) {
+    const transition = roomCodexBridge.recordOutcome(data.roomPostQueue, candidate.id, attempt.itemCode, "not_posted", {
+      humanConfirmed: true,
+      operationClosedAt: attempt.roomOperationClosedAt,
+      closeReason: attempt.roomOperationCloseReason
+    });
+    if (!transition.ok) {
+      toast(transition.error);
+      return false;
+    }
+    data.roomPostQueue = transition.queue;
   }
   activeRoomPostQueue = null;
   const saved = saveData();
   if (!saved.ok) return false;
+  if (outcome === roomAttemptApi.STATUS.DUPLICATE_CONFIRMED
+      && data.roomPostQueue?.policy === "successful_posts") {
+    let persisted;
+    try { persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { persisted = null; }
+    const persistedCandidate = persisted?.candidates?.find((item) => item.id === candidate.id);
+    if (Boolean(persistedCandidate)
+        || persisted?.roomPostQueue?.deletedCount !== data.roomPostQueue.deletedCount) {
+      activeRoomPostQueue = null;
+      toast("重複候補の除外保存を確認できないため、次へ進みません。");
+      return false;
+    }
+    if (data.roomPostQueue.status === roomCodexBridge.QUEUE_STATUS.ACTIVE) {
+      const nextEntry = data.roomPostQueue.entries[0];
+      const nextCandidate = nextEntry && data.candidates.find((item) => item.id === nextEntry.candidateId);
+      if (!nextCandidate || roomAttemptApi.getItemCode(nextCandidate) !== nextEntry.itemCode) {
+        activeRoomPostQueue = null;
+        toast("次候補の候補ID・itemCodeが一致しないため停止しました。");
+        return false;
+      }
+      startSuccessTargetNextEntry(nextEntry);
+    } else {
+      activeRoomPostQueue = null;
+      renderAll();
+    }
+    return true;
+  }
   toast(outcome === roomAttemptApi.STATUS.NOT_POSTED_CONFIRMED
-    ? "ROOM側で未投稿と確認した記録を保存しました。"
+    ? resolvingUnknownQueue
+      ? "ROOM側の未投稿確認を保存しました。旧キューは停止したままです。次の投稿は新しい明示指示で開始してください。"
+      : "ROOM側で未投稿と確認した記録を保存しました。"
     : "ROOM側の重複警告を記録しました。新しい投稿履歴は作成していません。");
   if (outcome === roomAttemptApi.STATUS.DUPLICATE_CONFIRMED
       && data.roomPostQueue?.status === roomCodexBridge.QUEUE_STATUS.ADVANCE_READY) {
@@ -4772,9 +5065,13 @@ function confirmRoomAttemptResult(id, outcome, source = getRoomConfirmationSourc
 }
 
 function getProcessingBlocker(excludeId = "") {
-  return data.candidates.find((candidate) => candidate.id !== excludeId && isRoomAttemptBlocked(candidate)
-    && !(candidate.roomAttempt?.status === roomAttemptApi.STATUS.RESULT_CHECK_REQUIRED
-      && roomCodexBridge.isOperationClosed(candidate.roomAttempt))) || null;
+  return data.candidates.find((candidate) => {
+    if (candidate.id === excludeId) return false;
+    const attempt = candidate.roomAttempt;
+    if (attempt?.status === roomAttemptApi.STATUS.RESULT_CHECK_REQUIRED
+        && roomCodexBridge.isOperationClosed(attempt)) return false;
+    return isRoomAttemptBlocked(candidate);
+  }) || null;
 }
 
 function getRoomProcessingStopMessage(candidate) {
@@ -4800,6 +5097,16 @@ async function handleCodexRoomCommandSubmit(event) {
     return false;
   }
   const existingQueue = data.roomPostQueue;
+  if (existingQueue?.policy === "successful_posts"
+      && [roomCodexBridge.QUEUE_STATUS.ACTIVE, roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED,
+        roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(existingQueue.status)) {
+    if (activeRoomPostQueue?.entries?.length && activeRoomPostQueue.mode === "continuous") {
+      if (message) message.textContent = "成功目標キューはすでにこの画面で処理中です。二重開始しません。";
+    } else if (message) {
+      message.textContent = "保存上のキュー状態が残っています。ROOM操作終了を確認し、上の『古い保存キューを安全に終了』から整理してから新しい指示を開始してください。";
+    }
+    return false;
+  }
   if (existingQueue?.status === roomCodexBridge.QUEUE_STATUS.ACTIVE
       && existingQueue.requestedCount === parsed.requestedCount) {
     const entry = existingQueue.entries?.[existingQueue.currentIndex];
@@ -4866,7 +5173,9 @@ async function handleCodexRoomCommandSubmit(event) {
   if (data.roomPostQueue?.queueId && data.roomPostQueue.queueId !== beforeQueueId
       && [roomCodexBridge.QUEUE_STATUS.ACTIVE, roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(data.roomPostQueue.status)) {
     if (input) input.value = "";
-    if (message) message.textContent = `${data.roomPostQueue.requestedCount}件の候補ID・itemCodeを固定しました。進捗：${data.roomPostQueue.currentIndex + 1} / ${data.roomPostQueue.requestedCount}件。`;
+    if (message) message.textContent = data.roomPostQueue.policy === "successful_posts"
+      ? `成功目標 ${data.roomPostQueue.requestedCount}件で開始しました。現在の固定候補は${data.roomPostQueue.entries.length}件です。`
+      : `${data.roomPostQueue.requestedCount}件の候補ID・itemCodeを固定しました。進捗：${data.roomPostQueue.currentIndex + 1} / ${data.roomPostQueue.requestedCount}件。`;
     return true;
   }
   return false;
@@ -4882,7 +5191,8 @@ async function startSequentialProcessing(mode = "continuous", requestedCount = g
     toast(text);
     return;
   }
-  const builtQueue = window.RoomSequentialQueue.buildRoomSequentialQueue(data.candidates, requestedCount, data.history);
+  const successTarget = mode === "continuous" && options.source === "codex-prompt";
+  const builtQueue = window.RoomSequentialQueue.buildRoomSequentialQueue(data.candidates, requestedCount, data.history, { successTarget });
   if (!builtQueue.ok) {
     if (message) message.textContent = builtQueue.error;
     toast(builtQueue.error);
@@ -4903,7 +5213,7 @@ async function startSequentialProcessing(mode = "continuous", requestedCount = g
       return;
     }
     const created = roomCodexBridge.createQueue(builtQueue.entries, requestedCount,
-      new Date().toISOString(), crypto.randomUUID());
+      new Date().toISOString(), crypto.randomUUID(), { successTarget });
     if (!created.ok) {
       if (message) message.textContent = created.error;
       toast(created.error);
@@ -4915,6 +5225,7 @@ async function startSequentialProcessing(mode = "continuous", requestedCount = g
       activeRoomPostQueue = null;
       return;
     }
+    renderAll();
   }
   activeRoomPostMode = postMode;
   activeRoomPostQueue = {
@@ -5307,6 +5618,20 @@ function markPosted(id, confirmationSource = getRoomConfirmationSource(id)) {
   const item = data.candidates.find((candidate) => candidate.id === id);
   if (!item) return false;
   const itemCode = roomAttemptApi.getItemCode(item);
+  const storedQueueEntry = data.roomPostQueue?.entries?.[data.roomPostQueue.currentIndex];
+  const resolvingUnknownQueue = data.roomPostQueue?.status === roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED
+    && storedQueueEntry?.candidateId === id && storedQueueEntry.itemCode === itemCode
+    && item.roomAttempt?.status === roomAttemptApi.STATUS.RESULT_CHECK_REQUIRED;
+  if (data.roomPostQueue?.status === roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED
+      && (!resolvingUnknownQueue || !roomCodexBridge.isSavedQueueConsistent(data.roomPostQueue, data.candidates))) {
+    toast("結果不明キューの候補ID・itemCodeを照合できません。履歴は変更していません。");
+    return false;
+  }
+  if (item.roomAttempt?.status === roomAttemptApi.STATUS.RESULT_CHECK_REQUIRED
+      && !roomCodexBridge.isOperationClosed(item.roomAttempt)) {
+    toast("投稿結果を確定する前にROOM操作終了を確認してください。履歴は変更していません。");
+    return false;
+  }
   const confirmedAttempt = roomAttemptApi.confirm(item, roomAttemptApi.STATUS.POSTED_CONFIRMED,
     confirmationSource, new Date().toISOString(), crypto.randomUUID());
   if (!confirmedAttempt) {
@@ -5362,7 +5687,8 @@ function markPosted(id, confirmationSource = getRoomConfirmationSource(id)) {
   if (queueOwnsCandidate) {
     const transition = roomCodexBridge.recordOutcome(data.roomPostQueue, id, itemCode, "posted", {
       roomCompletionConfirmed: true,
-      historySaved: true
+      historySaved: true,
+      stopAfterHumanResolution: resolvingUnknownQueue
     });
     if (!transition.ok) {
       activeRoomPostQueue = null;
@@ -5377,17 +5703,43 @@ function markPosted(id, confirmationSource = getRoomConfirmationSource(id)) {
     }
     let persistedQueue;
     try { persistedQueue = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null")?.roomPostQueue; } catch { persistedQueue = null; }
+    const persistedSuccessTarget = persistedQueue?.policy === "successful_posts";
     if (persistedQueue?.queueId !== data.roomPostQueue.queueId
-        || persistedQueue?.entries?.[data.roomPostQueue.currentIndex]?.outcome !== "posted"
+        || (persistedSuccessTarget
+          ? persistedQueue.successCount !== data.roomPostQueue.successCount
+            || persistedQueue.entries?.[0]?.candidateId !== data.roomPostQueue.entries?.[0]?.candidateId
+          : persistedQueue?.entries?.[persistedQueue.currentIndex]?.outcome !== "posted")
         || persistedQueue?.status !== data.roomPostQueue.status) {
       activeRoomPostQueue = null;
       toast("投稿結果のキュー保存を確認できないため、次の商品へ進みません。");
       return false;
     }
-    activeRoomPostQueue = { entries: persistedQueue.entries, currentIndex: persistedQueue.currentIndex, mode: "continuous" };
+    activeRoomPostQueue = { entries: persistedQueue.entries, currentIndex: persistedSuccessTarget ? 0 : persistedQueue.currentIndex, mode: "continuous" };
   }
   renderAll();
   toast("ROOM投稿成功と履歴保存を確認しました。");
+  if (data.roomPostQueue?.policy === "successful_posts") {
+    if (data.roomPostQueue.status === roomCodexBridge.QUEUE_STATUS.COMPLETED) {
+      activeRoomPostQueue = null;
+      toast(`投稿キュー終了：成功 ${data.roomPostQueue.successCount}/${data.roomPostQueue.requestedCount}件、失敗 ${data.roomPostQueue.failureCount}件。`);
+      return true;
+    }
+    if (resolvingUnknownQueue || data.roomPostQueue.status === roomCodexBridge.QUEUE_STATUS.STOPPED) {
+      activeRoomPostQueue = null;
+      toast("ROOM側の投稿結果を人間確認して保存しました。旧キューは再開せず停止しています。続ける場合は新しい明示指示でキューを開始してください。");
+      return true;
+    }
+    const nextEntry = data.roomPostQueue.entries?.[0];
+    const nextCandidate = nextEntry && data.candidates.find((candidate) => candidate.id === nextEntry.candidateId);
+    if (!nextCandidate || roomAttemptApi.getItemCode(nextCandidate) !== nextEntry.itemCode) {
+      activeRoomPostQueue = null;
+      toast("次候補の候補ID・itemCodeを確認できないため停止しました。");
+      return false;
+    }
+    activeRoomPostQueue = { entries: data.roomPostQueue.entries, currentIndex: 0, mode: "continuous" };
+    void startCodexPost(nextEntry.candidateId, "continuous", nextEntry.itemCode);
+    return true;
+  }
   if (data.roomPostQueue?.status === roomCodexBridge.QUEUE_STATUS.ADVANCE_READY
       && data.roomPostQueue.entries?.[data.roomPostQueue.currentIndex]?.candidateId === item.id) {
     activeRoomPostQueue = { entries: data.roomPostQueue.entries, currentIndex: data.roomPostQueue.currentIndex, mode: "continuous" };

@@ -26,11 +26,15 @@ const records = [
   { id: "sns", itemCode: "s:sns", title: "SNS", postStatus: "投稿待ち", destination: "threads_only" }
 ];
 
-assert.deepStrictEqual(JSON.parse(JSON.stringify(api.filterRoomCandidates(records, { mode: "unposted" }).map((item) => item.id))), ["pending", "copy"]);
+const postableCandidateIds = new Set(["pending", "copy"]);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(api.filterRoomCandidates(records, { mode: "unposted", postableCandidateIds }).map((item) => item.id))), ["pending", "copy"]);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(api.filterRoomCandidates(records, { mode: "review" }).map((item) => item.id))), ["waiting", "processing", "unknown-state"]);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(api.filterRoomCandidates(records, { mode: "all" }).map((item) => item.id))), ["pending", "copy", "waiting", "processing", "unknown-state", "posted"]);
-assert.deepStrictEqual(JSON.parse(JSON.stringify(api.filterRoomCandidates(records, { mode: "unposted", history: [{ itemCode: " S:COPY " }] }).map((item) => item.id))), ["pending"]);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(api.filterRoomCandidates(records, { mode: "unposted", history: [{ itemCode: " S:COPY " }], postableCandidateIds: new Set(["pending"]) }).map((item) => item.id))), ["pending"]);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(api.filterRoomCandidates(records, { mode: "all", keyword: "posted" }).map((item) => item.id))), ["posted"]);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(api.summarizeRoomCandidates(records, { postableCandidateIds }))),
+  { total: 6, postable: 2, review: 3, posted: 1, other: 0 },
+  "saved total, eligible, review and posted counts are distinct; missing introduction remains postable");
 assert.strictEqual(api.isReviewCandidate(records[2]), true);
 assert.strictEqual(api.isPostedCandidate(records[5]), true);
 

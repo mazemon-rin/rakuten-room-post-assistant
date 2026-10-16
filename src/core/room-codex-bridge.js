@@ -42,15 +42,23 @@
     return String(entry.itemCode || "").trim();
   }
 
+  function getCandidateCode(candidate = {}) {
+    const top = String(candidate.itemCode || "").trim();
+    const nested = String(candidate.product?.itemCode || "").trim();
+    return top && nested && normalizeItemCode(top) !== normalizeItemCode(nested) ? "" : top || nested;
+  }
+
   function normalizeItemCode(code) {
     return root.ProductIdentity?.normalizeItemCode
       ? root.ProductIdentity.normalizeItemCode(code)
       : String(code || "").trim().toLowerCase();
   }
 
-  function createQueue(entries = [], requestedCount, createdAt, queueId) {
-    if (!Number.isInteger(requestedCount) || requestedCount < 1 || entries.length !== requestedCount) {
-      return { ok: false, error: "固定キューの件数が指定件数と一致しません。" };
+  function createQueue(entries = [], requestedCount, createdAt, queueId, options = {}) {
+    const successTarget = options.successTarget === true;
+    if (!Number.isInteger(requestedCount) || requestedCount < 1 || !entries.length
+        || (!successTarget && entries.length !== requestedCount)) {
+      return { ok: false, error: "投稿目標とキュー候補の条件が一致しません。" };
     }
     const ids = new Set();
     const codes = new Set();
@@ -68,9 +76,14 @@
     return {
       ok: true,
       queue: {
-        version: 1,
+        version: successTarget ? 2 : 1,
+        policy: successTarget ? "successful_posts" : "fixed_items",
         queueId: String(queueId || "").trim(),
         requestedCount,
+        successCount: 0,
+        failureCount: 0,
+        deletedCount: 0,
+        unknownCount: 0,
         createdAt: String(createdAt || ""),
         currentIndex: 0,
         mode: "continuous",
@@ -88,13 +101,40 @@
       && String(attempt.roomOperationCloseReason || "").trim());
   }
 
+  function matchStaleQueueCurrent(queue, candidate) {
+    const openStatuses = [QUEUE_STATUS.ACTIVE, QUEUE_STATUS.ADVANCE_READY,
+      QUEUE_STATUS.RESULT_CHECK_REQUIRED, QUEUE_STATUS.HUMAN_ACTION_REQUIRED];
+    if (!queue || !openStatuses.includes(queue.status) || !Array.isArray(queue.entries)
+        || !Number.isInteger(queue.currentIndex) || queue.currentIndex < 0) {
+      return { ok: false, error: "保存キューの状態または現在位置を確認できません。" };
+    }
+    const entry = queue.entries[queue.currentIndex];
+    const candidateId = String(candidate?.id || "").trim();
+    const topCode = String(candidate?.itemCode || "").trim();
+    const nestedCode = String(candidate?.product?.itemCode || "").trim();
+    const candidateCode = topCode && nestedCode && topCode !== nestedCode ? "" : topCode || nestedCode;
+    if (!entry?.candidateId || !entry.itemCode || !candidateId || !candidateCode
+        || entry.candidateId !== candidateId || normalizeItemCode(entry.itemCode) !== normalizeItemCode(candidateCode)) {
+      return { ok: false, error: "保存キューの現在候補ID・itemCodeが一致しません。" };
+    }
+    return { ok: true, entry };
+  }
+
   function isSavedQueueConsistent(queue, candidates = []) {
     if (!queue) return true;
     const statuses = Object.values(QUEUE_STATUS);
     const entries = queue.entries;
-    if (!statuses.includes(queue.status) || !Array.isArray(entries) || !entries.length
-        || !queue.queueId || queue.requestedCount !== entries.length
-        || !Number.isInteger(queue.currentIndex) || queue.currentIndex < 0 || queue.currentIndex >= entries.length) return false;
+    if (!statuses.includes(queue.status) || !Array.isArray(entries)
+        || (!entries.length && queue.status !== QUEUE_STATUS.COMPLETED)
+        || !queue.queueId || !Number.isInteger(queue.requestedCount) || queue.requestedCount < 1
+        || (queue.policy !== "successful_posts" && queue.requestedCount !== entries.length)
+        || (queue.policy === "successful_posts" && (queue.version !== 2
+          || !Number.isInteger(queue.successCount) || queue.successCount < 0
+          || !Number.isInteger(queue.failureCount) || queue.failureCount < 0
+          || !Number.isInteger(queue.deletedCount) || queue.deletedCount < 0
+          || (queue.unknownCount !== undefined && (!Number.isInteger(queue.unknownCount) || queue.unknownCount < 0))))
+        || !Number.isInteger(queue.currentIndex) || queue.currentIndex < 0
+        || (entries.length ? queue.currentIndex >= entries.length : queue.status !== QUEUE_STATUS.COMPLETED)) return false;
     const ids = new Set();
     const codes = new Set();
     for (const entry of entries) {
@@ -118,27 +158,38 @@
     if (!isSavedQueueConsistent(previousQueue, candidates)) {
       return { ok: false, error: "保存済みキューの件数・候補ID・itemCodeを整合確認できません。" };
     }
-    if ([QUEUE_STATUS.ACTIVE, QUEUE_STATUS.ADVANCE_READY, QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(previousQueue?.status)) {
+    if ([QUEUE_STATUS.ACTIVE, QUEUE_STATUS.ADVANCE_READY, QUEUE_STATUS.RESULT_CHECK_REQUIRED,
+      QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(previousQueue?.status)) {
       return { ok: false, error: "前のROOMキューが継続中または人間操作待ちです。" };
     }
-    const pendingCodes = new Set();
+    const targetIds = new Set();
+    const targetCodes = new Set();
+    for (const entry of entries) {
+      const id = String(entry?.candidateId || "").trim();
+      const code = normalizeItemCode(getEntryCode(entry));
+      const matches = candidates.filter((candidate) => String(candidate?.id || "") === id);
+      if (!id || !code || matches.length !== 1 || normalizeItemCode(getCandidateCode(matches[0])) !== code
+          || targetIds.has(id) || targetCodes.has(code)) {
+        return { ok: false, error: "新しいキューの候補ID・itemCodeを一意に照合できません。" };
+      }
+      targetIds.add(id);
+      targetCodes.add(code);
+    }
     for (const candidate of candidates) {
       const attempt = candidate?.roomAttempt;
       if (!BLOCKING_ATTEMPTS.has(attempt?.status)) continue;
-      if (attempt.status === "processing" || !isOperationClosed(attempt)) {
-        return { ok: false, error: "ROOM操作の終了を確認できない処理中・結果確認待ち商品があります。" };
+      const candidateCode = normalizeItemCode(getCandidateCode(candidate));
+      if (attempt.candidateId && attempt.candidateId !== candidate.id) {
+        return { ok: false, error: "ROOM試行の候補IDが保存候補と一致しません。" };
       }
-      pendingCodes.add(normalizeItemCode(attempt.itemCode));
-    }
-    if (entries.some((entry) => pendingCodes.has(normalizeItemCode(getEntryCode(entry))))) {
-      return { ok: false, error: "結果確認待ちのitemCodeが新しいキューに含まれています。" };
-    }
-    if (previousQueue?.status === QUEUE_STATUS.RESULT_CHECK_REQUIRED) {
-      const current = previousQueue.entries?.[previousQueue.currentIndex];
-      const candidate = candidates.find((item) => item.id === current?.candidateId);
-      if (!candidate || current.itemCode !== candidate.roomAttempt?.itemCode || !isOperationClosed(candidate.roomAttempt)) {
-        return { ok: false, error: "前回のROOM操作終了を確認できません。" };
+      if (attempt.itemCode && normalizeItemCode(attempt.itemCode) !== candidateCode) {
+        return { ok: false, error: "ROOM試行のitemCodeが保存候補と一致しません。" };
       }
+      if (attempt.status === "result_check_required" && isOperationClosed(attempt)) {
+        if (targetCodes.has(candidateCode)) return { ok: false, error: "投稿結果不明の同一itemCodeは再投稿できません。" };
+        continue;
+      }
+      return { ok: false, error: "ROOM操作の終了を確認できない処理中・結果確認待ち商品があります。" };
     }
     return { ok: true };
   }
@@ -156,7 +207,23 @@
         return { ok: false, error: "ROOM完了と履歴保存の両方を確認できないため成功を記録できません。" };
       }
       current.outcome = "posted";
-      next.status = next.currentIndex + 1 >= next.entries.length ? QUEUE_STATUS.COMPLETED : QUEUE_STATUS.ADVANCE_READY;
+      if (next.policy === "successful_posts") {
+        next.successCount += 1;
+        next.entries.shift();
+        next.currentIndex = 0;
+        next.status = proof.stopAfterHumanResolution === true && next.successCount < next.requestedCount && next.entries.length
+          ? QUEUE_STATUS.STOPPED
+          : next.successCount >= next.requestedCount || !next.entries.length ? QUEUE_STATUS.COMPLETED : QUEUE_STATUS.ACTIVE;
+        next.stopReason = proof.stopAfterHumanResolution === true && next.status === QUEUE_STATUS.STOPPED
+          ? "結果不明の商品を人間確認で整理しました。旧キューは停止しました。次は新しい明示指示で開始してください。"
+          : next.successCount >= next.requestedCount
+          ? "指定した投稿成功件数に到達しました。"
+          : next.entries.length ? "投稿成功を保存しました。次候補へ進みます。" : "投稿可能な候補がなくなりました。";
+      } else {
+        next.status = proof.stopAfterHumanResolution === true ? QUEUE_STATUS.STOPPED
+          : next.currentIndex + 1 >= next.entries.length ? QUEUE_STATUS.COMPLETED : QUEUE_STATUS.ADVANCE_READY;
+        if (proof.stopAfterHumanResolution === true) next.stopReason = "結果不明の商品を人間確認で整理しました。旧キューは停止しました。次は新しい明示指示で開始してください。";
+      }
     } else if (outcome === "duplicate") {
       if (proof.duplicateWarningConfirmed !== true || !proof.operationClosedAt || !String(proof.closeReason || "").trim()) {
         return { ok: false, error: "ROOM重複警告と画面終了の根拠を確認できないため次へ進めません。" };
@@ -164,7 +231,31 @@
       current.outcome = "duplicate";
       next.operationClosedAt = String(proof.operationClosedAt);
       next.operationCloseReason = String(proof.closeReason).trim();
-      next.status = next.currentIndex + 1 >= next.entries.length ? QUEUE_STATUS.COMPLETED : QUEUE_STATUS.ADVANCE_READY;
+      if (next.policy === "successful_posts") {
+        next.failureCount += 1;
+        next.deletedCount += 1;
+        next.entries.shift();
+        next.currentIndex = 0;
+        next.status = proof.stopAfterHumanResolution === true && next.entries.length
+          ? QUEUE_STATUS.STOPPED
+          : next.successCount >= next.requestedCount || !next.entries.length ? QUEUE_STATUS.COMPLETED : QUEUE_STATUS.ACTIVE;
+        next.stopReason = proof.stopAfterHumanResolution === true && next.status === QUEUE_STATUS.STOPPED
+          ? "結果不明の商品をROOM重複確認で整理しました。旧キューは停止しました。次は新しい明示指示で開始してください。"
+          : next.entries.length ? "重複を確認して対象を除外しました。次候補へ進みます。" : "投稿可能な候補がなくなりました。";
+      } else {
+        next.status = proof.stopAfterHumanResolution === true ? QUEUE_STATUS.STOPPED
+          : next.currentIndex + 1 >= next.entries.length ? QUEUE_STATUS.COMPLETED : QUEUE_STATUS.ADVANCE_READY;
+        if (proof.stopAfterHumanResolution === true) next.stopReason = "結果不明の商品をROOM重複確認で整理しました。旧キューは停止しました。次は新しい明示指示で開始してください。";
+      }
+    } else if (outcome === "not_posted") {
+      if (proof.humanConfirmed !== true || !proof.operationClosedAt || !String(proof.closeReason || "").trim()) {
+        return { ok: false, error: "ROOM側の未投稿確認と操作終了の根拠が必要です。" };
+      }
+      current.outcome = "not_posted_confirmed";
+      next.operationClosedAt = String(proof.operationClosedAt);
+      next.operationCloseReason = String(proof.closeReason).trim();
+      next.status = QUEUE_STATUS.STOPPED;
+      next.stopReason = "ROOM側で未投稿を確認しました。旧キューは停止しました。次は新しい明示指示で開始してください。";
     } else if (outcome === "unknown") {
       current.outcome = "result_check_required";
       next.status = QUEUE_STATUS.RESULT_CHECK_REQUIRED;
@@ -185,6 +276,54 @@
     return { ok: true, queue: next };
   }
 
+  function recordConfirmedFailure(queue, candidateId, itemCode, reasonCode, proof = {}) {
+    const allowedReasons = new Set(["product_missing", "duplicate", "identity_mismatch", "discontinued", "confirmed_unposted_error"]);
+    const entry = queue?.entries?.[queue.currentIndex];
+    if (queue?.policy !== "successful_posts" || queue.status !== QUEUE_STATUS.ACTIVE
+        || !entry || entry.candidateId !== candidateId || entry.itemCode !== itemCode) {
+      return { ok: false, error: "現在の商品が成功目標キューと一致しません。" };
+    }
+    if (!allowedReasons.has(reasonCode) || !String(proof.evidence || "").trim()
+        || proof.roomOperationMayBeActive !== false || !Number.isFinite(Date.parse(proof.confirmedAt))
+        || !Number.isFinite(Date.parse(proof.operationClosedAt))
+        || !String(proof.closeReason || "").trim()) {
+      return { ok: false, error: "確認済みの投稿不能理由と根拠が必要です。" };
+    }
+    const next = structuredClone(queue);
+    next.failureCount += 1;
+    next.deletedCount += 1;
+    next.entries.shift();
+    next.currentIndex = 0;
+    next.status = next.successCount >= next.requestedCount || !next.entries.length
+      ? QUEUE_STATUS.COMPLETED : QUEUE_STATUS.ACTIVE;
+    next.stopReason = next.entries.length ? "投稿不能を確認して候補を除外しました。次候補へ進みます。" : "投稿可能な候補がなくなりました。";
+    return { ok: true, queue: next, done: next.status === QUEUE_STATUS.COMPLETED };
+  }
+
+  function releaseClosedUnknown(queue, candidateId, itemCode, attempt, proof = {}) {
+    const entry = queue?.entries?.[queue.currentIndex];
+    if (queue?.status !== QUEUE_STATUS.RESULT_CHECK_REQUIRED || !entry
+        || entry.candidateId !== candidateId || normalizeItemCode(entry.itemCode) !== normalizeItemCode(itemCode)
+        || attempt?.status !== "result_check_required" || attempt.candidateId !== candidateId
+        || normalizeItemCode(attempt.itemCode) !== normalizeItemCode(itemCode)
+        || !isOperationClosed(attempt) || !String(proof.evidence || "").trim()
+        || (proof.operationClosedAt && proof.operationClosedAt !== attempt.roomOperationClosedAt)) {
+      return { ok: false, error: "結果確認待ち商品の候補ID・itemCode、ROOM操作終了の根拠を照合できません。キューは進めません。" };
+    }
+    const next = structuredClone(queue);
+    next.entries.shift();
+    next.currentIndex = 0;
+    next.unknownCount = (Number.isInteger(next.unknownCount) ? next.unknownCount : 0) + 1;
+    next.operationClosedAt = attempt.roomOperationClosedAt;
+    next.operationCloseReason = attempt.roomOperationCloseReason;
+    next.status = next.entries.length ? QUEUE_STATUS.ACTIVE : QUEUE_STATUS.COMPLETED;
+    next.stopReason = next.entries.length
+      ? "投稿結果不明の商品は保留・再投稿禁止のまま、ROOM操作終了を確認したため固定済みの別候補へ進みます。"
+      : "投稿結果不明の商品を保留しました。固定キューに次候補はありません。";
+    return { ok: true, queue: next, done: next.status === QUEUE_STATUS.COMPLETED,
+      entry: next.entries[0] || null };
+  }
+
   function advanceQueue(queue) {
     if (queue?.status !== QUEUE_STATUS.ADVANCE_READY
         || !["posted", "duplicate"].includes(queue.entries?.[queue.currentIndex]?.outcome)) {
@@ -202,5 +341,6 @@
   }
 
   root.RoomCodexBridge = Object.freeze({ QUEUE_STATUS, parseRequestedCount, hasExplicitPostingIntent,
-    createQueue, isOperationClosed, isSavedQueueConsistent, canStartQueue, recordOutcome, advanceQueue });
+    createQueue, isOperationClosed, matchStaleQueueCurrent, isSavedQueueConsistent, canStartQueue, recordOutcome,
+    recordConfirmedFailure, releaseClosedUnknown, advanceQueue });
 })(typeof window !== "undefined" ? window : globalThis);
