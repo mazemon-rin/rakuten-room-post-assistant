@@ -5138,6 +5138,14 @@ async function handleCodexRoomCommandSubmit(event) {
     if (message) message.textContent = "明示的なROOM投稿指示を確認できません。確認・準備のみの依頼ではキューを開始しません。";
     return false;
   }
+  const countSpecified = Number.isInteger(parsed.requestedCount);
+  const eligibleCount = window.RoomSequentialQueue
+    .getEligibleRoomCandidates(data.candidates, data.history).length;
+  const requestedCount = countSpecified ? parsed.requestedCount : eligibleCount;
+  if (requestedCount < 1) {
+    if (message) message.textContent = "現在、ROOM投稿可能な候補がありません。確認待ち・投稿済み・処理中の商品は対象外です。";
+    return false;
+  }
   const existingQueue = data.roomPostQueue;
   const mayReplaceClosedUnknownQueue = !activeRoomPostQueue
     && roomCodexBridge.canReplaceClosedUnknownQueue(data.candidates, existingQueue).ok;
@@ -5153,7 +5161,7 @@ async function handleCodexRoomCommandSubmit(event) {
     return false;
   }
   if (!mayReplaceClosedUnknownQueue && existingQueue?.status === roomCodexBridge.QUEUE_STATUS.ACTIVE
-      && existingQueue.requestedCount === parsed.requestedCount) {
+      && existingQueue.requestedCount === requestedCount) {
     const entry = existingQueue.entries?.[existingQueue.currentIndex];
     const current = data.candidates.find((candidate) => candidate.id === entry?.candidateId);
     const structuralCheck = roomCodexBridge.createQueue(existingQueue.entries || [], existingQueue.requestedCount,
@@ -5193,7 +5201,7 @@ async function handleCodexRoomCommandSubmit(event) {
     return false;
   }
   if (existingQueue?.status === roomCodexBridge.QUEUE_STATUS.ADVANCE_READY) {
-    if (existingQueue.requestedCount !== parsed.requestedCount) {
+    if (existingQueue.requestedCount !== requestedCount) {
       if (message) message.textContent = `前の${existingQueue.requestedCount}件キューに保存済みの結果があります。同じ件数の指示で再開してください。`;
       return false;
     }
@@ -5214,12 +5222,14 @@ async function handleCodexRoomCommandSubmit(event) {
     return false;
   }
   const beforeQueueId = data.roomPostQueue?.queueId || "";
-  await startSequentialProcessing("continuous", parsed.requestedCount, { source: "codex-prompt" });
+  await startSequentialProcessing("continuous", requestedCount, { source: "codex-prompt" });
   if (data.roomPostQueue?.queueId && data.roomPostQueue.queueId !== beforeQueueId
       && [roomCodexBridge.QUEUE_STATUS.ACTIVE, roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(data.roomPostQueue.status)) {
     if (input) input.value = "";
     if (message) message.textContent = data.roomPostQueue.policy === "successful_posts"
-      ? `成功目標 ${data.roomPostQueue.requestedCount}件で開始しました。現在の固定候補は${data.roomPostQueue.entries.length}件です。`
+      ? countSpecified
+        ? `成功目標 ${data.roomPostQueue.requestedCount}件で開始しました。現在の固定候補は${data.roomPostQueue.entries.length}件です。`
+        : `件数未指定のため、開始時点の投稿可能候補${data.roomPostQueue.entries.length}件を固定して処理します。成功確認後に次へ進みます。`
       : `${data.roomPostQueue.requestedCount}件の候補ID・itemCodeを固定しました。進捗：${data.roomPostQueue.currentIndex + 1} / ${data.roomPostQueue.requestedCount}件。`;
     return true;
   }

@@ -24,8 +24,14 @@
 
   function parseRequestedCount(prompt = "") {
     const text = String(prompt || "").replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xFEE0));
-    const matches = [...text.matchAll(/([0-9]{1,3}|[〇零一二三四五六七八九十]+)\s*件(?!目)/g)];
+    const matches = [...text.matchAll(/([0-9]{1,3}|[〇零一二三四五六七八九十]+)\s*件(?!\s*(?:目|ずつ|ごと))/g)];
     const counts = [...new Set(matches.map((match) => japaneseCount(match[1])).filter(Number.isInteger))];
+    if (counts.length === 0) {
+      if (/[0-9]{1,3}|[〇零一二三四五六七八九十]+/.test(text) && /(?:[0-9]{1,3}|[〇零一二三四五六七八九十]+)\s*件\s*目/.test(text)) {
+        return { ok: false, error: "対象件数ではなく順番の表現が含まれています。成功目標件数を明示するか、件数未指定を明確にしてください。" };
+      }
+      return { ok: true, requestedCount: null };
+    }
     if (counts.length !== 1 || counts[0] < 1 || counts[0] > 100) {
       return { ok: false, error: counts.length > 1 ? "投稿件数が複数あり、指定を一意に判断できません。" : "投稿件数を「3件」の形式で1つ指定してください。" };
     }
@@ -34,8 +40,11 @@
 
   function hasExplicitPostingIntent(prompt = "") {
     const text = String(prompt || "");
-    if (/投稿しない|実投稿しない|投稿は禁止|投稿は行わない|確認だけ|準備だけ|文章作成だけ/.test(text)) return false;
-    return /(?:ROOM|楽天ROOM)[^。\n]{0,70}(?:投稿|実投稿)[^。\n]{0,35}(?:してください|して|する|実行|実施|開始|進めて)|(?:連続実投稿|連続投稿を実行|実投稿してください)/i.test(text);
+    // A prohibition scoped to X/Threads must not cancel an explicit ROOM
+    // instruction elsewhere in the same prompt.
+    const roomScopedText = text.replace(/(?:X|Threads|スレッズ)(?:[^。\n]{0,16}?)(?:には|は|へ|に)?\s*投稿(?:しない|は禁止|は行わない|を行わない|しません)/gi, "");
+    if (/投稿しない|実投稿しない|投稿は禁止|投稿は行わない|確認だけ|準備だけ|文章作成だけ/.test(roomScopedText)) return false;
+    return /(?:ROOM|楽天ROOM)[^。\n]{0,70}(?:投稿|実投稿)[^。\n]{0,35}(?:してください|して|する|実行|実施|開始|進めて)|(?:連続実投稿|連続投稿を実行|実投稿してください)/i.test(roomScopedText);
   }
 
   function getEntryCode(entry = {}) {

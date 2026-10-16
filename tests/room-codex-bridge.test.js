@@ -16,6 +16,8 @@ const prompt = "楽天ROOMの投稿候補から3件、正式Skillに従って連
 assert.deepStrictEqual(JSON.parse(JSON.stringify(bridge.parseRequestedCount(prompt))), { ok: true, requestedCount: 3 });
 assert.strictEqual(bridge.parseRequestedCount("楽天ROOM投稿を二件お願いします。").requestedCount, 2);
 assert.strictEqual(bridge.parseRequestedCount("ROOM投稿を３件してください。").requestedCount, 3);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(bridge.parseRequestedCount("楽天ROOMの投稿可能候補を、候補がなくなるまで1件ずつ連続実投稿してください。"))),
+  { ok: true, requestedCount: null }, "one-at-a-time wording does not become a fixed count");
 assert.strictEqual(bridge.parseRequestedCount("1件目と2件目を処理して3件目は止める").ok, false);
 assert.strictEqual(bridge.parseRequestedCount("楽天ROOM投稿を2件、今回は4件に変更").ok, false);
 assert.strictEqual(bridge.hasExplicitPostingIntent(prompt), true);
@@ -23,6 +25,12 @@ assert.strictEqual(bridge.hasExplicitPostingIntent("楽天ROOMへの実投稿を
 assert.strictEqual(bridge.hasExplicitPostingIntent("楽天ROOMに3件投稿してください。"), true);
 assert.strictEqual(bridge.hasExplicitPostingIntent("楽天ROOM投稿候補から3件、今回は実投稿しないでください。"), false);
 assert.strictEqual(bridge.hasExplicitPostingIntent("投稿準備だけを3件お願いします。"), false);
+assert.strictEqual(bridge.hasExplicitPostingIntent("今回、楽天ROOMへの実投稿を許可します。投稿可能候補がなくなるまで1件ずつ連続実投稿してください。X・Threadsには投稿しないでください。"), true,
+  "X/Threads-only prohibition does not cancel explicit ROOM permission");
+assert.strictEqual(bridge.hasExplicitPostingIntent("楽天ROOMには投稿しないでください。"), false,
+  "a ROOM-scoped prohibition still blocks the queue");
+assert.strictEqual(bridge.hasExplicitPostingIntent("ROOM投稿は禁止です。"), false,
+  "an explicit ROOM prohibition still blocks the queue");
 
 const targets = [
   { candidateId: "c-old", itemCode: "Shop:one" },

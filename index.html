@@ -156,10 +156,10 @@
        </details>
        <details class="panel codex-room-command-panel" aria-labelledby="codex-room-command-title">
         <summary id="codex-room-command-title">Codex連携を開く</summary>
-        <p>投稿成功件数を含む自然言語の指示を貼り付け、Control＋Enter（MacはCommand＋Enter）で受け付けます。候補ID・itemCodeは開始時に固定され、成功目標に達するか候補がなくなると終了します。</p>
+        <p>ROOMへの実投稿を明示した自然言語の指示を貼り付け、Control＋Enter（MacはCommand＋Enter）で受け付けます。件数を指定すると成功目標を上限にし、未指定なら開始時点の投稿可能候補を固定して候補がなくなるまで1件ずつ処理します。</p>
         <form id="codex-room-command-form">
           <label for="codex-room-command">今回の自然言語指示
-            <textarea id="codex-room-command" rows="3" autocomplete="off" placeholder="例：楽天ROOMの投稿候補から3件、正式Skillに従って連続実投稿してください。"></textarea>
+            <textarea id="codex-room-command" rows="3" autocomplete="off" placeholder="例：ROOMへの実投稿を許可します。投稿可能候補を古い順に、候補がなくなるまで1件ずつ連続実投稿してください。X・Threadsは対象外です。"></textarea>
           </label>
           <p id="codex-room-command-message" class="message" role="status" aria-live="polite"></p>
         </form>
@@ -485,7 +485,7 @@
   <script src="src/core/duplicate-detection.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
   <script src="src/core/candidate-list-view.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
   <script src="src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-progress-separated-result-20261016"></script>
-  <script src="src/core/room-codex-bridge.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
+  <script src="src/core/room-codex-bridge.js?v=room-2.7.1.4-codex-prompt-scope-20261016"></script>
   <script src="src/core/room-attempt.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
   <script src="src/core/discount-rules.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
   <script src="src/core/utils.js?v=room-2.7.1.4-queue-recovery-20261016"></script>

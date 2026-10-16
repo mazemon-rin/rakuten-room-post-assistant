@@ -327,6 +327,47 @@ run("data = loadData();");
   assert.strictEqual(run("data.roomPostQueue.entries[3].candidateId"), "queue-4",
     "reloading preserves the entire initial eligible snapshot");
 
+  // Unspecified count means snapshot all currently eligible ROOM candidates.
+  // Confirmation-wait and posted items stay excluded, and X/Threads-only
+  // negative wording must not cancel the explicit ROOM posting permission.
+  const allAvailableCandidates = [
+    ...[3, 1, 2].map((number) => ({ ...candidate, id: `all-${number}`, itemCode: `shop:all-${number}`,
+      title: `${number}番目`, savedAt: `2026-10-0${number}T00:00:00.000Z`,
+      product: { ...candidate.product, itemCode: `shop:all-${number}`, itemName: `${number}番目` } })),
+    { ...candidate, id: "already-posted", itemCode: "shop:already-posted", postStatus: "投稿済み",
+      status: "投稿済み", postedAt: "2026-10-01T00:00:00.000Z",
+      product: { ...candidate.product, itemCode: "shop:already-posted" } },
+    { ...candidate, id: "result-wait", itemCode: "shop:result-wait", postStatus: "結果確認待ち",
+      roomAttempt: { status: "result_check_required", candidateId: "result-wait", itemCode: "shop:result-wait",
+        roomOperationClosedAt: "2026-10-16T01:00:00.000Z", roomOperationCloseReason: "隔離テストで操作終了を記録済み" },
+      product: { ...candidate.product, itemCode: "shop:result-wait" } }
+  ];
+  context.localStorage.value = JSON.stringify({
+    settings: {}, candidates: allAvailableCandidates,
+    history: [{ itemCode: "shop:already-posted", postedAt: "2026-10-01T00:00:00.000Z" }]
+  });
+  run("data = loadData(); activeRoomPostQueue = null; data.roomPostQueue = undefined;");
+  context.commandInputs = {
+    "#codex-room-command": { value: "今回、楽天ROOMへの実投稿を許可します。投稿可能候補を登録日時の古い順に、候補がなくなるまで1件ずつ連続実投稿してください。X・Threadsには投稿しないでください。" },
+    "#codex-room-command-message": { textContent: "" }
+  };
+  context.mockRoomStarts = [];
+  run("startCodexPost = async (id, mode, code) => { mockRoomStarts.push({ id, mode, code }); return true; };");
+  assert.strictEqual(await run("handleCodexRoomCommandSubmit({ preventDefault() {} })"), true,
+    context.commandInputs["#codex-room-command-message"].textContent);
+  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 3,
+    "an unspecified success target is bounded by the initial eligible candidate count");
+  assert.strictEqual(run("data.roomPostQueue.entries.length"), 3);
+  assert.deepStrictEqual(Array.from(run("data.roomPostQueue.entries"), (entry) => [entry.candidateId, entry.itemCode]), [
+    ["all-1", "shop:all-1"], ["all-2", "shop:all-2"], ["all-3", "shop:all-3"]
+  ], "all eligible candidates are fixed in savedAt order while posted and result-check-required candidates are excluded");
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(context.mockRoomStarts)), [
+    { id: "all-1", mode: "continuous", code: "shop:all-1" }
+  ], "the normal queue starts one fixed item at a time");
+  assert.match(context.commandInputs["#codex-room-command-message"].textContent, /件数未指定.*3件を固定/);
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'result-wait').postStatus"), "結果確認待ち");
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'already-posted').postStatus"), "投稿済み");
+
   // Successful-post target: a confirmed unusable candidate is removed, does not count, and the queue ends at two successes.
   const recoveryCandidates = ["fail-one", "success-two", "success-three"].map((id, index) => ({
     ...candidate, id, itemCode: `shop:${id}`, title: id,
