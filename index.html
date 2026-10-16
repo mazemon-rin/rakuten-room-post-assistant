@@ -158,7 +158,7 @@
        </details>
        <details class="panel codex-room-command-panel" aria-labelledby="codex-room-command-title">
         <summary id="codex-room-command-title">Codex連携を開く</summary>
-        <p>ROOMへの実投稿を明示した自然言語の指示を貼り付け、Control＋Enter（MacはCommand＋Enter）で受け付けます。件数を指定すると成功目標を上限にし、未指定なら開始時点の投稿可能候補を固定して候補がなくなるまで1件ずつ処理します。</p>
+        <p>ROOMへの実投稿を明示した自然言語の指示を貼り付け、Control＋Enter（MacはCommand＋Enter）で受け付けます。件数を指定すると投稿成功数の目標になります。登録日時の古い候補から1件ずつ投稿し、ROOMの完了とアプリの履歴保存を確認した後に、次の投稿可能候補を改めて選択します。件数未指定の場合は、開始時点の投稿可能候補数を成功目標として処理します。</p>
         <form id="codex-room-command-form">
           <label for="codex-room-command">今回の自然言語指示
             <textarea id="codex-room-command" rows="3" autocomplete="off" placeholder="例：ROOMへの実投稿を許可します。投稿可能候補を古い順に、候補がなくなるまで1件ずつ連続実投稿してください。X・Threadsは対象外です。"></textarea>

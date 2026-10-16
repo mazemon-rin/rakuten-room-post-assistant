@@ -54,6 +54,8 @@ if (!script.includes('role="alertdialog" aria-label="候補削除の確認"')
 }
 if (!candidateList.includes('function filterRoomCandidates') || !script.includes('window.CandidateListView.filterRoomCandidates')) throw new Error("candidate list filters must use the testable view helper");
 if (!html.includes('<details class="panel codex-room-command-panel"') || !html.includes('id="codex-room-command-form"') || !html.includes('id="codex-room-command"') || !script.includes('handleCodexRoomCommandSubmit')) throw new Error("Codex bridge must remain available in a collapsed, natively operable details panel");
+if (!html.includes('ROOMの完了とアプリの履歴保存を確認した後に、次の投稿可能候補を改めて選択します。')
+    || html.includes('開始時点の投稿可能候補を固定')) throw new Error("Codex bridge help text must describe one-item-at-a-time dynamic candidate selection");
 if (!script.includes('startSequentialProcessing("continuous", requestedCount, { source: "codex-prompt", candidateId: first.id })')
     || !script.includes('const requestedCount = parsed.requestedCount || eligible.length')) throw new Error("Codex prompt bridge must use an explicit success target or the current eligible count");
 if (html.includes('room-processing-diagnostics') || html.includes('room-processing-state.js') || /data\.pendingRoomPost|completePendingRoomPost/.test(script)) throw new Error("pending state or its diagnostic UI remains active");
