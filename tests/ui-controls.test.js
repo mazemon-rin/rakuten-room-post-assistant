@@ -74,7 +74,14 @@ if (!script.includes('queue.policy === "successful_posts"') || !script.includes(
   throw new Error("unknown results must remain protected, and only a verified closure may advance the fixed queue");
 }
 if (!html.includes('id="queue-stats"') || !html.includes('id="candidate-count-summary"') || !html.includes('id="stale-queue-recovery"') || !html.includes('id="refresh-latest-app"')) throw new Error("candidate and queue summaries, stale-queue recovery, and safe cache refresh controls must be present");
-if (!script.includes('getEligibleRoomCandidates(roomCandidates, data.history)') || !script.includes('textContent = eligible.length') || !script.includes('summarizeRoomCandidates')) throw new Error("candidate tab badge must use the same eligibility source as the posting queue");
+if (!script.includes('function getPostableRoomCandidates()')
+    || !script.includes('updateCandidateViewCounts(postableCandidates)')
+    || !script.includes('getDisplayedRoomCandidates(postableCandidates)')
+    || !script.includes('textContent = postableCandidates.length')
+    || !script.includes('postableCandidates: new Set(postableCandidates)')
+    || !script.includes('summarizeRoomCandidates')) {
+  throw new Error("candidate badge, unposted filter, and summary must share the exact queue-eligible candidate snapshot");
+}
 if (!script.includes('結果不明保留 ${queueState.unknownCount || 0}件')) throw new Error("queue status must distinguish unresolved results from confirmed failure and deletion");
 if (!html.includes('queue-recovery-20261016')) throw new Error("static assets need a shared cache-busting identifier");
 if (!script.includes('function reloadLatestAppWithoutClearingData()') || !script.includes('url.searchParams.set("app-refresh"') || script.includes('function reloadLatestAppWithoutClearingData() {\n  localStorage.clear')) throw new Error("latest-version refresh must change the navigation URL without clearing saved data");

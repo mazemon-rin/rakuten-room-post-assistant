@@ -2897,38 +2897,38 @@ function renderCandidates() {
   if (trustUpdated) {
     saveData(data, { render: false });
   }
-  updateCandidateViewCounts();
-  const items = getDisplayedRoomCandidates();
+  const postableCandidates = getPostableRoomCandidates();
+  updateCandidateViewCounts(postableCandidates);
+  const items = getDisplayedRoomCandidates(postableCandidates);
   $("#candidateList").innerHTML = items.length ? items.map(candidateCardCompact).join("") : `<p class="message">表示できる投稿候補はありません。</p>`;
   renderThreadsOnlyCandidates();
   renderQueueProgress();
   renderCollectionSummary();
 }
 
-function getDisplayedRoomCandidates() {
+function getPostableRoomCandidates() {
+  return window.RoomSequentialQueue.getEligibleRoomCandidates(data.candidates, data.history);
+}
+
+function getDisplayedRoomCandidates(postableCandidates = getPostableRoomCandidates()) {
   const keyword = $("#candidateFilter")?.value?.trim().toLowerCase() || "";
   const mode = $("#candidateStatusFilter")?.value || "unposted";
-  const postableCandidateIds = new Set(window.RoomSequentialQueue
-    .getEligibleRoomCandidates(data.candidates.filter(isRoomCandidate), data.history)
-    .map((candidate) => String(candidate.id || "")));
   return window.CandidateListView.filterRoomCandidates(data.candidates, {
     mode,
     keyword,
     history: data.history,
     isRoomCandidate,
-    postableCandidateIds
+    postableCandidates: new Set(postableCandidates)
   });
 }
 
-function updateCandidateViewCounts() {
+function updateCandidateViewCounts(postableCandidates = getPostableRoomCandidates()) {
   const roomCandidates = data.candidates.filter(isRoomCandidate);
-  const eligible = window.RoomSequentialQueue.getEligibleRoomCandidates(roomCandidates, data.history);
-  const postableCandidateIds = new Set(eligible.map((candidate) => String(candidate.id || "")));
   const counts = window.CandidateListView.summarizeRoomCandidates(roomCandidates, {
-    history: data.history, isRoomCandidate, postableCandidateIds
+    history: data.history, isRoomCandidate, postableCandidates: new Set(postableCandidates)
   });
   const threadsCount = data.candidates.filter(isThreadsOnlyItem).length;
-  if ($("#roomCandidateCount")) $("#roomCandidateCount").textContent = eligible.length;
+  if ($("#roomCandidateCount")) $("#roomCandidateCount").textContent = postableCandidates.length;
   if ($("#threadsCandidateCount")) $("#threadsCandidateCount").textContent = threadsCount;
   const filter = $("#candidateStatusFilter");
   if (filter) {

@@ -1,8 +1,14 @@
 (function exposeRoomSequentialQueue(root) {
+  function normalizeItemCode(code) {
+    return root.ProductIdentity?.normalizeItemCode
+      ? root.ProductIdentity.normalizeItemCode(code)
+      : String(code || "").trim().toLowerCase();
+  }
+
   function getItemCode(candidate = {}) {
     const top = String(candidate.itemCode || "").trim();
     const nested = String(candidate.product?.itemCode || "").trim();
-    return top && nested && top !== nested ? "" : top || nested;
+    return top && nested && normalizeItemCode(top) !== normalizeItemCode(nested) ? "" : top || nested;
   }
 
   function savedTime(candidate) {
@@ -21,19 +27,19 @@
   }
 
   function getEligibleRoomCandidates(candidates = [], history = []) {
-    const normalizeCode = (code) => root.ProductIdentity?.normalizeItemCode
-      ? root.ProductIdentity.normalizeItemCode(code) : String(code || "").trim().toLowerCase();
     const postedCodes = new Set(history.flatMap((entry) => [entry.itemCode, entry.product?.itemCode]
-      .map(normalizeCode).filter(Boolean)));
-    const blockedCodes = new Set(candidates.filter((candidate) => {
+      .map(normalizeItemCode).filter(Boolean)));
+    const roomCandidates = candidates.filter((candidate) => candidate.destination !== "threads_only");
+    const blockedCodes = new Set(roomCandidates.filter((candidate) => {
       const status = candidate.roomAttempt?.status;
       return ["投稿済み", "ROOM重複確認済み"].includes(candidate.postStatus)
+        || candidate.status === "投稿済み" || Boolean(candidate.postedAt)
         || ["processing", "result_check_required", "posted_confirmed", "duplicate_confirmed"].includes(status);
-    }).map((candidate) => normalizeCode(getItemCode(candidate))).filter(Boolean));
+    }).map((candidate) => normalizeItemCode(getItemCode(candidate))).filter(Boolean));
     // Missing/invalid dates stay missing. They follow dated candidates, then use ID as a stable tie-breaker.
-    return candidates.filter((candidate) => {
-      const normalizedCode = normalizeCode(getItemCode(candidate));
-      return isEligible(candidate, postedCodes, normalizeCode) && normalizedCode && !blockedCodes.has(normalizedCode);
+    const eligible = candidates.filter((candidate) => {
+      const normalizedCode = normalizeItemCode(getItemCode(candidate));
+      return isEligible(candidate, postedCodes, normalizeItemCode) && normalizedCode && !blockedCodes.has(normalizedCode);
     }).sort((a, b) => {
       const left = savedTime(a);
       const right = savedTime(b);
@@ -42,6 +48,22 @@
       if (left !== null && right === null) return -1;
       return String(a.id || "").localeCompare(String(b.id || ""), "ja", { numeric: true })
         || getItemCode(a).localeCompare(getItemCode(b));
+    });
+
+    // A candidate can be queued only when its ID is unique and its itemCode
+    // has not already been claimed by an older eligible candidate.
+    const idCounts = new Map();
+    candidates.forEach((candidate) => {
+      const id = String(candidate.id || "").trim();
+      if (id) idCounts.set(id, (idCounts.get(id) || 0) + 1);
+    });
+    const seenItemCodes = new Set();
+    return eligible.filter((candidate) => {
+      const id = String(candidate.id || "").trim();
+      const normalizedCode = normalizeItemCode(getItemCode(candidate));
+      if (!id || idCounts.get(id) !== 1 || !normalizedCode || seenItemCodes.has(normalizedCode)) return false;
+      seenItemCodes.add(normalizedCode);
+      return true;
     });
   }
 
@@ -57,8 +79,7 @@
     const entries = [];
     const ids = new Set();
     const itemCodes = new Set();
-    const normalizeCode = (value) => root.ProductIdentity?.normalizeItemCode
-      ? root.ProductIdentity.normalizeItemCode(value) : String(value || "").trim().toLowerCase();
+    const normalizeCode = normalizeItemCode;
     // A success-target queue must be able to pass confirmed failures without
     // counting them toward the requested number of successful ROOM posts.
     const selected = successTarget ? eligible : eligible.slice(0, requestedCount);

@@ -56,6 +56,18 @@ assert.strictEqual(successTarget.ok, true);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(successTarget.entries.map((entry) => entry.candidateId))), ["dup-first", "after-duplicate"]);
 assert.strictEqual(queueApi.buildRoomSequentialQueue([candidate("few", "shop:few")], 3, [], { successTarget: true }).ok, true,
   "a success target may start with fewer candidates and end when candidates are exhausted");
+const identityEligible = queueApi.getEligibleRoomCandidates([
+  { ...candidate("duplicate-id", "shop:a"), title: "Duplicate ID A" },
+  { ...candidate("duplicate-id", "shop:b"), title: "Duplicate ID B" },
+  { ...candidate("shared-with-posted", "shop:ready"), postStatus: "投稿済み", status: "投稿済み" },
+  { ...candidate("shared-with-posted", "shop:ready-new"), postStatus: "投稿待ち" },
+  { ...candidate("shared-with-threads", "shop:threads"), destination: "threads_only" },
+  { ...candidate("shared-with-threads", "shop:room"), destination: "room" },
+  { ...candidate("nested-code", "Shop:Nested"), product: { itemCode: "shop:nested" } },
+  candidate("valid", "shop:valid")
+], []);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(identityEligible.map((item) => item.id))), ["nested-code", "valid"],
+  "queue eligibility excludes globally ambiguous IDs but normalizes equivalent nested itemCodes");
 
 // 7: a requested limit is a hard boundary even when hundreds of candidates exist.
 const manyCandidates = Array.from({ length: 371 }, (_, index) => candidate(`item-${index + 1}`, `shop:item-${index + 1}`));

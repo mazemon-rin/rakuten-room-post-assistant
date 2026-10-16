@@ -31,6 +31,7 @@
       if (keyword && !searchable.includes(keyword)) return false;
       if (mode === "all") return true;
       if (mode === "review") return isReviewCandidate(candidate);
+      if (options.postableCandidates instanceof Set) return options.postableCandidates.has(candidate);
       if (options.postableCandidateIds instanceof Set) return options.postableCandidateIds.has(String(candidate.id || ""));
       return !isPostedCandidate(candidate, history) && !isReviewCandidate(candidate);
     });
@@ -39,11 +40,13 @@
   function summarizeRoomCandidates(candidates = [], options = {}) {
     const history = Array.isArray(options.history) ? options.history : [];
     const isRoomCandidate = options.isRoomCandidate || ((candidate) => candidate.destination !== "threads_only");
+    const postableCandidates = options.postableCandidates instanceof Set ? options.postableCandidates : null;
     const postableCandidateIds = options.postableCandidateIds instanceof Set ? options.postableCandidateIds : new Set();
     const roomCandidates = candidates.filter(isRoomCandidate);
     const review = roomCandidates.filter(isReviewCandidate).length;
     const posted = roomCandidates.filter((candidate) => !isReviewCandidate(candidate) && isPostedCandidate(candidate, history)).length;
-    const postable = roomCandidates.filter((candidate) => postableCandidateIds.has(String(candidate.id || ""))).length;
+    const postable = roomCandidates.filter((candidate) => postableCandidates
+      ? postableCandidates.has(candidate) : postableCandidateIds.has(String(candidate.id || ""))).length;
     return { total: roomCandidates.length, postable, review, posted,
       other: Math.max(0, roomCandidates.length - postable - review - posted) };
   }
