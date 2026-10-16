@@ -196,7 +196,8 @@ run("data = loadData();");
   assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "processing");
   context.localStorage.fail = false;
 
-  // Phase 3: natural-language count starts a persistent bounded queue; saved history is verified before item two starts.
+  // Continuous posting selects one saved candidate at a time. The next item is
+  // recalculated only after ROOM success and its history write are verified.
   const secondCandidate = { ...candidate, id: "candidate-2", itemCode: "shop:item-2", title: "保存済み特徴のTシャツ",
     itemUrl: "https://item.rakuten.co.jp/shop/item-2/", product: { itemCode: "shop:item-2", itemName: "保存済み特徴のTシャツ",
       itemUrl: "https://item.rakuten.co.jp/shop/item-2/", itemCaption: "ポリエステル素材。吸汗速乾性。" },
@@ -204,8 +205,10 @@ run("data = loadData();");
   const firstCandidate = { ...candidate, id: "candidate-1", savedAt: "2026-10-01T00:00:00.000Z" };
   context.localStorage.value = JSON.stringify({ settings: {}, candidates: [secondCandidate, firstCandidate], history: [] });
   run("data = loadData(); activeRoomPostQueue = null; data.roomPostQueue = undefined;");
-  assert.strictEqual(await run("startSequentialProcessing('continuous', 2, { source: 'codex-prompt' })"), undefined);
-  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 2);
+  assert.strictEqual(await run("startSequentialProcessing('continuous', 2, { source: 'codex-prompt' })"), true);
+  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 1,
+    "the persisted audit queue contains only the current item; the success target stays in runtime state");
+  assert.strictEqual(run("data.roomPostQueue.entries.length"), 1, "only the current candidate is persisted, not a fixed batch");
   assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "candidate-1");
   assert.strictEqual(run("data.roomPostQueue.currentIndex"), 0);
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-1').roomAttempt"), undefined,
@@ -215,14 +218,14 @@ run("data = loadData();");
     "a continuous queue's prepared current item remains visible alongside other postable candidates");
   assert.strictEqual(run("beginPreparedRoomOperation('candidate-1', 'shop:item-1')"), true);
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-1').roomAttempt.status"), "processing");
-  assert.strictEqual(run("JSON.parse(localStorage.value).roomPostQueue.entries.length"), 2);
+  assert.strictEqual(run("JSON.parse(localStorage.value).roomPostQueue.entries.length"), 1);
   assert.strictEqual(run("markPosted('candidate-1', RoomAttempt.SOURCE.COMPLETION)"), true);
   await new Promise((resolve) => setImmediate(resolve));
   assert.strictEqual(run("data.history.length"), 1);
-  assert.strictEqual(run("data.roomPostQueue.currentIndex"), 0);
   assert.strictEqual(run("data.roomPostQueue.entries.length"), 1);
-  assert.strictEqual(run("data.roomPostQueue.policy"), "successful_posts");
-  assert.strictEqual(run("data.roomPostQueue.successCount"), 1);
+  assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "candidate-2",
+    "the saved single-item queue is replaced with the next candidate only after success is persisted");
+  assert.strictEqual(run("activeRoomPostQueue.successCount"), 1);
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-2').roomAttempt"), undefined,
     "the next queue entry is only prepared until its own ROOM operation starts");
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-2').postStatus"), "投稿準備済み");
@@ -233,7 +236,8 @@ run("data = loadData();");
   assert.strictEqual(JSON.parse(context.localStorage.value).history.length, 1,
     "the first history write is visible in storage before the next attempt starts");
 
-  // Reload recovery: a persisted in-flight success-target queue is not restarted; it becomes unknown and waits for ROOM closure.
+  // Reload recovery: an in-flight one-item queue is never restarted and becomes
+  // result-check-required until a human verifies the outcome.
   const reloaded = JSON.parse(context.localStorage.value);
   reloaded.roomPostQueue.status = "active";
   reloaded.roomPostQueue.currentIndex = 0;
@@ -244,7 +248,7 @@ run("data = loadData();");
   const resumed = await run("handleCodexRoomCommandSubmit({ preventDefault() {} })");
   assert.strictEqual(resumed, false, "a saved ACTIVE flag is not enough to restart ROOM interaction after reload");
   assert.strictEqual(run("data.roomPostQueue.status"), "result_check_required");
-  assert.strictEqual(run("data.roomPostQueue.successCount"), 1);
+  assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "candidate-2");
   context.commandInputs["#room-operation-close-reason-candidate-2"] = { value: "ROOM投稿操作を終了し、該当タブが閉じていることを確認" };
   assert.strictEqual(run("confirmRoomOperationClosed('candidate-2')"), true);
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-2').postStatus"), "結果確認待ち",
@@ -253,18 +257,19 @@ run("data = loadData();");
     "a closed unknown result does not block a different item after it is removed from the fixed queue");
   run("data.candidates.push({ ...data.candidates[0], id: 'candidate-3', itemCode: 'shop:item-3', product: { ...data.candidates[0].product, itemCode: 'shop:item-3' }, roomAttempt: undefined, postStatus: '投稿待ち', status: '投稿待ち' })");
   assert.strictEqual(run("RoomCodexBridge.canStartQueue(data.candidates, [{ candidateId: 'candidate-3', itemCode: 'shop:item-3' }], data.roomPostQueue).ok"), true,
-    "after queue closure, a different product may start while the unknown result remains protected");
+    `after queue closure, a different product may start while the unknown result remains protected: ${run("RoomCodexBridge.canStartQueue(data.candidates, [{ candidateId: 'candidate-3', itemCode: 'shop:item-3' }], data.roomPostQueue).error")}`);
   assert.strictEqual(run("typeof removeClosedUnknownFromSuccessQueue"), "undefined",
     "the legacy unknown-removal action is removed rather than left as an alternate continuation path");
   assert.strictEqual(run("data.candidates.some((item) => item.id === 'candidate-2')"), true);
-  assert.strictEqual(run("data.roomPostQueue.successCount"), 1, "unknown result does not count as a post");
+  assert.strictEqual(run("data.roomPostQueue.successCount"), 0, "the current item's audit queue never inherits prior run successes");
   assert.strictEqual(run("data.roomPostQueue.failureCount"), 0);
-  assert.strictEqual(run("data.roomPostQueue.status"), "completed");
-  assert.strictEqual(run("data.roomPostQueue.entries.length"), 0);
+  assert.strictEqual(run("data.roomPostQueue.status"), "stopped");
+  assert.strictEqual(run("data.roomPostQueue.entries.length"), 0,
+    "the completed audit queue releases its active candidate while the candidate attempt remains protected");
   assert.strictEqual(run("data.roomPostQueue.unknownCount"), 1);
   assert.strictEqual(run("confirmRoomAttemptResult('candidate-2', RoomAttempt.STATUS.NOT_POSTED_CONFIRMED, RoomAttempt.SOURCE.NOT_POSTED)"), true,
     "a human-confirmed ROOM result can resolve the attempt using the normal state UI");
-  assert.strictEqual(run("data.roomPostQueue.status"), "completed", "a queue with no remaining fixed candidates stays completed after human resolution");
+  assert.strictEqual(run("data.roomPostQueue.status"), "stopped", "human resolution does not revive the old queue");
   assert.strictEqual(run("data.roomPostQueue.entries.length"), 0);
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'candidate-2').postStatus"), "投稿待ち");
   assert.strictEqual(run("getProcessingBlocker()"), null, "confirmed result clears only the result blocker");
@@ -279,8 +284,8 @@ run("data = loadData();");
   assert.notStrictEqual(run("data.roomPostQueue.queueId"), stoppedQueueId,
     "a new explicit command creates a new queue ID rather than resuming the stopped queue");
   assert.strictEqual(run("data.roomPostQueue.status"), "active");
-  assert.strictEqual(run("data.roomPostQueue.entries.length"), 2,
-    "the new success-target queue fixes the remaining eligible candidates in order");
+  assert.strictEqual(run("data.roomPostQueue.entries.length"), 1,
+    "a new explicit command saves only its current item, not a candidate batch");
   assert.strictEqual(context.mockRoomStarts[0].id, "candidate-2");
 
   // A human-confirmed duplicate is deleted from the success-target queue before the next fixed candidate starts.
@@ -303,13 +308,13 @@ run("data = loadData();");
   context.mockRoomStarts = [];
   run("startSuccessTargetNextEntry = (entry) => { mockRoomStarts.push(entry.candidateId); return true; };");
   assert.strictEqual(run("confirmRoomAttemptResult('unknown-duplicate', RoomAttempt.STATUS.DUPLICATE_CONFIRMED, RoomAttempt.SOURCE.DUPLICATE)"), true);
-  assert.strictEqual(run("data.roomPostQueue.status"), "active");
+  assert.strictEqual(run("data.roomPostQueue.status"), "stopped");
   assert.strictEqual(run("data.roomPostQueue.failureCount"), 1);
-  assert.strictEqual(run("data.roomPostQueue.deletedCount"), 1);
+  assert.strictEqual(run("data.roomPostQueue.deletedCount"), 0);
   assert.strictEqual(run("data.roomPostQueue.successCount"), 0);
-  assert.strictEqual(run("data.candidates.some((item) => item.id === 'unknown-duplicate')"), false,
-    "a ROOM-confirmed duplicate is removed from candidates without deleting successful history");
-  assert.deepStrictEqual(context.mockRoomStarts, ["after-unknown"], "a confirmed duplicate advances to the next fixed item");
+  assert.strictEqual(run("data.candidates.some((item) => item.id === 'unknown-duplicate')"), true,
+    "a ROOM-confirmed duplicate is retained as a candidate record and excluded by its status");
+  assert.deepStrictEqual(context.mockRoomStarts, [], "resolving a legacy unknown result never resumes its frozen queue");
   assert.strictEqual(run("data.history.length"), 0, "a duplicate is not recorded as a new success");
 
   // Candidate deletion requires a rendered confirmation and a second explicit action.
@@ -358,20 +363,21 @@ run("data = loadData();");
   run("startCodexPost = async (id, mode, code) => { mockRoomStarts.push({ id, mode, code }); return true; };");
   assert.strictEqual(await run("handleCodexRoomCommandSubmit({ preventDefault() {} })"), true,
     context.commandInputs["#codex-room-command-message"].textContent);
-  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 3);
-  assert.strictEqual(run("data.roomPostQueue.entries.length"), 4, "the queue snapshots eligible candidates beyond the success target to allow confirmed skips");
+  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 1);
+  assert.strictEqual(run("activeRoomPostQueue.targetSuccesses"), 3);
+  assert.strictEqual(run("data.roomPostQueue.entries.length"), 1, "only the current candidate is saved in the audit queue");
   assert.deepStrictEqual(JSON.parse(JSON.stringify(context.mockRoomStarts)), [{ id: "queue-1", mode: "continuous", code: "shop:item-1" }],
     "the mocked handoff starts only the oldest fixed candidate and has no external side effect");
   assert.deepStrictEqual(Array.from(run("data.roomPostQueue.entries"), (entry) => [entry.candidateId, entry.itemCode]), [
-    ["queue-1", "shop:item-1"], ["queue-2", "shop:item-2"], ["queue-3", "shop:item-3"], ["queue-4", "shop:item-4"]
+    ["queue-1", "shop:item-1"]
   ]);
   assert.strictEqual(run("data.candidates.some((item) => item.roomAttempt)"), false,
     "mock queue acceptance does not create a live ROOM attempt");
-  assert.strictEqual(JSON.parse(context.localStorage.value).roomPostQueue.entries.length, 4,
-    "the eligible snapshot survives app reload through the normal persistence layer");
+  assert.strictEqual(JSON.parse(context.localStorage.value).roomPostQueue.entries.length, 1,
+    "the current-item audit record uses the normal persistence layer");
   run("data = loadData(); activeRoomPostQueue = null; recoverInterruptedRoomAttempts();");
-  assert.strictEqual(run("data.roomPostQueue.entries[3].candidateId"), "queue-4",
-    "reloading preserves the entire initial eligible snapshot");
+  assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "queue-1",
+    "reloading never recreates or expands the current-item audit record");
 
   // Unspecified count means snapshot all currently eligible ROOM candidates.
   // Confirmation-wait and posted items stay excluded, and X/Threads-only
@@ -401,20 +407,23 @@ run("data = loadData();");
   run("startCodexPost = async (id, mode, code) => { mockRoomStarts.push({ id, mode, code }); return true; };");
   assert.strictEqual(await run("handleCodexRoomCommandSubmit({ preventDefault() {} })"), true,
     context.commandInputs["#codex-room-command-message"].textContent);
-  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 3,
-    "an unspecified success target is bounded by the initial eligible candidate count");
-  assert.strictEqual(run("data.roomPostQueue.entries.length"), 3);
+  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 1,
+    "the saved audit queue is always limited to its current item");
+  assert.strictEqual(run("activeRoomPostQueue.targetSuccesses"), 3,
+    "an unspecified target is bounded by the initial eligible candidate count in runtime state");
+  assert.strictEqual(run("data.roomPostQueue.entries.length"), 1);
   assert.deepStrictEqual(Array.from(run("data.roomPostQueue.entries"), (entry) => [entry.candidateId, entry.itemCode]), [
-    ["all-1", "shop:all-1"], ["all-2", "shop:all-2"], ["all-3", "shop:all-3"]
-  ], "all eligible candidates are fixed in savedAt order while posted and result-check-required candidates are excluded");
+    ["all-1", "shop:all-1"]
+  ], "only the oldest eligible candidate is persisted; posted and result-check-required candidates stay excluded");
   assert.deepStrictEqual(JSON.parse(JSON.stringify(context.mockRoomStarts)), [
     { id: "all-1", mode: "continuous", code: "shop:all-1" }
   ], "the normal queue starts one fixed item at a time");
-  assert.match(context.commandInputs["#codex-room-command-message"].textContent, /件数未指定.*3件を固定/);
+  assert.match(context.commandInputs["#codex-room-command-message"].textContent, /1件ずつ.*成功目標 3件/);
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'result-wait').postStatus"), "結果確認待ち");
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'already-posted').postStatus"), "投稿済み");
 
-  // Successful-post target: a confirmed unusable candidate is removed, does not count, and the queue ends at two successes.
+  // A confirmed duplicate is not counted; the next candidate is resolved
+  // dynamically, and the success target is applied to actual saved posts.
   const recoveryCandidates = ["fail-one", "success-two", "success-three"].map((id, index) => ({
     ...candidate, id, itemCode: `shop:${id}`, title: id,
     product: { ...candidate.product, itemCode: `shop:${id}`, itemName: id },
@@ -430,28 +439,28 @@ run("data = loadData();");
   context.mockRoomStarts = [];
   run("startCodexPost = async (id, mode, code) => { mockRoomStarts.push({ id, mode, code }); return true; };");
   assert.strictEqual(await run("handleCodexRoomCommandSubmit({ preventDefault() {} })"), true);
-  assert.strictEqual(run("data.roomPostQueue.entries.length"), 3, "success-target queues scan past confirmed failures");
-  context.commandInputs["#queue-failure-reason-fail-one"] = { value: "product_missing" };
-  context.commandInputs["#queue-failure-evidence-fail-one"] = { value: "商品ページが見つからないことを確認" };
-  context.commandInputs["#queue-failure-closed-fail-one"] = { checked: true };
-  assert.strictEqual(run("confirmQueueCandidateUnpostable('fail-one')"), true);
-  assert.strictEqual(run("data.candidates.some((item) => item.id === 'fail-one')"), false);
-  assert.strictEqual(run("data.roomPostQueue.successCount"), 0);
-  assert.strictEqual(run("data.roomPostQueue.failureCount"), 1);
-  assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "success-two",
-    "the confirmed-failure transition fixes the next candidate by ID");
+  assert.strictEqual(run("data.roomPostQueue.entries.length"), 1);
+  assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "fail-one");
+  run("data.candidates[0].roomAttempt = { attemptId: 'unknown-duplicate-attempt', status: 'result_check_required', candidateId: 'fail-one', itemCode: 'shop:fail-one', startedAt: '2026-10-16T00:00:00.000Z', roomOperationClosedAt: '2026-10-16T00:01:00.000Z', roomOperationCloseReason: '隔離モックでROOM画面の終了を確認' };");
+  assert.strictEqual(run("confirmRoomAttemptResult('fail-one', RoomAttempt.STATUS.DUPLICATE_CONFIRMED, RoomAttempt.SOURCE.DUPLICATE)"), true);
+  assert.strictEqual(run("activeRoomPostQueue.successCount"), 0, "confirmed duplicate is not a successful post");
+  assert.strictEqual(context.mockRoomStarts.at(-1).id, "success-two", "after a confirmed and closed duplicate, selection advances to the next eligible candidate");
+  assert.strictEqual(run("data.roomPostQueue.entries.length"), 1);
+  assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "success-two");
   for (const id of ["success-two", "success-three"]) {
-    run("activeRoomPostQueue = { entries: data.roomPostQueue.entries, currentIndex: 0, mode: 'continuous' };");
     run(`data.candidates.find((item) => item.id === '${id}').roomAttempt = RoomAttempt.create(data.candidates.find((item) => item.id === '${id}'), 'attempt-${id}', '2026-10-16T00:00:00.000Z');`);
     assert.strictEqual(run(`markPosted('${id}', RoomAttempt.SOURCE.COMPLETION)`), true,
       `mocked success for ${id} should be accepted: ${run("toastMessages.at(-1)")}`);
+    if (id === "success-two") {
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.strictEqual(run("activeRoomPostQueue.successCount"), 1);
+      assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "success-three",
+        "the next item is selected only after the first history record is saved");
+    }
   }
-  assert.strictEqual(run("data.roomPostQueue.successCount"), 2);
-  assert.strictEqual(run("data.roomPostQueue.failureCount"), 1);
-  assert.strictEqual(run("data.roomPostQueue.status"), "completed");
-  assert.strictEqual(run("data.roomPostQueue.entries.length"), 0);
+  assert.strictEqual(run("activeRoomPostQueue"), null, "the run stops when its successful-post target is reached");
   assert.strictEqual(run("data.history.length"), 2);
-  assert.strictEqual(context.mockRoomStarts.at(-1).id, "success-three", "the success target is the terminal boundary");
+  assert.deepStrictEqual(context.mockRoomStarts.map((item) => item.id), ["fail-one", "success-two", "success-three"]);
 
   // Legacy status-only processing is protected only after an explicit identity check and confirmation.
   const legacyCandidate = { id: "2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e", destination: "room",
@@ -516,11 +525,10 @@ run("data = loadData();");
     "explicit prompt can start a fresh queue after a closed unknown result");
   assert.strictEqual(run("data.roomPostQueue.queueId"), "new-queue-two-items");
   assert.strictEqual(run("data.roomPostQueue.status"), "active");
-  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 2);
+  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 1);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(run("data.roomPostQueue.entries.map(({ candidateId, itemCode }) => ({ candidateId, itemCode }))"))), [
-    { candidateId: "fresh-a", itemCode: "shop:fresh-a" },
-    { candidateId: "fresh-b", itemCode: "shop:fresh-b" }
-  ], "new queue contains exactly the two eligible products in savedAt order");
+    { candidateId: "fresh-a", itemCode: "shop:fresh-a" }
+  ], "the new queue stores only the oldest eligible product; later candidates are recalculated after success");
   assert.strictEqual(context.mockRoomStarts[0].id, "fresh-a");
   assert.strictEqual(context.mockRoomStarts[0].code, "shop:fresh-a");
   assert.strictEqual(run("data.candidates.find((item) => item.id === '2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e').roomAttempt.status"), "result_check_required",
@@ -587,7 +595,7 @@ run("data = loadData();");
   assert.strictEqual(run("endStaleRoomQueue()"), true, "unknown saved queue count is not trusted; exact current ID and itemCode allow safe explicit closure");
   assert.strictEqual(run("data.candidates.length"), 1, "operation closure does not delete the unresolved candidate");
   assert.strictEqual(run("data.candidates[0].roomAttempt.status"), "result_check_required");
-  assert.strictEqual(run("data.roomPostQueue.status"), "completed", "the fixed queue ends when no other fixed item remains");
+  assert.strictEqual(run("data.roomPostQueue.status"), "stopped", "closing the old queue never resumes its fixed next item");
   assert.strictEqual(run("data.roomPostQueue.unknownCount"), 1);
   assert.strictEqual(run("data.history.length"), 0, "stale unknown result is never added to successful history");
 
@@ -604,12 +612,12 @@ run("data = loadData();");
   context.mockRoomStarts = [];
   run("startCodexPost = async (id, mode, code) => { mockRoomStarts.push({ id, mode, code }); return true; };");
   assert.strictEqual(run("endStaleRoomQueue()"), true);
-  assert.strictEqual(context.mockRoomStarts[0], "stale-next",
-    "after a verified closure, only the next fixed candidate is started");
+  assert.deepStrictEqual(context.mockRoomStarts, [],
+    "verified closure terminates the old queue without starting its frozen next candidate");
   assert.strictEqual(run("data.candidates.find((item) => item.id === '2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e').roomAttempt.status"), "result_check_required");
   assert.strictEqual(run("data.candidates.find((item) => item.id === '2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e').postStatus"), "結果確認待ち");
-  assert.strictEqual(run("data.roomPostQueue.entries[0].candidateId"), "stale-next");
-  assert.strictEqual(run("data.roomPostQueue.entries[0].itemCode"), "shop:next");
+  assert.strictEqual(run("data.roomPostQueue.entries.length"), 0,
+    "the old fixed queue is cleared only after confirmed operation closure; the candidate itself remains saved");
   assert.strictEqual(run("data.roomPostQueue.successCount"), 0);
   assert.strictEqual(run("data.roomPostQueue.unknownCount"), 1);
   assert.strictEqual(run("data.history.length"), 0);
@@ -626,7 +634,8 @@ run("data = loadData();");
   const magRide = { ...candidate, id: "magride", title: "MagRide",
     itemCode: "magcruise:10000091", product: { ...candidate.product, itemCode: "magcruise:10000091", itemName: "MagRide" },
     introText: "保存済みMagRide紹介文", hashTags: "#MagRide", postStatus: "投稿待ち",
-    roomAttempt: { status: "not_posted_confirmed", candidateId: "magride", itemCode: "magcruise:10000091" } };
+    roomAttempt: { status: "not_posted_confirmed", candidateId: "magride", itemCode: "magcruise:10000091",
+      roomOperationClosedAt: "2026-10-16T00:00:00.000Z", roomOperationCloseReason: "テスト用に操作終了確認済み" } };
   const waitingDevirock = { ...candidate, id: "devirock", title: "devirock",
     itemCode: "devirockstore:10031954", product: { ...candidate.product, itemCode: "devirockstore:10031954" },
     postStatus: "結果確認待ち", roomAttempt: { status: "result_check_required", candidateId: "devirock", itemCode: "devirockstore:10031954" } };
@@ -646,8 +655,8 @@ run("data = loadData();");
   assert.strictEqual(JSON.stringify(run("data.roomPostQueue.entries")), entriesBeforeQueueStop, "fixed queue entries remain intact");
   assert.strictEqual(JSON.stringify(run("data.candidates")), candidatesBeforeQueueStop, "candidate, intro, and attempt data remain byte-for-byte equivalent");
   assert.strictEqual(JSON.stringify(run("data.history")), historyBeforeQueueStop, "posting history is unchanged");
-  assert.strictEqual(run("data.candidates.find((item) => item.id === 'magride').roomAttempt.roomOperationClosedAt"), undefined,
-    "queue stop does not falsely claim ROOM operation closure");
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'magride').roomAttempt.roomOperationClosedAt"), "2026-10-16T00:00:00.000Z",
+    "queue stop preserves the existing ROOM operation closure evidence without changing it");
   assert.strictEqual(run("data.candidates.find((item) => item.id === 'devirock').roomAttempt.status"), "result_check_required",
     "other result-confirmation-wait candidates remain unchanged");
   assert.deepStrictEqual(context.mockRoomStarts, [], "queue-only stop never starts the next candidate");
@@ -664,10 +673,57 @@ run("data = loadData();");
   assert.strictEqual(run("data.roomPostQueue.status"), "active", "failed save leaves in-memory queue active as restored from storage");
   context.localStorage.fail = false;
 
-  run("activeRoomPostQueue = { entries: [{ candidateId: 'magride', itemCode: 'magcruise:10000091' }], currentIndex: 0 };");
+  run("data.candidates.find((item) => item.id === 'magride').roomAttempt = { attemptId: 'in-flight', candidateId: 'magride', itemCode: 'magcruise:10000091', status: 'processing' }; data.candidates.find((item) => item.id === 'magride').postStatus = 'Codex処理中'; activeRoomPostQueue = { entries: [{ candidateId: 'magride', itemCode: 'magcruise:10000091' }], currentIndex: 0, mode: 'continuous' };");
   assert.strictEqual(run("stopRoomQueueOnly()"), false, "queue-only stop cannot race an active runtime queue");
   assert.strictEqual(run("data.roomPostQueue.status"), "active");
   run("activeRoomPostQueue = null;");
+
+  // A detail-page action for Yakenū must not start it when the fixed queue
+  // currently names a different candidate; the mismatch remains untouched.
+  const yakenu = { ...candidate, id: "yakenu-id", title: "ヤケーヌ",
+    itemCode: "suzukachan:10000207", product: { ...candidate.product, itemCode: "suzukachan:10000207", itemName: "ヤケーヌ" },
+    introText: "保存済み紹介文", hashTags: "#ヤケーヌ", postStatus: "投稿待ち" };
+  const queueFirst = { ...candidate, id: "queue-first", title: "固定キュー先頭",
+    itemCode: "shop:queue-first", product: { ...candidate.product, itemCode: "shop:queue-first" }, postStatus: "投稿待ち" };
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [queueFirst, yakenu], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  run("data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'queue-first', itemCode: 'shop:queue-first' }, { candidateId: 'yakenu-id', itemCode: 'suzukachan:10000207' }], 2, '2026-10-16T00:00:00.000Z', 'yakenu-mismatch-queue').queue;");
+  run("activeRoomPostQueue = { entries: data.roomPostQueue.entries, currentIndex: 0, mode: 'continuous' }; currentRoomCopySession = { candidateId: 'yakenu-id', itemCode: 'suzukachan:10000207' }; currentProduct = { itemCode: 'suzukachan:10000207' }; startCodexPost = async () => { globalThis.unexpectedRoomStart = true; return true; };");
+  const beforeWrongDetailStart = JSON.stringify(run("data.candidates"));
+  assert.strictEqual(await run("startRoomPostFromDetail()"), false,
+    "a card/detail candidate that differs from the fixed queue cursor must be rejected before posting preparation");
+  assert.strictEqual(context.unexpectedRoomStart, undefined, "mismatch must not call the ROOM start/preparation routine");
+  assert.match(context.toastMessages.at(-1), /固定キューの現在候補と一致しません.*固定キュー先頭/);
+  assert.strictEqual(JSON.stringify(run("data.candidates")), beforeWrongDetailStart, "identity mismatch does not mutate candidates");
+  run("data.roomPostQueue.currentIndex = 1; activeRoomPostQueue.currentIndex = 1; startCodexPost = async () => false;");
+  assert.strictEqual(await run("startRoomPostFromDetail()"), false,
+    "detail action must propagate a failed asynchronous preparation instead of reporting success");
+
+  // A mismatched pre-start queue can be ended as queue metadata only when the
+  // current candidate has no ROOM attempt; confirmation-wait data is retained.
+  const waitingProtected = { ...candidate, id: "waiting-protected", title: "確認待ち商品",
+    itemCode: "shop:waiting", product: { ...candidate.product, itemCode: "shop:waiting" }, postStatus: "結果確認待ち",
+    roomAttempt: { attemptId: "waiting-attempt", candidateId: "waiting-protected", itemCode: "shop:waiting",
+      status: "result_check_required", startedAt: null } };
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [yakenu, waitingProtected], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null; data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'yakenu-id', itemCode: 'shop:stale-code' }], 1, '2026-10-16T00:00:00.000Z', 'yakenu-prestart-mismatch').queue; activeRoomPostQueue = { entries: data.roomPostQueue.entries, currentIndex: 0, mode: 'continuous' };");
+  const candidatesBeforeMismatchStop = JSON.stringify(run("data.candidates"));
+  const historyBeforeMismatchStop = JSON.stringify(run("data.history"));
+  assert.strictEqual(run("stopRoomQueueOnly()"), true,
+    "a pre-ROOM queue with mismatched itemCode can be stopped without guessing or editing a product");
+  assert.strictEqual(run("data.roomPostQueue.status"), "stopped");
+  assert.strictEqual(run("activeRoomPostQueue"), null, "runtime queue pointer is cleared after persisted stop is verified");
+  assert.strictEqual(JSON.stringify(run("data.candidates")), candidatesBeforeMismatchStop, "Yakenū and waiting candidate data stay unchanged");
+  assert.strictEqual(JSON.stringify(run("data.history")), historyBeforeMismatchStop, "history stays unchanged");
+  assert.strictEqual(run("data.candidates.find((item) => item.id === 'waiting-protected').roomAttempt.status"), "result_check_required",
+    "existing confirmation-wait state is preserved");
+
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [{ ...yakenu,
+    roomAttempt: { attemptId: "in-flight", candidateId: "yakenu-id", itemCode: "suzukachan:10000207", status: "processing" },
+    postStatus: "Codex処理中" }], history: [] });
+  run("data = loadData(); activeRoomPostQueue = { entries: [{ candidateId: 'yakenu-id', itemCode: 'suzukachan:10000207' }], currentIndex: 0, mode: 'continuous' }; data.roomPostQueue = RoomCodexBridge.createQueue([{ candidateId: 'yakenu-id', itemCode: 'suzukachan:10000207' }], 1, '2026-10-16T00:00:00.000Z', 'yakenu-inflight-queue').queue;");
+  assert.strictEqual(run("stopRoomQueueOnly()"), false, "an existing in-flight ROOM attempt prevents queue termination");
+  assert.strictEqual(run("data.roomPostQueue.status"), "active");
 
   console.log("ROOM attempt integration, bounded queue, reload recovery, legacy protection and failed-save safety: passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

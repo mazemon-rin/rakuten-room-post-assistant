@@ -148,13 +148,13 @@
        </div>
        <details id="stale-queue-recovery" class="panel queue-recovery-panel">
         <summary>古い保存キューのROOM操作終了を記録</summary>
-        <p>再読み込み後の「保存上ACTIVE」は実行中を意味しません。ROOM画面・投稿操作が終了していることを実際に確認した場合のみ使用してください。投稿結果不明の商品は結果確認待ち・同一itemCode再投稿禁止のまま保持し、成功数に含めません。保存済みキューの候補ID・itemCodeが一致すれば、その固定キュー内の別商品へ進みます。次候補が特定できない場合は停止します。</p>
+        <p>再読み込み後の「保存上ACTIVE」は実行中を意味しません。ROOM画面・投稿操作が終了していることを実際に確認した場合のみ記録してください。投稿結果不明の商品は結果確認待ち・同一itemCode再投稿禁止のまま保持し、成功数に含めません。旧キューは再開せず終了します。別商品の処理は新しい指示で候補を選び直します。</p>
         <p>「キューだけを終了」は保存キューの進行だけを止めます。ROOM操作終了・投稿結果を確定せず、候補・紹介文・履歴・確認待ち状態も変更しません。</p>
         <button id="stop-room-queue-only" class="secondary-button" type="button">キューを終了（次候補へ進まない）</button>
         <label for="stale-queue-close-reason">ROOM操作終了の確認根拠</label>
         <input id="stale-queue-close-reason" type="text" autocomplete="off" placeholder="例：ROOM投稿画面を閉じ、処理が継続していないことを確認">
         <label><input id="stale-queue-close-confirmed" type="checkbox"> ROOM操作が終了したことを確認しました。投稿結果は確定しません。</label>
-        <button id="end-stale-queue" class="secondary-button" type="button">終了を記録して固定キューの次候補へ</button>
+        <button id="end-stale-queue" class="secondary-button" type="button">ROOM操作終了を記録して旧キューを終了</button>
        </details>
        <details class="panel codex-room-command-panel" aria-labelledby="codex-room-command-title">
         <summary id="codex-room-command-title">Codex連携を開く</summary>
@@ -498,7 +498,7 @@
   <script src="src/core/affiliate-rate-diagnostic.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
   <script src="src/core/ranking-rules.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
   <script src="src/core/trend-rules.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
-  <script src="script.js?v=queue-only-stop-20261016"></script>
+  <script src="script.js?v=dynamic-room-step-20261016"></script>
   <script src="src/sns-trend.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
   <script src="src/sns-trend-discovery.js?v=room-2.7.1.4-queue-recovery-20261016"></script>
 </body>

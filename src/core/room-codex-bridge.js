@@ -134,16 +134,16 @@
     const statuses = Object.values(QUEUE_STATUS);
     const entries = queue.entries;
     if (!statuses.includes(queue.status) || !Array.isArray(entries)
-        || (!entries.length && queue.status !== QUEUE_STATUS.COMPLETED)
+        || (!entries.length && ![QUEUE_STATUS.COMPLETED, QUEUE_STATUS.STOPPED].includes(queue.status))
         || !queue.queueId || !Number.isInteger(queue.requestedCount) || queue.requestedCount < 1
-        || (queue.policy !== "successful_posts" && queue.requestedCount !== entries.length)
+        || (queue.policy !== "successful_posts" && entries.length > 0 && queue.requestedCount !== entries.length)
         || (queue.policy === "successful_posts" && (queue.version !== 2
           || !Number.isInteger(queue.successCount) || queue.successCount < 0
           || !Number.isInteger(queue.failureCount) || queue.failureCount < 0
           || !Number.isInteger(queue.deletedCount) || queue.deletedCount < 0
           || (queue.unknownCount !== undefined && (!Number.isInteger(queue.unknownCount) || queue.unknownCount < 0))))
         || !Number.isInteger(queue.currentIndex) || queue.currentIndex < 0
-        || (entries.length ? queue.currentIndex >= entries.length : queue.status !== QUEUE_STATUS.COMPLETED)) return false;
+        || (entries.length && queue.currentIndex >= entries.length)) return false;
     const ids = new Set();
     const codes = new Set();
     for (const entry of entries) {
@@ -271,7 +271,7 @@
       next.operationCloseReason = String(proof.closeReason).trim();
       if (next.policy === "successful_posts") {
         next.failureCount += 1;
-        next.deletedCount += 1;
+        if (proof.stopAfterHumanResolution !== true) next.deletedCount += 1;
         next.entries.shift();
         next.currentIndex = 0;
         next.status = proof.stopAfterHumanResolution === true && next.entries.length
@@ -349,17 +349,17 @@
       return { ok: false, error: "結果確認待ち商品の候補ID・itemCode、ROOM操作終了の根拠を照合できません。キューは進めません。" };
     }
     const next = structuredClone(queue);
-    next.entries.shift();
+    // Closing an old/unknown ROOM operation is not permission to resume its
+    // frozen batch. Keep the candidate attempt as the result-check record and
+    // terminate the legacy queue; a later explicit run will select afresh.
+    next.entries = [];
     next.currentIndex = 0;
     next.unknownCount = (Number.isInteger(next.unknownCount) ? next.unknownCount : 0) + 1;
     next.operationClosedAt = attempt.roomOperationClosedAt;
     next.operationCloseReason = attempt.roomOperationCloseReason;
-    next.status = next.entries.length ? QUEUE_STATUS.ACTIVE : QUEUE_STATUS.COMPLETED;
-    next.stopReason = next.entries.length
-      ? "投稿結果不明の商品は保留・再投稿禁止のまま、ROOM操作終了を確認したため固定済みの別候補へ進みます。"
-      : "投稿結果不明の商品を保留しました。固定キューに次候補はありません。";
-    return { ok: true, queue: next, done: next.status === QUEUE_STATUS.COMPLETED,
-      entry: next.entries[0] || null };
+    next.status = QUEUE_STATUS.STOPPED;
+    next.stopReason = "ROOM操作終了を記録しました。投稿結果不明の商品は保留・再投稿禁止のまま保持し、旧キューは終了しました。次は新しい明示指示で候補を再選択してください。";
+    return { ok: true, queue: next, done: true, entry: null };
   }
 
   function advanceQueue(queue) {

@@ -117,6 +117,18 @@ const liveSummary = queueApi.formatRoomQueueSummary({ policy: "fixed_items", sta
   currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] }, [liveCandidate], liveQueue,
   [liveCandidate]);
 assert(liveSummary.includes("処理中 next"), "only an exact runtime and persisted candidate match may be shown as processing");
+const dynamicLiveSummary = queueApi.formatRoomQueueSummary({ policy: "fixed_items", status: "active", currentIndex: 0,
+  entries: [{ candidateId: "next", itemCode: "shop:next" }] }, [liveCandidate],
+{ dynamicRun: true, targetSuccesses: 3, successCount: 1, currentCandidateId: "next", currentItemCode: "shop:next",
+  currentIndex: 0, entries: [{ candidateId: "next", itemCode: "shop:next" }] }, [liveCandidate]);
+assert.match(dynamicLiveSummary, /投稿成功 1\/3件・現在投稿可能 1件・処理中 next/,
+  "the compact per-item queue displays the run's success target without suggesting a fixed batch");
+const mismatchedDynamicSummary = queueApi.formatRoomQueueSummary({ policy: "fixed_items", status: "active", currentIndex: 0,
+  entries: [{ candidateId: "next", itemCode: "shop:next" }] }, [liveCandidate],
+{ dynamicRun: true, targetSuccesses: 3, successCount: 1, currentCandidateId: "other", currentItemCode: "shop:wrong",
+  currentIndex: 0, entries: [{ candidateId: "other", itemCode: "shop:wrong" }] }, [liveCandidate]);
+assert.match(mismatchedDynamicSummary, /保存キューと実行候補の照合待ち/,
+  "the progress UI never claims a live item if the persisted and runtime identities diverge");
 const preparedCandidate = { ...candidate("prepared", "shop:prepared"), roomPreparedAt: "2026-10-16T00:00:00.000Z",
   roomPreparedMode: "continuous", postStatus: "投稿準備済み" };
 const preparedQueue = { policy: "fixed_items", status: "active", currentIndex: 0,

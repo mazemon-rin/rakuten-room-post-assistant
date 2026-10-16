@@ -152,9 +152,12 @@
 
   function formatRoomQueueSummary(queueState, eligibleCandidates = [], runtimeQueue = null, candidates = []) {
     const remaining = Array.isArray(eligibleCandidates) ? eligibleCandidates.length : 0;
-    const prefix = queueState?.policy === "successful_posts"
-      ? `成功 ${queueState.successCount || 0}/${queueState.requestedCount || 0}件・失敗 ${queueState.failureCount || 0}件・削除 ${queueState.deletedCount || 0}件・結果不明保留 ${queueState.unknownCount || 0}件・現在投稿可能 ${remaining}件`
-      : `現在投稿可能 ${remaining}件`;
+    const dynamicRun = runtimeQueue?.dynamicRun === true ? runtimeQueue : null;
+    const prefix = dynamicRun
+      ? `投稿成功 ${dynamicRun.successCount || 0}/${dynamicRun.targetSuccesses}件・現在投稿可能 ${remaining}件`
+      : queueState?.policy === "successful_posts"
+        ? `成功 ${queueState.successCount || 0}/${queueState.requestedCount || 0}件・失敗 ${queueState.failureCount || 0}件・削除 ${queueState.deletedCount || 0}件・結果不明保留 ${queueState.unknownCount || 0}件・現在投稿可能 ${remaining}件`
+        : `現在投稿可能 ${remaining}件`;
     const status = queueState?.status;
     if (!queueState) return `${prefix}・処理中なし`;
     if (status === "completed") return `${prefix}・キュー完了（処理中なし）`;
@@ -162,6 +165,18 @@
 
     if (status === "active") {
       const savedEntry = queueState.entries?.[queueState.currentIndex];
+      if (dynamicRun) {
+        const matches = candidates.filter((candidate) => candidate.id === savedEntry?.candidateId
+          && normalizeItemCode(getItemCode(candidate)) === normalizeItemCode(savedEntry?.itemCode));
+        const runMatches = savedEntry?.candidateId === dynamicRun.currentCandidateId
+          && normalizeItemCode(savedEntry.itemCode) === normalizeItemCode(dynamicRun.currentItemCode);
+        if (!runMatches || matches.length !== 1) return `${prefix}・保存キューと実行候補の照合待ち`;
+        if (matches[0].roomAttempt?.status === "processing"
+            && matches[0].roomAttempt.candidateId === matches[0].id
+            && normalizeItemCode(matches[0].roomAttempt.itemCode) === normalizeItemCode(savedEntry.itemCode)) {
+          return `${prefix}・処理中 ${matches[0].title || matches[0].product?.itemName || "商品名未確認"}`;
+        }
+      }
       const savedMatches = candidates.filter((candidate) => candidate.id === savedEntry?.candidateId
         && normalizeItemCode(getItemCode(candidate)) === normalizeItemCode(savedEntry?.itemCode));
       if (savedMatches.length === 1 && savedMatches[0].roomPreparedAt && !savedMatches[0].roomAttempt

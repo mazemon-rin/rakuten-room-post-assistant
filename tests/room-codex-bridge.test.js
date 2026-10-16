@@ -109,8 +109,9 @@ assert.strictEqual(unknownMismatchQueue.ok, false, "attempt identity must match 
 const releasedUnknownQueue = bridge.releaseClosedUnknown(unknownSuccessTarget.queue, "s1", "shop:s1", closedUnknownAttempt,
   { evidence: "ROOM画面が閉じていることを確認", operationClosedAt: closedUnknownAttempt.roomOperationClosedAt });
 assert.strictEqual(releasedUnknownQueue.ok, true);
-assert.strictEqual(releasedUnknownQueue.queue.status, bridge.QUEUE_STATUS.ACTIVE);
-assert.strictEqual(releasedUnknownQueue.queue.entries[0].candidateId, "s2");
+assert.strictEqual(releasedUnknownQueue.queue.status, bridge.QUEUE_STATUS.STOPPED);
+assert.strictEqual(releasedUnknownQueue.queue.entries.length, 0,
+  "closing ROOM operation ends the old batch instead of advancing its frozen next item");
 assert.strictEqual(releasedUnknownQueue.queue.successCount, 0);
 assert.strictEqual(releasedUnknownQueue.queue.unknownCount, 1);
 assert.strictEqual(bridge.releaseClosedUnknown(unknownSuccessTarget.queue, "s1", "shop:wrong", {
@@ -209,8 +210,9 @@ const fixedUnknownAttempt = { ...closedCandidates[0].roomAttempt, candidateId: "
 const advancedUnknown = bridge.releaseClosedUnknown(fixedUnknownStopped, "c-old", "Shop:one", fixedUnknownAttempt,
   { evidence: "ROOM画面終了を確認", operationClosedAt: fixedUnknownAttempt.roomOperationClosedAt });
 assert.strictEqual(advancedUnknown.ok, true);
-assert.strictEqual(advancedUnknown.queue.status, bridge.QUEUE_STATUS.ACTIVE);
-assert.strictEqual(advancedUnknown.queue.entries[0].candidateId, "c-next");
+assert.strictEqual(advancedUnknown.queue.status, bridge.QUEUE_STATUS.STOPPED);
+assert.strictEqual(advancedUnknown.queue.entries.length, 0,
+  "closing an unknown result terminates the old batch without selecting the next fixed entry");
 assert.strictEqual(advancedUnknown.queue.successCount, 0, "unknown result is not a success");
 assert.strictEqual(advancedUnknown.queue.failureCount, 0, "unknown result is not a confirmed failure");
 assert.strictEqual(advancedUnknown.queue.deletedCount, 0, "unknown candidate is retained, not deleted");
@@ -219,6 +221,8 @@ assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "same-
   "same itemCode stays blocked after the old ROOM action is closed");
 assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], null).ok, true,
   "a different product can start after operation closure is verified");
+assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], advancedUnknown.queue).ok, true,
+  "a new explicit queue may start after the old queue is terminal and the different item is verified");
 
 const resolvedUnknown = bridge.recordOutcome(unknown.queue, "c-old", "Shop:one", "not_posted", {
   humanConfirmed: true, operationClosedAt: closedUnknownAttempt.roomOperationClosedAt,

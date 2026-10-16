@@ -54,10 +54,11 @@ if (!script.includes('role="alertdialog" aria-label="候補削除の確認"')
 }
 if (!candidateList.includes('function filterRoomCandidates') || !script.includes('window.CandidateListView.filterRoomCandidates')) throw new Error("candidate list filters must use the testable view helper");
 if (!html.includes('<details class="panel codex-room-command-panel"') || !html.includes('id="codex-room-command-form"') || !html.includes('id="codex-room-command"') || !script.includes('handleCodexRoomCommandSubmit')) throw new Error("Codex bridge must remain available in a collapsed, natively operable details panel");
-if (!script.includes('startSequentialProcessing("continuous", requestedCount, { source: "codex-prompt" })')
-    || !script.includes('getEligibleRoomCandidates(data.candidates, data.history).length')) throw new Error("Codex prompt bridge must support a bounded explicit count or snapshot all currently eligible candidates");
+if (!script.includes('startSequentialProcessing("continuous", requestedCount, { source: "codex-prompt", candidateId: first.id })')
+    || !script.includes('const requestedCount = parsed.requestedCount || eligible.length')) throw new Error("Codex prompt bridge must use an explicit success target or the current eligible count");
 if (html.includes('room-processing-diagnostics') || html.includes('room-processing-state.js') || /data\.pendingRoomPost|completePendingRoomPost/.test(script)) throw new Error("pending state or its diagnostic UI remains active");
-if (!html.includes('src/core/room-sequential-queue.js') || !script.includes('buildRoomSequentialQueue(data.candidates, requestedCount, data.history, { successTarget })')) throw new Error("continuous queue must use saved candidates and history, independent of screen order, with a success target");
+if (!html.includes('src/core/room-sequential-queue.js') || !script.includes('startDynamicRoomPostCandidate(candidate, run)')
+    || !script.includes('getEligibleRoomCandidates(data.candidates, data.history)')) throw new Error("continuous posting must dynamically select the next eligible candidate by saved order and history");
 if (!script.includes('searchResults = filterAvailableProducts(products)') || !script.includes('products.push(...filterAvailableProducts(await fetchRankingCategory(')) throw new Error("normal and ranking results must share saved-candidate exclusion");
 if (!script.includes('formatRoomQueueProgress(') || !roomQueue.includes('function formatRoomQueueProgress(queueState, eligibleCandidates = [], runtimeQueue = null, candidates = [])') || script.includes('(${position} / ${roomCandidates.length}件)')) throw new Error("queue progress must distinguish result-check-required candidates from validated live work");
 if (!script.includes('formatRoomQueueSummary(\n      queueState, eligibleCandidates, activeRoomPostQueue, data.candidates)')
@@ -66,8 +67,11 @@ if (!script.includes('formatRoomQueueSummary(\n      queueState, eligibleCandida
     || !roomQueue.includes('現在投稿可能 ${remaining}件')
     || !roomQueue.includes('保存上ACTIVE・実行状態未確認')) throw new Error("queue stats must distinguish completed queues from verified live work and persisted ACTIVE state");
 if (!script.includes('prepareRoomCopyForPosting(candidate)') || !script.includes('const selected = chooseRoomIntroVariant(product, result.variants)') || !script.includes('紹介文の保存を確認できなかったため')) throw new Error("a missing ROOM introduction must be generated from verified features and saved before posting");
-if (!script.includes('let activeRoomPostMode = "continuous"') || !script.includes('let activeRoomPostQueue = null') || !script.includes('function startNextCandidate(id, mode = activeRoomPostMode)') || !script.includes('roomCodexBridge.advanceQueue(storedQueue)') || !script.includes('startCodexPost(result.entry.candidateId, nextMode, result.entry.itemCode)')) throw new Error("continuous mode must advance by candidate ID and exact itemCode");
-if (!script.includes('連続キューの候補をすべて処理しました。次の商品には進みません。') || !script.includes('void startNextCandidate(item.id, activeRoomPostQueue.mode)')) throw new Error("continuous queue must advance only after saved completion and stop at its end");
+if (!script.includes('let activeRoomPostMode = "continuous"') || !script.includes('let activeRoomPostQueue = null')
+    || !script.includes('async function startNextCandidate(id, mode = activeRoomPostMode, confirmedOutcome = "posted")')
+    || !script.includes('startDynamicRoomPostCandidate(next, run)') || !script.includes('run.currentCandidateId === id')) throw new Error("continuous flow must reselect a unique candidate only after verifying prior candidate ID and itemCode");
+if (!script.includes('連続処理を終了しました。成功 ${run.successCount}/${run.targetSuccesses}件。')
+    || !script.includes('void startNextCandidate(item.id, "continuous")')) throw new Error("continuous flow must advance after success and stop at its successful-post target");
 if (!html.includes('id="codex-room-command-form"') || !html.includes('id="codex-room-command"') || html.includes('id="codex-room-command-submit"') || !script.includes('Control＋Enter') && !html.includes('Control＋Enter')) throw new Error("visible prompt bridge must submit from keyboard without a hidden or extra start button");
 if (!script.includes('handleCodexRoomCommandSubmit') || !script.includes('parseRequestedCount(prompt)') || !script.includes('hasExplicitPostingIntent(prompt)') || !script.includes('data.roomPostQueue = created.queue')) throw new Error("Codex prompt bridge must parse an optional count and explicit ROOM intent, then persist a bounded queue");
 if (!roomBridge.includes('function parseRequestedCount(prompt = "")') || !roomBridge.includes('function canStartQueue(candidates = [], entries = [], previousQueue = null)') || !roomBridge.includes('function recordOutcome(queue, candidateId, itemCode, outcome, proof = {})')) throw new Error("Codex queue validation and result lifecycle helpers are missing");
@@ -76,12 +80,11 @@ if (script.includes('結果を確認・記録するまで同じキューの続�
     || !script.includes('投稿結果は未確定のまま保持されます。同じitemCodeの再投稿は禁止です。別商品の新規キューは、旧キューと候補ID・itemCodeの整合性、および他のROOM操作がないことを開始時に確認できた場合に限り開始できます。旧キューは再開しません。')) {
   throw new Error("closed unknown results must be described accurately: same-item retry remains blocked while a verified different-item queue can be checked and started independently");
 }
-if (!script.includes('queue.policy === "successful_posts"') || !script.includes('confirmQueueCandidateUnpostable')
-    || script.includes('removeClosedUnknownFromSuccessQueue')
-    || !html.includes('終了を記録して固定キューの次候補へ')
+if (!script.includes('confirmQueueCandidateUnpostable') || script.includes('removeClosedUnknownFromSuccessQueue')
+    || !html.includes('ROOM操作終了を記録して旧キューを終了')
     || !script.includes('roomCodexBridge.releaseClosedUnknown')
-    || !script.includes('前商品は結果確認待ち・再投稿禁止のまま、固定キューの別候補へ進みます。')) {
-  throw new Error("unknown results must remain protected, and only a verified closure may advance the fixed queue");
+    || !script.includes('別商品の処理は新しい指示から開始してください')) {
+  throw new Error("unknown results must remain protected and closing the ROOM action must terminate, not resume, an old queue");
 }
 if (!html.includes('id="queue-stats"') || !html.includes('id="candidate-count-summary"') || !html.includes('id="stale-queue-recovery"') || !html.includes('id="refresh-latest-app"')) throw new Error("candidate and queue summaries, stale-queue recovery, and safe cache refresh controls must be present");
 if (!html.includes('id="stop-room-queue-only"') || !html.includes('キューを終了（次候補へ進まない）')
@@ -96,7 +99,7 @@ if (queueOnlyStopSource.includes("startNextCandidate(") || queueOnlyStopSource.i
   throw new Error("queue-only stop must not start a next item, confirm ROOM closure, or mutate candidate/history state");
 }
 if (!html.includes('src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-progress-separated-result-20261016')
-    || !html.includes('script.js?v=queue-only-stop-20261016')) throw new Error("queue and ROOM-copy assets must use their expected cache identifiers");
+    || !html.includes('script.js?v=dynamic-room-step-20261016')) throw new Error("queue and ROOM-copy assets must use their expected cache identifiers");
 if (!script.includes('function getPostableRoomCandidates()')
     || !script.includes('updateCandidateViewCounts(postableCandidates)')
     || !script.includes('getDisplayedRoomCandidates(postableCandidates)')
