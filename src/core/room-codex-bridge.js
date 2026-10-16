@@ -154,12 +154,39 @@
     return true;
   }
 
+  function canReplaceClosedUnknownQueue(candidates = [], queue = null) {
+    const replaceableStatuses = [QUEUE_STATUS.ACTIVE, QUEUE_STATUS.RESULT_CHECK_REQUIRED];
+    if (!queue || !replaceableStatuses.includes(queue.status)
+        || !Array.isArray(queue.entries) || !Number.isInteger(queue.currentIndex)
+        || queue.currentIndex < 0 || queue.currentIndex >= queue.entries.length) {
+      return { ok: false, error: "保存済みの旧キューを安全に照合できません。" };
+    }
+    const entry = queue.entries[queue.currentIndex];
+    const matches = candidates.filter((candidate) => String(candidate?.id || "") === entry?.candidateId);
+    if (!entry?.candidateId || !entry.itemCode || matches.length !== 1) {
+      return { ok: false, error: "旧キューの現在候補を一意に特定できません。" };
+    }
+    const candidate = matches[0];
+    const attempt = candidate.roomAttempt;
+    const candidateCode = normalizeItemCode(getCandidateCode(candidate));
+    if (!candidateCode || normalizeItemCode(entry.itemCode) !== candidateCode
+        || ![undefined, "pending", "result_check_required"].includes(entry.outcome)
+        || attempt?.status !== "result_check_required"
+        || attempt.candidateId !== candidate.id
+        || !attempt.itemCode || normalizeItemCode(attempt.itemCode) !== candidateCode
+        || !isOperationClosed(attempt)) {
+      return { ok: false, error: "旧キューの現在商品が結果確認待ちであること、ID・itemCode一致、ROOM操作終了を確認できません。" };
+    }
+    return { ok: true, candidateId: candidate.id, itemCode: candidateCode };
+  }
+
   function canStartQueue(candidates = [], entries = [], previousQueue = null) {
-    if (!isSavedQueueConsistent(previousQueue, candidates)) {
+    const mayReplaceClosedUnknown = canReplaceClosedUnknownQueue(candidates, previousQueue);
+    if (!isSavedQueueConsistent(previousQueue, candidates) && !mayReplaceClosedUnknown.ok) {
       return { ok: false, error: "保存済みキューの件数・候補ID・itemCodeを整合確認できません。" };
     }
     if ([QUEUE_STATUS.ACTIVE, QUEUE_STATUS.ADVANCE_READY, QUEUE_STATUS.RESULT_CHECK_REQUIRED,
-      QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(previousQueue?.status)) {
+      QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(previousQueue?.status) && !mayReplaceClosedUnknown.ok) {
       return { ok: false, error: "前のROOMキューが継続中または人間操作待ちです。" };
     }
     const targetIds = new Set();
@@ -185,7 +212,9 @@
       if (attempt.itemCode && normalizeItemCode(attempt.itemCode) !== candidateCode) {
         return { ok: false, error: "ROOM試行のitemCodeが保存候補と一致しません。" };
       }
-      if (attempt.status === "result_check_required" && isOperationClosed(attempt)) {
+      if (attempt.status === "result_check_required" && isOperationClosed(attempt)
+          && attempt.candidateId === candidate.id && attempt.itemCode
+          && normalizeItemCode(attempt.itemCode) === candidateCode) {
         if (targetCodes.has(candidateCode)) return { ok: false, error: "投稿結果不明の同一itemCodeは再投稿できません。" };
         continue;
       }
@@ -341,6 +370,7 @@
   }
 
   root.RoomCodexBridge = Object.freeze({ QUEUE_STATUS, parseRequestedCount, hasExplicitPostingIntent,
-    createQueue, isOperationClosed, matchStaleQueueCurrent, isSavedQueueConsistent, canStartQueue, recordOutcome,
+    createQueue, isOperationClosed, matchStaleQueueCurrent, isSavedQueueConsistent, canReplaceClosedUnknownQueue,
+    canStartQueue, recordOutcome,
     recordConfirmedFailure, releaseClosedUnknown, advanceQueue });
 })(typeof window !== "undefined" ? window : globalThis);

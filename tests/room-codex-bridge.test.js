@@ -143,14 +143,50 @@ const unresolvedCandidates = [
 assert.strictEqual(bridge.canStartQueue(unresolvedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], unknown.queue).ok, false);
 const closedCandidates = [
   { id: "c-old", itemCode: "Shop:one", roomAttempt: {
-    status: "result_check_required", itemCode: "Shop:one",
+    status: "result_check_required", candidateId: "c-old", itemCode: "Shop:one",
     roomOperationClosedAt: "2026-10-16T01:00:00.000Z", roomOperationCloseReason: "ROOM画面を閉じた"
   } },
   { id: "c-next", itemCode: "shop:two" }
 ];
-assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], unknown.queue).ok, false,
-  "the unknown fixed queue must be advanced through the closure transition before a different queue can start");
+assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], unknown.queue).ok, true,
+  "a new queue for another item may replace a closed unknown-result queue without classifying the old product");
+const unknownQueueWithoutRecoverableStartCount = { ...unknown.queue, requestedCount: 99 };
+assert.strictEqual(bridge.isSavedQueueConsistent(unknownQueueWithoutRecoverableStartCount, closedCandidates), false);
+assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], unknownQueueWithoutRecoverableStartCount).ok, true,
+  "an unrecoverable old queue count does not block a fresh queue when its current unknown product identity and ROOM closure match");
 assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "same-code", itemCode: "shop:one" }], unknown.queue).ok, false);
+const twoFreshTargets = [
+  { id: "fresh-a", itemCode: "shop:fresh-a" },
+  { id: "fresh-b", itemCode: "shop:fresh-b" }
+];
+const twoFreshEntries = twoFreshTargets.map(({ id, itemCode }) => ({ candidateId: id, itemCode }));
+assert.strictEqual(bridge.canStartQueue([...closedCandidates, ...twoFreshTargets], twoFreshEntries, unknown.queue).ok, true,
+  "two distinct postable products can be fixed in a new queue while the old item remains unknown");
+assert.strictEqual(bridge.canStartQueue([
+  ...closedCandidates,
+  { id: "fresh-a", itemCode: "shop:fresh-a" },
+  { id: "fresh-b", itemCode: "shop:fresh-b", roomAttempt: { status: "processing", candidateId: "fresh-b", itemCode: "shop:fresh-b" } }
+], twoFreshEntries, unknown.queue).ok, false,
+  "a separate actively processing ROOM attempt still blocks the new queue");
+assert.strictEqual(bridge.canStartQueue([
+  { ...closedCandidates[0], roomAttempt: { ...closedCandidates[0].roomAttempt, candidateId: "wrong-id" } },
+  closedCandidates[1], ...twoFreshTargets
+], twoFreshEntries, unknown.queue).ok, false,
+  "an unknown attempt with a mismatched candidate ID cannot be bypassed");
+assert.strictEqual(bridge.canStartQueue([
+  { ...closedCandidates[0], roomAttempt: { ...closedCandidates[0].roomAttempt, itemCode: "shop:wrong" } },
+  closedCandidates[1], ...twoFreshTargets
+], twoFreshEntries, unknown.queue).ok, false,
+  "an unknown attempt with a mismatched itemCode cannot be bypassed");
+assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], {
+  ...unknown.queue, currentIndex: 8
+}).ok, false, "an unreconcilable old queue remains a blocker");
+assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], {
+  ...unknown.queue, entries: [{ candidateId: "different-id", itemCode: "shop:wrong", outcome: "result_check_required" }], currentIndex: 0
+}).ok, false, "a stale queue whose current entry disagrees with the protected attempt remains a blocker");
+assert.strictEqual(bridge.canStartQueue(closedCandidates, [{ candidateId: "c-next", itemCode: "shop:two" }], {
+  ...unknown.queue, entries: [{ ...unknown.queue.entries[0], outcome: "posted" }]
+}).ok, false, "a queue claiming success while the attempt is unknown remains a blocker");
 assert.strictEqual(bridge.isSavedQueueConsistent(unknown.queue, closedCandidates), true);
 assert.strictEqual(bridge.isSavedQueueConsistent(unknown.queue, [closedCandidates[0]]), false,
   "a queue with a missing fixed candidate is inconsistent");

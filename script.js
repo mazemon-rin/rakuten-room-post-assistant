@@ -5097,9 +5097,12 @@ async function handleCodexRoomCommandSubmit(event) {
     return false;
   }
   const existingQueue = data.roomPostQueue;
+  const mayReplaceClosedUnknownQueue = !activeRoomPostQueue
+    && roomCodexBridge.canReplaceClosedUnknownQueue(data.candidates, existingQueue).ok;
   if (existingQueue?.policy === "successful_posts"
       && [roomCodexBridge.QUEUE_STATUS.ACTIVE, roomCodexBridge.QUEUE_STATUS.RESULT_CHECK_REQUIRED,
-        roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(existingQueue.status)) {
+        roomCodexBridge.QUEUE_STATUS.HUMAN_ACTION_REQUIRED].includes(existingQueue.status)
+      && !mayReplaceClosedUnknownQueue) {
     if (activeRoomPostQueue?.entries?.length && activeRoomPostQueue.mode === "continuous") {
       if (message) message.textContent = "成功目標キューはすでにこの画面で処理中です。二重開始しません。";
     } else if (message) {
@@ -5107,7 +5110,7 @@ async function handleCodexRoomCommandSubmit(event) {
     }
     return false;
   }
-  if (existingQueue?.status === roomCodexBridge.QUEUE_STATUS.ACTIVE
+  if (!mayReplaceClosedUnknownQueue && existingQueue?.status === roomCodexBridge.QUEUE_STATUS.ACTIVE
       && existingQueue.requestedCount === parsed.requestedCount) {
     const entry = existingQueue.entries?.[existingQueue.currentIndex];
     const current = data.candidates.find((candidate) => candidate.id === entry?.candidateId);

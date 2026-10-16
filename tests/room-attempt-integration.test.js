@@ -349,6 +349,47 @@ run("data = loadData();");
     "a different itemCode can be queued after ROOM closure is verified");
   assert.strictEqual(run("RoomCodexBridge.canStartQueue(data.candidates, sameQueueEntries, null).ok"), false,
     "the protected itemCode remains blocked even after operation closure");
+  const freshQueueCandidates = [
+    { ...legacyCandidate, roomAttempt: run("structuredClone(data.candidates[0].roomAttempt)") },
+    { ...candidate, id: "fresh-b", itemCode: "shop:fresh-b", product: { ...candidate.product, itemCode: "shop:fresh-b" },
+      title: "新しい商品B", savedAt: "2026-10-03T00:00:00.000Z" },
+    { ...candidate, id: "fresh-a", itemCode: "shop:fresh-a", product: { ...candidate.product, itemCode: "shop:fresh-a" },
+      title: "新しい商品A", savedAt: "2026-10-02T00:00:00.000Z" }
+  ];
+  context.freshQueueCandidates = freshQueueCandidates;
+  const oldQueue = run("RoomCodexBridge.recordOutcome(RoomCodexBridge.createQueue(freshQueueCandidates.map((item) => ({ candidateId: item.id, itemCode: item.itemCode })), 3, '2026-10-16T00:00:00.000Z', 'old-unrecoverable-count-queue', { successTarget: true }).queue, '2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e', 'devirockstore:10031954', 'unknown').queue");
+  oldQueue.policy = "fixed_items";
+  oldQueue.version = 1;
+  oldQueue.requestedCount = 371;
+  context.oldQueue = oldQueue;
+  assert.strictEqual(run("RoomCodexBridge.isSavedQueueConsistent(oldQueue, freshQueueCandidates)"), false,
+    "test fixture represents an old queue whose starting count cannot be reconciled");
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: freshQueueCandidates, history: [{ itemCode: "shop:already-posted" }], roomPostQueue: oldQueue });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  context.commandInputs = { "#codex-room-command": { value: "楽天ROOMの投稿候補から2件、連続実投稿してください。" },
+    "#codex-room-command-message": { textContent: "" } };
+  context.crypto.randomUUID = () => "new-queue-two-items";
+  context.mockRoomStarts = [];
+  run("startCodexPost = async (id, mode, code) => { mockRoomStarts.push({ id, mode, code }); return true; };");
+  assert.strictEqual(await run("handleCodexRoomCommandSubmit({ preventDefault() {} })"), true,
+    "explicit prompt can start a fresh queue after a closed unknown result");
+  assert.strictEqual(run("data.roomPostQueue.queueId"), "new-queue-two-items");
+  assert.strictEqual(run("data.roomPostQueue.status"), "active");
+  assert.strictEqual(run("data.roomPostQueue.requestedCount"), 2);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(run("data.roomPostQueue.entries.map(({ candidateId, itemCode }) => ({ candidateId, itemCode }))"))), [
+    { candidateId: "fresh-a", itemCode: "shop:fresh-a" },
+    { candidateId: "fresh-b", itemCode: "shop:fresh-b" }
+  ], "new queue contains exactly the two eligible products in savedAt order");
+  assert.strictEqual(context.mockRoomStarts[0].id, "fresh-a");
+  assert.strictEqual(context.mockRoomStarts[0].code, "shop:fresh-a");
+  assert.strictEqual(run("data.candidates.find((item) => item.id === '2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e').roomAttempt.status"), "result_check_required",
+    "replacing the old queue leaves the unknown product protected and unclassified");
+  assert.strictEqual(run("data.candidates.length"), 3, "new queue creation does not delete candidates");
+  assert.strictEqual(run("data.history.length"), 1, "new queue creation preserves posting history");
+
+  context.localStorage.value = JSON.stringify({ settings: {},
+    candidates: [run("structuredClone(data.candidates.find((item) => item.id === '2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e'))")], history: [] });
+  run("data = loadData(); activeRoomPostQueue = null;");
   assert.strictEqual(run("confirmRoomAttemptResult('2f145c8f-dd1b-4ce2-be1b-a3a9b1bbcf1e', RoomAttempt.STATUS.NOT_POSTED_CONFIRMED, RoomAttempt.SOURCE.NOT_POSTED)"), true);
   assert.strictEqual(run("data.roomPostQueue"), undefined, "legacy candidate can be resolved without inventing a prior queue");
   assert.strictEqual(run("RoomCodexBridge.canStartQueue([...data.candidates, { id: 'other-id', itemCode: 'different-shop:item' }], otherQueueEntries, null).ok"), true,
