@@ -111,7 +111,6 @@ const defaultData = {
   },
   candidates: [],
   history: [],
-  pendingRoomPost: null,
   sales: [],
   favorites: [],
   trendSettings: { keywords: [], updatedAt: null },
@@ -177,6 +176,7 @@ function getCandidateProductForDisplay(candidate = {}) {
 }
 
 function normalizeStoredData(saved) {
+  // Preserve unknown legacy fields verbatim; obsolete pendingRoomPost data is not read or rewritten.
   return {
     ...defaultData,
     ...(saved || {}),
@@ -341,8 +341,8 @@ function isRoomCandidate(item = {}) {
 let data = loadData();
 let currentProduct = null;
 let currentRoomCopySession = { itemCode: "", candidateId: "", variants: [], mode: "" };
-// Reloadすると安全側の確認モードへ戻す。連続実投稿の選択はこの画面セッション内だけ保持する。
-let activeRoomPostMode = "confirmation";
+// 画面セッションの標準経路は連続投稿。実際の外部公開は現在のユーザー依頼で許可された場合だけ行う。
+let activeRoomPostMode = "continuous";
 let activeRoomPostQueue = null;
 let searchResults = [];
 let affiliateRateSearchResults = [];
@@ -2773,7 +2773,6 @@ function renderCandidates() {
   const items = getDisplayedRoomCandidates();
   $("#candidateList").innerHTML = items.length ? items.map(candidateCard).join("") : `<p class="message">投稿候補はまだありません。</p>`;
   renderThreadsOnlyCandidates();
-  renderRoomProcessingDiagnostics();
   renderQueueProgress();
   renderCollectionSummary();
 }
@@ -2924,13 +2923,13 @@ function renderQueueProgress() {
   if (!progress) return;
   const roomCandidates = data.candidates.filter(isRoomCandidate);
   const queue = roomCandidates.filter((item) => !["投稿済み", "スキップ"].includes(item.postStatus));
-  const active = roomCandidates.find((item) => ["Codex処理中", "確認待ち"].includes(item.postStatus));
+  const active = roomCandidates.find((item) => ["Codex処理中", "確認待ち", "要手動確認"].includes(item.postStatus));
   if (!queue.length) {
     progress.textContent = "処理対象の商品はありません。";
     return;
   }
   if (!active) {
-    progress.textContent = `投稿待ち ${queue.filter((item) => item.postStatus === "投稿待ち").length}件。確認モードで先頭の商品を準備できます。`;
+    progress.textContent = `投稿待ち ${queue.filter((item) => item.postStatus === "投稿待ち").length}件。件数を指定して連続投稿を開始できます。`;
     return;
   }
   progress.textContent = window.RoomSequentialQueue.formatRoomSequentialProgress(active, activeRoomPostQueue);
@@ -3071,7 +3070,7 @@ function applyCodexResult() {
   candidate.introText = finalIntroText;
   candidate.hashTags = parsed.hashTags;
   candidate.status = "文章作成済み";
-  candidate.postStatus = "確認待ち";
+  candidate.postStatus = candidate.postStatus === "Codex処理中" ? "Codex処理中" : "確認待ち";
   saveData();
   const saved = data.candidates.find((item) => item.id === candidate.id);
   if (!saved || saved.introText !== finalIntroText || saved.hashTags !== parsed.hashTags) {
@@ -3359,12 +3358,11 @@ function candidateCard(item) {
         ${item.introText ? `<details class="candidate-intro"><summary>紹介文を確認</summary><p>${escapeHtml(item.introText)}</p><p>${escapeHtml(item.hashTags || "")}</p></details>` : ""}
         ${item.introPrompt ? `<details class="candidate-intro"><summary>Codex投稿指示文を確認</summary><textarea readonly>${escapeHtml(item.introPrompt)}</textarea><button class="secondary-button" type="button" onclick="copyCandidatePrompt('${item.id}')">指示文をコピー</button></details>` : ""}
         <div class="record-actions candidate-primary-actions">
-          <button class="primary-button codex-post-button" type="button" onclick="startCodexPost('${item.id}', 'confirmation')">確認モードでROOM画面を準備</button>
-          <button class="secondary-button" type="button" onclick="startCodexPost('${item.id}', 'continuous')">連続実投稿用の指示を作成</button>
+          <button class="primary-button codex-post-button" type="button" onclick="startCodexPost('${item.id}', 'continuous')">連続実投稿を開始</button>
+          <button class="secondary-button" type="button" onclick="startCodexPost('${item.id}', 'confirmation')">確認モードで準備</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '要手動確認')">要手動確認にする</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
-          ${data.pendingRoomPost?.itemCode && data.pendingRoomPost.itemCode === (item.itemCode || item.product?.itemCode || "") ? `<button class="primary-button" type="button" onclick="completePendingRoomPost()">ROOM投稿完了を記録</button>` : ""}
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', 'スキップ')">スキップ</button>
           ${["注意喚起候補", "要確認"].includes(trust.trustStatus) ? `<button class="secondary-button" type="button" onclick="generateWarningPrompt('${item.id}')">注意喚起文を生成</button>` : ""}
           ${item.postStatus === "投稿済み" ? `<button class="secondary-button" type="button" onclick="startNextCandidate('${item.id}')">次の商品を処理</button>` : ""}
@@ -4386,148 +4384,27 @@ function focusNextCandidate(id) {
   toast(`次の商品「${resolved.candidate.title}」を処理できます。`);
 }
 
-function getProcessingBlocker(excludeId = "") {
-  const issue = getRoomProcessingDiagnostics().issues.find((entry) => entry.candidateId !== excludeId);
-  return issue ? data.candidates.find((candidate) => candidate.id === issue.candidateId) || null : null;
+function normalizeRoomPostMode(mode) {
+  return mode === "confirmation" ? "confirmation" : "continuous";
 }
 
-function getRoomProcessingDiagnostics() {
-  return window.RoomProcessingState.inspectRoomProcessingState(data.candidates, data.history, data.pendingRoomPost, {
-    isRoomCandidate,
-    isVisibleRoomCandidate,
-    postedHistoryMatch: (candidate, history) => window.DuplicateDetection.postedHistoryMatch(candidate, history)
-  });
+function getProcessingBlocker(excludeId = "") {
+  return data.candidates.find((candidate) => candidate.id !== excludeId
+    && isRoomCandidate(candidate)
+    && ["Codex処理中", "確認待ち", "要手動確認"].includes(candidate.postStatus)) || null;
 }
 
 function getRoomProcessingStopMessage(candidate) {
-  const issue = getRoomProcessingDiagnostics().issues.find((entry) => entry.candidateId === candidate?.id);
-  if (!issue) return "A：アプリ内の確認待ち候補があります。診断パネルで状態を確認してください。";
-  const pendingMismatch = issue.pendingRelation !== "なし" && issue.pendingRelation !== "候補ID・itemCodeとも一致";
-  const category = pendingMismatch ? "B：pendingRoomPostの不整合" : "A：アプリ内の確認待ち候補";
-  const history = issue.historyMatch ? `履歴一致：あり（${issue.historyMatch.itemCode}）` : "履歴一致：なし";
-  return `${category}で開始を停止しました。商品：${issue.title} / itemCode：${issue.itemCode} / 状態：${issue.postStatus} / 表示理由：${issue.hiddenReason} / ${history} / pending：${issue.pendingRelation}。診断パネルでROOM側の結果を照合してください。不明なら状態を変更せず、この商品を保留してください。`;
+  if (!candidate) return "別のROOM候補が処理中です。投稿結果を確認するまで開始しません。";
+  const code = candidate.itemCode || candidate.product?.itemCode || "未確認";
+  const historyMatch = findPostedHistoryRecord(candidate);
+  const duplicate = historyMatch ? `投稿履歴に同じitemCodeがあります（${code}）。` : "投稿履歴の重複はありません。";
+  return `別の商品「${candidate.title || candidate.product?.itemName || "未確認"}」（itemCode：${code}）が「${candidate.postStatus || "未確認"}」のため停止しました。${duplicate} ROOM側の投稿結果を確認し、結果不明なら状態を変更せず保留してください。`;
 }
 
-function getPendingRoomPostStopMessage() {
-  const diagnostics = getRoomProcessingDiagnostics();
-  const pending = diagnostics.pendingStatus;
-  const category = diagnostics.pendingIssue ? "B：pendingRoomPostの不整合" : "A：アプリ内の処理中・確認待ち状態";
-  return `${category}のため新しい投稿を開始しません。商品：${pending?.title || "未確認"} / itemCode：${pending?.itemCode || "未確認"} / 候補との関連：${pending?.relation || "未確認"}。診断パネルで候補・履歴・ROOM側の結果を照合してください。不明ならpendingを解除せず保留してください。`;
-}
-
-function renderRoomProcessingDiagnostics() {
-  const panel = $("#room-processing-diagnostics");
-  if (!panel) return;
-  const diagnostics = getRoomProcessingDiagnostics();
-  const keyword = $("#candidateFilter")?.value?.trim().toLowerCase() || "";
-  const status = $("#candidateStatusFilter")?.value || "";
-  const activeIssues = diagnostics.issues.map((issue) => {
-    const candidate = data.candidates.find((entry) => entry.id === issue.candidateId);
-    const candidateText = `${candidate?.title || ""} ${candidate?.shopName || ""} ${candidate?.memo || ""}`.toLowerCase();
-    const postStatus = candidate?.postStatus || candidate?.status || "投稿待ち";
-    const hiddenByFilter = Boolean((keyword && !candidateText.includes(keyword)) || (status && postStatus !== status && candidate?.status !== status));
-    const historyText = issue.historyMatch
-      ? `一致あり：${escapeHtml(issue.historyMatch.title)}（itemCode：${escapeHtml(issue.historyMatch.itemCode)}）`
-      : "一致なし";
-    return `<article class="room-processing-issue"><h4>${escapeHtml(issue.title)}</h4>
-      <dl><dt>itemCode</dt><dd>${escapeHtml(issue.itemCode)}</dd>
-      <dt>現在のpostStatus</dt><dd>${escapeHtml(issue.postStatus)}</dd>
-      <dt>候補一覧の表示</dt><dd>${issue.visible ? (hiddenByFilter ? "検索・ステータスフィルターで非表示" : "表示対象") : escapeHtml(issue.hiddenReason)}</dd>
-      <dt>投稿履歴との一致</dt><dd>${historyText}</dd>
-      <dt>pendingRoomPostとの関連</dt><dd>${escapeHtml(issue.pendingRelation)}</dd></dl>
-      <div class="record-actions">
-        <button class="secondary-button" type="button" onclick="resolveBlockedRoomCandidate('${escapeAttr(issue.candidateId)}','posted')">ROOM投稿済みを確認して記録</button>
-        <button class="secondary-button" type="button" onclick="resolveBlockedRoomCandidate('${escapeAttr(issue.candidateId)}','unposted')">ROOM未投稿を確認して投稿待ちへ</button>
-      </div><p class="meta">結果不明の場合は操作せず、ブロックを維持してください。</p></article>`;
-  }).join("");
-  const pendingText = diagnostics.pendingStatus
-    ? (() => {
-      const pendingCandidate = data.candidates.find((entry) => entry.id === data.pendingRoomPost?.candidateId)
-        || data.candidates.find((entry) => String(entry.itemCode || entry.product?.itemCode || "").trim() === String(data.pendingRoomPost?.itemCode || "").trim());
-      const alreadyListed = pendingCandidate && diagnostics.issues.some((issue) => issue.candidateId === pendingCandidate.id);
-      const pendingResolution = pendingCandidate && !alreadyListed && diagnostics.pendingStatus.relation === "候補ID・itemCodeとも一致"
-        ? `<div class="record-actions"><button class="secondary-button" type="button" onclick="resolveBlockedRoomCandidate('${escapeAttr(pendingCandidate.id)}','posted')">ROOM投稿済みを確認して記録</button><button class="secondary-button" type="button" onclick="resolveBlockedRoomCandidate('${escapeAttr(pendingCandidate.id)}','unposted')">ROOM未投稿を確認して投稿待ちへ</button></div><p class="meta">結果不明の場合は操作せず、pendingを維持してください。</p>`
-        : "";
-      return `<article class="room-processing-issue"><h4>pendingRoomPostの保存状態</h4><dl>
-      <dt>商品名</dt><dd>${escapeHtml(diagnostics.pendingStatus.title)}</dd>
-      <dt>itemCode</dt><dd>${escapeHtml(diagnostics.pendingStatus.itemCode)}</dd>
-      <dt>候補との関連</dt><dd>${escapeHtml(diagnostics.pendingStatus.relation)}</dd></dl>
-      ${diagnostics.pendingIssue ? `<p role="alert">対応する候補がない、または候補IDとitemCodeが一致しません。自動解除せず、照合が必要です。</p>` : ""}
-      ${diagnostics.pendingIssue?.relation === "一致する候補なし" ? `<button class="secondary-button" type="button" onclick="resolveOrphanPendingAsUnposted()">ROOM未投稿を確認して孤立pendingを解除</button>` : ""}
-      ${pendingResolution}</article>`;
-    })()
-    : "";
-  const hasIssues = diagnostics.issues.length > 0 || Boolean(diagnostics.pendingStatus);
-  panel.hidden = !hasIssues;
-  panel.innerHTML = hasIssues
-    ? `<h3>ROOM投稿状態の確認が必要です</h3><p>一覧に見えない候補やpending情報も開始判定に含まれます。投稿結果が不明な状態は自動解除されません。</p>${activeIssues}${pendingText}`
-    : "";
-}
-
-function resolveBlockedRoomCandidate(id, result) {
-  const candidate = data.candidates.find((item) => item.id === id && isRoomCandidate(item));
-  if (!candidate || !["posted", "unposted"].includes(result)) return;
-  const stateLabel = result === "posted" ? "ROOM投稿済み" : "ROOM未投稿";
-  if (!window.confirm(`ROOM側で「${candidate.title}」を${stateLabel}と確認しましたか？\n確認済みの場合だけ状態を反映します。投稿結果が不明ならキャンセルしてください。`)) return;
-  if (result === "unposted" && findPostedHistoryRecord(candidate)) {
-    toast("投稿履歴に同じitemCodeがあるため、未投稿へは変更しません。履歴とROOMの状態を先に照合してください。");
-    return;
-  }
-  const pendingMatches = window.RoomProcessingState.isPendingLinkedToCandidate(candidate, data.pendingRoomPost);
-  if (result === "posted") {
-    const existingHistory = findPostedHistoryRecord(candidate);
-    candidate.status = "投稿済み";
-    candidate.postStatus = "投稿済み";
-    candidate.postedAt = existingHistory?.postedAt || candidate.postedAt || "";
-    candidate.roomUrl = existingHistory?.roomUrl || candidate.roomUrl || "";
-    candidate.introText = finalizeRoomIntro(candidate, candidate.introText || "");
-    const historySnapshot = createHistoryRecord(candidate, { postedAt: candidate.postedAt, introText: candidate.introText });
-    historySnapshot.id = existingHistory?.id || candidate.id;
-    if (existingHistory) Object.assign(existingHistory, historySnapshot);
-    else data.history.unshift(historySnapshot);
-    compactPostedCandidate(candidate, data.history);
-  } else {
-    candidate.postStatus = "投稿待ち";
-    candidate.status = "投稿待ち";
-  }
-  if (pendingMatches) data.pendingRoomPost = null;
-  const saved = saveData();
-  if (!saved.ok) return;
-  toast(result === "posted" ? "確認されたROOM投稿を履歴へ反映しました。" : "ROOM未投稿の確認を反映し、投稿待ちへ戻しました。");
-}
-
-function resolveOrphanPendingAsUnposted() {
-  const pending = data.pendingRoomPost;
-  const itemCode = String(pending?.itemCode || "").trim();
-  if (!pending || !itemCode) {
-    toast("孤立pendingのitemCodeが確認できないため解除しません。");
-    return;
-  }
-  const linkedCandidate = data.candidates.some((candidate) => isRoomCandidate(candidate)
-    && (candidate.id === pending.candidateId || String(candidate.itemCode || candidate.product?.itemCode || "").trim() === itemCode));
-  if (linkedCandidate) {
-    toast("候補との関連が残っているため、この操作では解除しません。");
-    return;
-  }
-  if (data.history.some((entry) => !entry.repostRequested && String(entry.itemCode || entry.product?.itemCode || "").trim() === itemCode)) {
-    toast("同じitemCodeの投稿履歴があるため、未投稿として解除しません。");
-    return;
-  }
-  if (!window.confirm(`ROOMでitemCode「${itemCode}」が未投稿と確認済みですか？\n確認済みの場合だけ孤立pendingを解除します。不明な場合はキャンセルしてください。`)) return;
-  data.pendingRoomPost = null;
-  const saved = saveData();
-  if (saved.ok) toast("ROOM未投稿の確認に基づき、孤立pendingを解除しました。");
-}
-
-async function startSequentialProcessing(mode = "confirmation", requestedCount = getRequestedRoomQueueCount()) {
+async function startSequentialProcessing(mode = "continuous", requestedCount = getRequestedRoomQueueCount()) {
   const message = $("#codex-result-message");
   if (!Number.isInteger(requestedCount) || requestedCount < 1) return;
-  if (data.pendingRoomPost) {
-    const text = getPendingRoomPostStopMessage();
-    if (message) message.textContent = text;
-    toast(text);
-    return;
-  }
   const blocker = getProcessingBlocker();
   if (blocker) {
     const text = getRoomProcessingStopMessage(blocker);
@@ -4547,7 +4424,7 @@ async function startSequentialProcessing(mode = "confirmation", requestedCount =
     toast(text);
     return;
   }
-  const postMode = window.RoomProcessingState.normalizePostMode(mode);
+  const postMode = normalizeRoomPostMode(mode);
   activeRoomPostMode = postMode;
   activeRoomPostQueue = { entries: builtQueue.entries, currentIndex: 0, mode: postMode };
   const firstEntry = activeRoomPostQueue.entries[0];
@@ -4579,7 +4456,7 @@ async function startNextCandidate(id, mode = activeRoomPostMode) {
     return;
   }
   const result = window.RoomSequentialQueue.advanceRoomSequentialQueue(
-    activeRoomPostQueue.entries, activeRoomPostQueue.currentIndex, id, data.candidates, data.pendingRoomPost
+    activeRoomPostQueue.entries, activeRoomPostQueue.currentIndex, id, data.candidates
   );
   if (!result.ok) {
     toast(result.error);
@@ -4592,7 +4469,7 @@ async function startNextCandidate(id, mode = activeRoomPostMode) {
   }
   const previousIndex = activeRoomPostQueue.currentIndex;
   activeRoomPostQueue.currentIndex = result.nextIndex;
-  const nextMode = window.RoomProcessingState.normalizePostMode(activeRoomPostQueue.mode || mode);
+  const nextMode = normalizeRoomPostMode(activeRoomPostQueue.mode || mode);
   activeRoomPostMode = nextMode;
   const started = await startCodexPost(result.entry.candidateId, nextMode, result.entry.itemCode);
   if (!started) activeRoomPostQueue.currentIndex = previousIndex;
@@ -4881,105 +4758,45 @@ function recordRoomPosting(item, { roomUrl = item.roomUrl || "", postedAt = "", 
   return existingHistory || historySnapshot;
 }
 
-function completePendingRoomPost() {
-  const pending = data.pendingRoomPost;
-  if (!pending?.itemCode) {
-    toast("投稿中の商品情報がありません。対象カードから投稿を開始してください。");
-    return false;
-  }
-  const matches = data.candidates.filter((candidate) => isRoomCandidate(candidate)
-    && (pending.candidateId ? candidate.id === pending.candidateId : (candidate.itemCode || candidate.product?.itemCode || "") === pending.itemCode));
-  if (matches.length !== 1) {
-    toast("投稿開始時の候補IDから商品を一意に特定できません。pending情報を保持したまま停止しました。");
-    return false;
-  }
-  const item = matches[0];
-  if (String(item.itemCode || item.product?.itemCode || "").trim() !== String(pending.itemCode).trim()) {
-    toast("pendingRoomPostの候補IDとitemCodeが一致しません。pending情報を保持したまま停止しました。");
-    return false;
-  }
-  if (findPostedHistoryRecord(item)) {
-    const previousState = structuredClone(data);
-    data.pendingRoomPost = null;
-    const result = saveData();
-    if (!result.ok) {
-      data = previousState;
-      renderAll();
-      toast("ROOMへの投稿は完了していますが、アプリの履歴保存に失敗しました。同じ商品を再投稿しないよう注意してください。");
-      return false;
-    }
-    toast("この商品はすでに投稿履歴にあります。重複登録は行いません。");
-    return true;
-  }
-  const previousState = structuredClone(data);
-  const previousSnapshot = getSerializedDataSnapshot(data);
-  try {
-    if (String(pending.itemCode || "").trim() !== String(item.itemCode || item.product?.itemCode || "").trim()) {
-      toast("投稿開始時と現在の商品itemCodeが一致しないため、投稿完了を記録せず停止しました。");
-      return false;
-    }
-    const pendingTitle = String(pending.title || "").trim();
-    const currentTitle = String(item.title || item.product?.itemName || "").trim();
-    if (pendingTitle && currentTitle && pendingTitle !== currentTitle) {
-      toast("投稿開始時と現在の商品名が一致しないため、投稿完了を記録せず停止しました。");
-      return false;
-    }
-    const payload = validateRoomPostingPayload(item, pending.introText || item.introText);
-    if (!payload.ok) {
-      toast(payload.error);
-      return false;
-    }
-    recordRoomPosting(item, { postedAt: new Date().toISOString(), introText: payload.introText });
-    compactPostedCandidate(item, data.history);
-    data.pendingRoomPost = null;
-    const savedResult = saveData(data, { render: false });
-    if (!savedResult.ok) {
-      data = previousState;
-      renderAll();
-      toast("ROOMへの投稿は完了していますが、アプリの履歴保存に失敗しました。同じ商品を再投稿しないよう注意してください。");
-      return false;
-    }
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    const savedHistory = (saved.history || []).find((entry) => (entry.itemCode || entry.product?.itemCode || "") === pending.itemCode);
-    if (!savedHistory?.postedAt) throw new Error("投稿履歴の保存確認に失敗しました。");
-    renderAll();
-    toast("ROOM投稿完了をアプリへ記録しました。");
-    if (activeRoomPostQueue?.mode === "continuous") {
-      void startNextCandidate(item.id, activeRoomPostQueue.mode);
-    }
-    return true;
-  } catch (error) {
-    try { localStorage.setItem(STORAGE_KEY, previousSnapshot.json); } catch (restoreError) { console.warn("投稿完了処理の検証失敗時に元データを復元できませんでした。", restoreError); }
-    data = previousState;
-    renderAll();
-    toast(`ROOMへの投稿は完了していますが、アプリの履歴保存に失敗しました。同じ商品を再投稿しないよう注意してください。${error.message ? ` ${error.message}` : ""}`);
-    return false;
-  }
-}
-
 function markPosted(id) {
   const item = data.candidates.find((candidate) => candidate.id === id);
   if (!item) return;
-  if (data.pendingRoomPost) {
-    if (window.RoomProcessingState.isPendingLinkedToCandidate(item, data.pendingRoomPost)) {
-      completePendingRoomPost();
-      return;
-    }
-    toast(getPendingRoomPostStopMessage());
+  const itemCode = String(item.itemCode || item.product?.itemCode || "").trim();
+  const queued = activeRoomPostQueue?.entries?.[activeRoomPostQueue.currentIndex];
+  if (activeRoomPostQueue?.mode === "continuous" && (!queued || queued.candidateId !== id || queued.itemCode !== itemCode)) {
+    toast("投稿キューの候補ID・itemCodeと一致しないため、履歴を更新しません。");
     return;
   }
-  const existingHistory = findPostedHistoryRecord(item);
-  if ((item.status === "投稿済み" || item.postStatus === "投稿済み") && existingHistory) {
+  const duplicateHistory = findPostedHistoryRecord(item);
+  if (duplicateHistory && !item.repostOfHistoryId) {
     toast("この商品はすでに投稿済みです。");
     return;
   }
+  const payload = validateRoomPostingPayload(item, item.introText || "");
+  if (!payload.ok) {
+    toast(payload.error);
+    return;
+  }
   // URL取得前の従来運用でもROOM投稿完了を記録できる。後のURL登録時は同じ履歴を更新する。
+  item.introText = payload.introText;
   recordRoomPosting(item);
   compactPostedCandidate(item, data.history);
-  const result = saveData();
+  const result = saveData(data, { render: false });
   if (!result.ok) return;
-  showTab("history");
-  toast("投稿履歴に記録しました。");
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { saved = null; }
+  const savedHistory = saved?.history?.find((entry) => String(entry.itemCode || entry.product?.itemCode || "").trim() === itemCode);
+  if (!savedHistory?.postedAt) {
+    toast("履歴保存を確認できません。投稿結果不明として再投稿せず停止してください。");
+    return;
+  }
+  renderAll();
+  toast("ROOM投稿成功を確認した内容を履歴へ記録しました。");
+  if (activeRoomPostQueue?.mode === "continuous") {
+    void startNextCandidate(item.id, activeRoomPostQueue.mode);
+  } else {
+    showTab("history");
+  }
 }
 
 function generateCandidatePrompt(id) {
@@ -5045,7 +4862,7 @@ function buildCodexPostInstructions(candidate, { mode = "confirmation" } = {}) {
     "7. itemCode完全一致の商品だけに保存されたことを確認する",
     "8. アプリ自身が紹介文・ハッシュタグを解析し、localStorageへ保存したことを確認する",
     "9. 一致しない、複数一致、解析失敗、500文字超過、保存後の値不一致の場合は状態をエラーにして停止する",
-    "10. 正常時だけpostStatusが確認待ちになったことを確認する",
+    `10. 正常時に候補のpostStatusが${mode === "continuous" ? "Codex処理中" : "確認待ち"}で、候補ID・itemCode・紹介文・タグが保存済みであることを確認する`,
     "11. 投稿キューの対象カードにある「楽天商品ページを開く」ボタンを通常のChrome操作で押す（itemCodeを保持する）",
     "12. 開いた楽天商品ページの商品名・ショップ名などが対象商品と一致することを確認する。不一致ならROOM操作へ進まず停止する",
     "13. 商品ページ上の「ROOMに投稿」リンクを通常のChrome操作で認識する（aria-label、リンク文字、role=link、アクセシビリティ上の操作可能リンクの順）",
@@ -5078,7 +4895,8 @@ function buildCodexPostInstructions(candidate, { mode = "confirmation" } = {}) {
         "23. 利用者が先に完了した場合は追加クリックせず、ROOMの投稿完了を確認する",
         "24. 利用者が先に完了していない場合、60秒後にROOM投稿画面、対象商品、#collect-content、紹介文・ハッシュタグ、500文字以内、操作可能な完了ボタン、エラーなしを画面上だけで再確認する。この再確認は利用者への確認・承認要求ではない",
         "25. 画面上の再確認がすべて正常な場合は追加質問なしで、そのまま実在するROOMの「完了」ボタンを通常のGoogle Chrome操作で1回クリックする。JavaScript疑似クリック、URL推測、投稿URL生成は使用しない",
-        "26. 60秒後の再確認で異常がある場合はクリックせず停止し、ROOM投稿完了確認前に投稿済み記録へ進まない"
+        "26. 60秒後の再確認で異常がある場合はクリックせず停止し、ROOM投稿完了確認前に投稿済み記録へ進まない",
+        "27. ROOM側の投稿成功を確認後、アプリの同じ候補カードにある『投稿済みにする』を1回押して履歴保存を確認する。連続キューがある場合、保存成功後にアプリが次の商品へ進むため、別の候補を手動で選ばない"
       ]),
     "",
     "【紹介文条件】",
@@ -5102,7 +4920,7 @@ function buildCodexPostInstructions(candidate, { mode = "confirmation" } = {}) {
   ].join("\n");
 }
 
-async function startCodexPost(id, mode = "confirmation", expectedItemCode = "") {
+async function startCodexPost(id, mode = "continuous", expectedItemCode = "") {
   const matches = data.candidates.filter((item) => item.id === id);
   if (matches.length !== 1) {
     toast("候補IDから商品を一意に特定できないため投稿を開始しません。");
@@ -5110,12 +4928,16 @@ async function startCodexPost(id, mode = "confirmation", expectedItemCode = "") 
   }
   const candidate = matches[0];
   if (!candidate) return false;
+  if (!isRoomCandidate(candidate)) {
+    toast("ROOM投稿対象ではない候補のため開始しません。");
+    return false;
+  }
   const itemCode = String(candidate.itemCode || candidate.product?.itemCode || "").trim();
   if (expectedItemCode && itemCode !== String(expectedItemCode).trim()) {
     toast("候補IDとitemCodeが一致しないため投稿を開始しません。");
     return false;
   }
-  const postMode = window.RoomProcessingState.normalizePostMode(mode);
+  const postMode = normalizeRoomPostMode(mode);
   if (postMode === "continuous" && activeRoomPostQueue?.mode !== "continuous") {
     const displayedCandidate = getDisplayedRoomCandidates().find((item) => item.id === id);
     if (!displayedCandidate) {
@@ -5144,10 +4966,6 @@ async function startCodexPost(id, mode = "confirmation", expectedItemCode = "") 
   const active = getProcessingBlocker(id);
   if (active) {
     toast(getRoomProcessingStopMessage(active));
-    return false;
-  }
-  if (data.pendingRoomPost) {
-    toast(getPendingRoomPostStopMessage());
     return false;
   }
   if (["Codex処理中", "確認待ち", "投稿済み", "スキップ"].includes(candidate.postStatus)) {
@@ -5195,20 +5013,12 @@ async function startCodexPost(id, mode = "confirmation", expectedItemCode = "") 
   }
   activeRoomPostMode = postMode;
   const instructions = buildCodexPostInstructions(candidate, { mode: postMode });
-  data.pendingRoomPost = {
-    candidateId: candidate.id,
-    itemCode,
-    title: candidate.title || candidate.product?.itemName || "",
-    introText: candidate.introText,
-    originalPhoto: normalizeOriginalPhoto(candidate.originalPhoto),
-    startedAt: new Date().toISOString()
-  };
   candidate.introPrompt = instructions;
   candidate.postStatus = postMode === "confirmation" ? "確認待ち" : "Codex処理中";
   candidate.status = "投稿待ち";
   const pendingSave = saveData();
   if (!pendingSave.ok) {
-    toast("投稿対象のpending情報を保存できなかったため開始しません。");
+    toast("投稿指示と候補状態を保存できなかったため開始しません。");
     return false;
   }
   const copied = await copyText(instructions, { silent: true });
@@ -5286,16 +5096,7 @@ function prepareCandidatePost(id) {
   ].join("\n");
   candidate.introText = candidate.introText.trim();
   saveData();
-  data.pendingRoomPost = {
-    candidateId: candidate.id,
-    itemCode: candidate.itemCode || candidate.product?.itemCode || "",
-    title: candidate.title || candidate.product?.itemName || "",
-    introText: candidate.introText.trim(),
-    originalPhoto: normalizeOriginalPhoto(candidate.originalPhoto),
-    startedAt: new Date().toISOString()
-  };
-  candidate.postStatus = "確認待ち";
-  candidate.status = "投稿待ち";
+  candidate.introPrompt = instructions;
   saveData();
   copyText(instructions);
   window.open(itemUrl, "_blank", "noopener,noreferrer");
@@ -5303,11 +5104,6 @@ function prepareCandidatePost(id) {
 }
 
 function deleteCandidate(id) {
-  const candidate = data.candidates.find((item) => item.id === id);
-  if (candidate && window.RoomProcessingState.isPendingAssociatedWithCandidate(candidate, data.pendingRoomPost)) {
-    toast("この候補はpendingRoomPostに紐付いているため削除できません。ROOM状態を照合して先に解消してください。");
-    return;
-  }
   data.candidates = data.candidates.filter((item) => item.id !== id);
   saveData();
 }

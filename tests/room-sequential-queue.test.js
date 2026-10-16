@@ -33,12 +33,7 @@ assert.strictEqual(queueApi.resolveRoomQueueCandidate(sortedSnapshot.entries[1],
 const filteredSnapshot = queueApi.buildRoomSequentialQueue([third], 1);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(filteredSnapshot.entries.map((entry) => entry.candidateId))), ["id-third"]);
 
-// 4: unresolved pending state blocks advancement.
-const pendingBlocked = queueApi.advanceRoomSequentialQueue(snapshot.entries, 0, first.id, [first, second, third], { candidateId: first.id, itemCode: "shop:first" });
-assert.strictEqual(pendingBlocked.ok, false);
-assert.match(pendingBlocked.error, /pendingRoomPost/);
-
-// 5: ID or itemCode mismatch stops; it never selects a different product by position.
+// 4: ID or itemCode mismatch stops; it never selects a different product by position.
 assert.strictEqual(queueApi.resolveRoomQueueCandidate(snapshot.entries[1], [candidate("id-second", "shop:wrong")]).ok, false);
 assert.strictEqual(queueApi.advanceRoomSequentialQueue(snapshot.entries, 0, "id-second", [first, second, third]).ok, false);
 
@@ -51,8 +46,6 @@ const afterTwo = queueApi.advanceRoomSequentialQueue(twoItems.entries, 1, "two",
 assert.strictEqual(afterTwo.done, true);
 assert.strictEqual(twoItems.entries.length, 2);
 
-// Pending linkage must correspond to the same candidate and exact itemCode.
-assert.strictEqual(queueApi.advanceRoomSequentialQueue(twoItems.entries, 0, "one", [candidate("one", "shop:one", "投稿済み"), candidate("two", "shop:two")], { candidateId: "one", itemCode: "shop:wrong" }).ok, false);
 assert.strictEqual(queueApi.buildRoomSequentialQueue([candidate("a", "shop:duplicate"), candidate("b", "shop:duplicate")], 2).ok, false);
 
 // 7: a requested limit is a hard boundary even when hundreds of candidates exist.

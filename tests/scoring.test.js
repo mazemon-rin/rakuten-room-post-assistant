@@ -5,7 +5,7 @@ const source = fs.readFileSync(path.join(__dirname, "..", "script.js"), "utf8");
 
 const identitySource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "product-identity.js"), "utf8");
 const duplicateSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "duplicate-detection.js"), "utf8");
-const roomProcessingStateSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "room-processing-state.js"), "utf8");
+const roomSequentialQueueSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "room-sequential-queue.js"), "utf8");
 const discountRulesSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "discount-rules.js"), "utf8");
 const utilsSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "utils.js"), "utf8");
 const affiliateSalesSource = fs.readFileSync(path.join(__dirname, "..", "src", "core", "affiliate-sales.js"), "utf8");
@@ -40,14 +40,14 @@ const context = {
 };
 context.window = context;
 vm.createContext(context);
-vm.runInContext(roomProcessingStateSource, context);
+vm.runInContext(roomSequentialQueueSource, context);
 vm.runInContext(discountRulesSource, context);
 vm.runInContext(utilsSource, context);
 vm.runInContext(affiliateSalesSource, context);
 vm.runInContext(productNormalizationSource, context);
 vm.runInContext(rankingRulesSource, context);
 vm.runInContext(trendRulesSource, context);
- vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, completePendingRoomPost, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, validateGeneratedCopy, buildLightweightPostedProduct, getCandidateProductForDisplay, candidateCard, data, ROOM_COPY_HOOKS, cleanRoomProductTitle, extractVerifiedRoomFeatures, buildRoomIntroVariants, chooseRoomIntroVariant, getSafeRoomCopyTags, prepareRoomCopyForPosting, openDetail, generatePrompt, generateRoomCopy, selectRoomCopyVariant, saveRoomCopyDraft, startCodexPost, getCurrentData: () => data, reloadData: () => { data = loadData(); return data; } };`, context);
+ vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, normalizeSnsRecords, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, getItemCodes, resetCodexCandidateAfterFailure, validateGeneratedCopy, buildLightweightPostedProduct, getCandidateProductForDisplay, candidateCard, data, ROOM_COPY_HOOKS, cleanRoomProductTitle, extractVerifiedRoomFeatures, buildRoomIntroVariants, chooseRoomIntroVariant, getSafeRoomCopyTags, prepareRoomCopyForPosting, openDetail, generatePrompt, generateRoomCopy, selectRoomCopyVariant, saveRoomCopyDraft, startCodexPost, getCurrentData: () => data, reloadData: () => { data = loadData(); return data; } };`, context);
 vm.runInContext("this.__roomPostTest = { cleanRoomCopySource, buildRoomIntroVariants, buildCodexPostInstructions };", context);
 
 const scoring = context.__scoring;
@@ -771,7 +771,6 @@ roomCopyElements["#emoji"].value = "あり";
 const roomCopyData = scoring.getCurrentData();
 roomCopyData.candidates = [];
 roomCopyData.history = [];
-roomCopyData.pendingRoomPost = null;
 const roomCopyProduct = {
   itemCode: "hook-test:umbrella-1",
   itemName: "折りたたみ傘 UVカット 軽量",
@@ -798,7 +797,7 @@ const autoHookChoices = ["0", "1", "2", "3", "4"].map((suffix) => scoring.choose
 assert(new Set(autoHookChoices).size === 5, "Room copy UX: auto mode distributes hook styles across different item identities");
 roomCopyElements["#introText"].value += "編集済み。";
 assert(scoring.saveRoomCopyDraft(), "Room copy workflow A: edited copy saves");
-assert(!roomCopyElements["#startRoomPostFromDetail"].disabled && !scoring.getCurrentData().pendingRoomPost, "Room copy workflow A2: successful save enables a separate post action without starting it");
+assert(!roomCopyElements["#startRoomPostFromDetail"].disabled && !Object.hasOwn(scoring.getCurrentData(), "pendingRoomPost"), "Room copy workflow A2: successful save enables a separate post action without creating pending state");
 let savedRoomCopy = scoring.getCurrentData().candidates.find((candidate) => candidate.itemCode === roomCopyProduct.itemCode);
 assert(savedRoomCopy && savedRoomCopy.introText.endsWith("編集済み。") && savedRoomCopy.hashTags && savedRoomCopy.product.itemCode === roomCopyProduct.itemCode, "Room copy workflow B: exact itemCode, edited intro, tags, and product are saved together");
 assert(`${savedRoomCopy.introText}\n${savedRoomCopy.hashTags}`.length <= 500, "Room copy workflow C: combined ROOM text stays within 500 characters");
@@ -821,10 +820,10 @@ scoring.generateRoomCopy("auto");
 const preparedOnlyIntro = roomCopyElements["#introText"].value;
 assert(preparedOnlyIntro && scoring.saveRoomCopyDraft(), "Room preparation without product-page URL A: confirmed saved fields generate and save copy");
 let savedOnlyCandidate = scoring.getCurrentData().candidates.find((candidate) => candidate.itemCode === savedOnlyProduct.itemCode);
-assert(savedOnlyCandidate?.introText === preparedOnlyIntro && !savedOnlyCandidate.itemUrl && !scoring.getCurrentData().pendingRoomPost, "Room preparation without product-page URL B: saved copy remains a draft and creates no posting action");
+assert(savedOnlyCandidate?.introText === preparedOnlyIntro && !savedOnlyCandidate.itemUrl && !Object.hasOwn(scoring.getCurrentData(), "pendingRoomPost"), "Room preparation without product-page URL B: saved copy remains a draft and creates no pending state");
 const preparedCandidateCount = scoring.getCurrentData().candidates.length;
 const preparedAfterReload = scoring.reloadData().candidates.find((candidate) => candidate.itemCode === savedOnlyProduct.itemCode);
-assert(preparedAfterReload?.introText === preparedOnlyIntro && preparedAfterReload.hashTags && !scoring.getCurrentData().pendingRoomPost && scoring.getCurrentData().candidates.length === preparedCandidateCount, "Room preparation without product-page URL C: saved copy persists after reload without posting or duplicate candidates");
+assert(preparedAfterReload?.introText === preparedOnlyIntro && preparedAfterReload.hashTags && !Object.hasOwn(scoring.getCurrentData(), "pendingRoomPost") && scoring.getCurrentData().candidates.length === preparedCandidateCount, "Room preparation without product-page URL C: saved copy persists after reload without pending or duplicate candidates");
 const sandboxProduct = {
   itemCode: "actual-product-test:001",
   itemName: "ステンレスボトル 500ml 保温保冷対応",
@@ -917,8 +916,8 @@ const roomPostPromptCandidate = {
   product: { ...babyProduct, itemUrl: "https://example.com/room-copy-confirmation", shopName: "テストショップ" }
 };
 const roomPostCard = scoring.candidateCard({ ...roomPostPromptCandidate, status: "文章作成済み", price: 1980 });
-assert(roomPostCard.includes("確認モードでROOM画面を準備") && roomPostCard.includes("連続実投稿用の指示を作成"), "ROOM post UI: confirmation and explicit continuous modes are both visible");
-const confirmationPrompt = context.__roomPostTest.buildCodexPostInstructions(roomPostPromptCandidate);
+assert(roomPostCard.includes("連続実投稿を開始") && roomPostCard.includes("確認モードで準備"), "ROOM post UI: continuous posting is primary and confirmation mode remains available");
+const confirmationPrompt = context.__roomPostTest.buildCodexPostInstructions(roomPostPromptCandidate, { mode: "confirmation" });
 const continuousPrompt = context.__roomPostTest.buildCodexPostInstructions(roomPostPromptCandidate, { mode: "continuous" });
 assert(confirmationPrompt.includes("確認モード") && confirmationPrompt.includes("ROOM投稿画面と入力済み") && confirmationPrompt.includes("「完了」はクリックしない"), "ROOM post mode: default confirmation instructions stop at the composer without publishing");
 assert(!confirmationPrompt.includes("60秒後にROOMの「完了」") && confirmationPrompt.includes("投稿済み記録を作らない"), "ROOM post mode: confirmation instructions do not schedule completion or app posting records");
@@ -971,8 +970,8 @@ context.renderAll = () => {};
 scoring.startCodexPost(blankIntroCandidate.id).then(() => {
   const savedBlankIntro = scoring.getCurrentData().candidates.find((candidate) => candidate.id === blankIntroCandidate.id);
   assert(savedBlankIntro.introText && savedBlankIntro.hashTags, "Room post flow: missing intro and tags are generated and saved");
-  assert(scoring.getCurrentData().pendingRoomPost?.candidateId === blankIntroCandidate.id, "Room post flow: successful copy preparation continues directly to the selected posting mode");
-  assert(scoring.getCurrentData().pendingRoomPost.itemCode === blankIntroCandidate.itemCode, "Room post flow: generated copy remains linked to the exact itemCode");
+  assert(!Object.hasOwn(scoring.getCurrentData(), "pendingRoomPost"), "Room post flow: instruction creation does not create pending state");
+  assert(savedBlankIntro.postStatus === "Codex処理中", "Room post flow: continuous mode remains visible in the candidate status");
   assert(`${savedBlankIntro.introText}\n${savedBlankIntro.hashTags}`.length <= 500, "Room post flow: generated copy remains within the combined 500-character limit");
   context.localStorage.value = previousStoredJson;
   scoring.reloadData();

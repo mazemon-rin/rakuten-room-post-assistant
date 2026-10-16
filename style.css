@@ -180,38 +180,6 @@ h1 {
   text-align: right;
 }
 
-.room-processing-diagnostics:not([hidden]) {
-  width: 100%;
-  margin-top: 12px;
-  padding: 14px;
-  border: 1px solid #d9a05d;
-  border-radius: 10px;
-  background: #fff8ed;
-}
-
-.room-processing-issue {
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid #e7d7c2;
-  border-radius: 8px;
-  background: #fffdf9;
-}
-
-.room-processing-issue dl {
-  display: grid;
-  grid-template-columns: minmax(150px, 220px) 1fr;
-  gap: 6px 12px;
-  overflow-wrap: anywhere;
-}
-
-.room-processing-issue dt { font-weight: 700; }
-.room-processing-issue dd { margin: 0; }
-
-@media (max-width: 600px) {
-  .room-processing-issue dl { grid-template-columns: 1fr; gap: 2px; }
-  .room-processing-issue dd { margin-bottom: 8px; }
-}
-
 @media (max-width: 720px) {
   .queue-control-panel {
     align-items: stretch;

@@ -157,10 +157,9 @@
         <label for="sequential-processing-count">今回処理する件数
           <input id="sequential-processing-count" type="number" min="1" step="1" value="1" inputmode="numeric">
         </label>
-        <button id="start-sequential-processing" class="primary-button" type="button">確認モードで次の候補を準備</button>
-        <button id="start-sequential-posting" class="secondary-button" type="button">連続実投稿モードで開始</button>
+        <button id="start-sequential-posting" class="primary-button" type="button">連続実投稿を開始</button>
+        <button id="start-sequential-processing" class="secondary-button" type="button">確認モードで準備</button>
         <p id="queue-progress" class="queue-progress" role="status" aria-live="polite"></p>
-        <section id="room-processing-diagnostics" class="room-processing-diagnostics" aria-live="polite" hidden></section>
       </div>
       <section class="panel collection-panel">
         <h3>コレクション管理</h3>
@@ -480,7 +479,6 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="src/core/product-identity.js"></script>
   <script src="src/core/duplicate-detection.js"></script>
-  <script src="src/core/room-processing-state.js"></script>
   <script src="src/core/room-sequential-queue.js"></script>
   <script src="src/core/discount-rules.js"></script>
   <script src="src/core/utils.js"></script>

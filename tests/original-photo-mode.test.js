@@ -20,9 +20,9 @@ assert.match(source, /前のページへ戻らず、別ページへ移動せず�
 assert.match(source, /利用者が先に完了した場合は追加クリックせず/);
 assert.match(source, /そのまま実在するROOMの「完了」ボタンを通常のGoogle Chrome操作で1回クリックする/);
 assert.match(source, /再確認で異常がある場合はクリックせず停止/);
-assert.match(source, /ROOM投稿完了をアプリへ記録しました/);
+assert.match(source, /ROOM投稿成功を確認した内容を履歴へ記録しました/);
 assert.match(source, /originalPhoto: normalizeOriginalPhoto\(candidate\.originalPhoto\)/);
-assert.match(source, /data\.pendingRoomPost = \{[\s\S]*?originalPhoto: normalizeOriginalPhoto\(candidate\.originalPhoto\)/);
+assert.doesNotMatch(source, /data\.pendingRoomPost|completePendingRoomPost/);
 assert.ok(!source.includes("originalPhoto.enabled === true) {\n    document"));
 
 console.log("original photo mode regression cases: passed");

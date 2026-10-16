@@ -37,7 +37,7 @@
     return { ok: true, candidate };
   }
 
-  function advanceRoomSequentialQueue(queue, currentIndex, currentCandidateId, candidates = [], pending = null) {
+  function advanceRoomSequentialQueue(queue, currentIndex, currentCandidateId, candidates = []) {
     const currentEntry = queue?.[currentIndex];
     if (!currentEntry || currentEntry.candidateId !== currentCandidateId) {
       return { ok: false, error: "現在の商品が連続キューの対象と一致しません。" };
@@ -47,8 +47,6 @@
     if (currentResult.candidate.postStatus !== "投稿済み") {
       return { ok: false, error: "現在の商品が投稿済みと確認できないため次へ進みません。" };
     }
-    if (pending) return { ok: false, error: "pendingRoomPostが残っているため次へ進みません。" };
-
     const nextIndex = currentIndex + 1;
     if (nextIndex >= queue.length) return { ok: true, done: true, nextIndex };
     const nextEntry = queue[nextIndex];
