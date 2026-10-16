@@ -630,6 +630,7 @@ function bindForms() {
   on("#refresh-latest-app", "click", reloadLatestAppWithoutClearingData);
   on("#end-stale-queue", "click", endStaleRoomQueue);
   on("#stop-room-queue-only", "click", stopRoomQueueOnly);
+  on("#delete-room-queue-only", "click", deleteRoomQueueMetadataOnly);
 }
 
 function reloadLatestAppWithoutClearingData() {
@@ -803,6 +804,45 @@ function stopRoomQueueOnly() {
   activeRoomPostQueue = null;
   renderAll();
   toast("保存キューの進行だけを終了しました。次候補へは進まず、ROOM操作終了・候補・紹介文・履歴・確認待ちは変更していません。");
+  return true;
+}
+
+function deleteRoomQueueMetadataOnly() {
+  const queue = data.roomPostQueue;
+  if (!queue || typeof queue !== "object" || Array.isArray(queue)) {
+    toast("削除できる保存キュー管理データがありません。変更していません。");
+    return false;
+  }
+  if (activeRoomPostQueue || data.candidates.some((item) =>
+    item.roomAttempt?.status === roomAttemptApi.STATUS.PROCESSING)) {
+    toast("実行中のROOMキューまたは処理中のROOM試行があるため削除しません。候補・履歴・roomAttemptは変更していません。");
+    return false;
+  }
+  if (!$("#delete-room-queue-confirmed")?.checked) {
+    toast("別タブを含むROOM操作の非実行を確認してからチェックしてください。変更していません。");
+    return false;
+  }
+
+  const originalCandidates = JSON.stringify(data.candidates);
+  const originalHistory = JSON.stringify(data.history);
+  const originalAttempts = JSON.stringify(data.candidates.map((item) => item.roomAttempt));
+  const nextData = structuredClone(data);
+  delete nextData.roomPostQueue;
+  const saved = saveData(nextData, { render: false });
+  if (!saved.ok) return false;
+
+  let persisted;
+  try { persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { persisted = null; }
+  if (!persisted || Object.hasOwn(persisted, "roomPostQueue")
+      || JSON.stringify(persisted.candidates) !== originalCandidates
+      || JSON.stringify(persisted.history) !== originalHistory
+      || JSON.stringify(persisted.candidates.map((item) => item.roomAttempt)) !== originalAttempts) {
+    toast("キュー管理データだけの削除を保存後に確認できません。追加操作を停止しました。");
+    return false;
+  }
+  activeRoomPostQueue = null;
+  renderAll();
+  toast("旧キュー管理データだけを削除しました。候補・紹介文・投稿履歴・roomAttempt・確認待ちは保持されています。");
   return true;
 }
 

@@ -768,5 +768,59 @@ run("data = loadData();");
     "a live runtime queue prevents queue-only stop even when the candidate has no roomAttempt");
   assert.strictEqual(run("data.roomPostQueue.status"), "active");
 
+  // Dedicated cleanup removes only saved queue metadata. Candidate, copy,
+  // history, and ROOM attempts (including result-wait) remain unchanged.
+  const cleanupQueue = run("RoomCodexBridge.createQueue([{ candidateId: 'legacy-no-attempt', itemCode: 'shop:legacy-no-attempt' }], 1, '2026-10-16T00:00:00.000Z', 'metadata-only-cleanup').queue");
+  context.localStorage.value = JSON.stringify({ settings: { keep: true }, candidates: [legacyNoAttempt, waitingDevirock],
+    history: historyBeforeStop, roomPostQueue: cleanupQueue });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  context.uiNodes = { "#delete-room-queue-confirmed": { checked: false } };
+  assert.strictEqual(run("deleteRoomQueueMetadataOnly()"), false,
+    "queue metadata cleanup requires explicit UI confirmation");
+  assert.strictEqual(Object.hasOwn(JSON.parse(context.localStorage.value), "roomPostQueue"), true);
+  context.uiNodes["#delete-room-queue-confirmed"].checked = true;
+  const preservedCandidates = JSON.stringify(run("data.candidates"));
+  const preservedHistory = JSON.stringify(run("data.history"));
+  const preservedAttempts = JSON.stringify(run("data.candidates.map((item) => item.roomAttempt)"));
+  assert.strictEqual(run("deleteRoomQueueMetadataOnly()"), true,
+    "confirmed cleanup removes only queue metadata when no ROOM operation is active");
+  const cleanedData = JSON.parse(context.localStorage.value);
+  assert.strictEqual(Object.hasOwn(cleanedData, "roomPostQueue"), false);
+  assert.strictEqual(JSON.stringify(cleanedData.candidates), preservedCandidates);
+  assert.strictEqual(JSON.stringify(cleanedData.history), preservedHistory);
+  assert.strictEqual(JSON.stringify(cleanedData.candidates.map((item) => item.roomAttempt)), preservedAttempts);
+  assert.strictEqual(cleanedData.candidates.find((item) => item.id === "devirock").roomAttempt.status, "result_check_required",
+    "result-confirmation wait remains unchanged");
+
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [{ ...legacyNoAttempt,
+    roomAttempt: { status: "processing", candidateId: legacyNoAttempt.id, itemCode: legacyNoAttempt.itemCode } }],
+    history: [], roomPostQueue: cleanupQueue });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  context.uiNodes["#delete-room-queue-confirmed"].checked = true;
+  const savedDuringAttempt = context.localStorage.value;
+  assert.strictEqual(run("deleteRoomQueueMetadataOnly()"), false,
+    "a persisted processing ROOM attempt blocks queue metadata deletion");
+  assert.strictEqual(context.localStorage.value, savedDuringAttempt,
+    "blocked cleanup leaves persisted data untouched");
+
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [legacyNoAttempt], history: [], roomPostQueue: cleanupQueue });
+  run("data = loadData(); activeRoomPostQueue = { entries: [], currentIndex: 0, mode: 'continuous' };");
+  const savedWithRuntimeQueue = context.localStorage.value;
+  assert.strictEqual(run("deleteRoomQueueMetadataOnly()"), false,
+    "a live in-memory ROOM queue blocks metadata deletion");
+  assert.strictEqual(context.localStorage.value, savedWithRuntimeQueue);
+  run("activeRoomPostQueue = null;");
+
+  context.localStorage.value = JSON.stringify({ settings: {}, candidates: [legacyNoAttempt], history: [], roomPostQueue: cleanupQueue });
+  run("data = loadData(); activeRoomPostQueue = null;");
+  context.uiNodes["#delete-room-queue-confirmed"].checked = true;
+  const savedBeforeMetadataDeleteFailure = context.localStorage.value;
+  context.localStorage.fail = true;
+  assert.strictEqual(run("deleteRoomQueueMetadataOnly()"), false,
+    "failed persistence rejects queue metadata deletion");
+  assert.strictEqual(context.localStorage.value, savedBeforeMetadataDeleteFailure,
+    "failed persistence leaves the old queue and protected records untouched");
+  context.localStorage.fail = false;
+
   console.log("ROOM attempt integration, bounded queue, reload recovery, legacy protection and failed-save safety: passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

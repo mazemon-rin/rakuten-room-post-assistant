@@ -94,6 +94,19 @@ if (!html.includes('id="stop-room-queue-only"') || !html.includes('キューを�
     || !script.includes('on("#stop-room-queue-only", "click", stopRoomQueueOnly)')) {
   throw new Error("a dedicated queue-only stop action must be available without advancing or changing candidate state");
 }
+if (!html.includes('id="delete-room-queue-only"') || !html.includes('id="delete-room-queue-confirmed"')
+    || !html.includes('旧キュー管理データだけ削除') || !script.includes('function deleteRoomQueueMetadataOnly()')
+    || !script.includes('on("#delete-room-queue-only", "click", deleteRoomQueueMetadataOnly)')) {
+  throw new Error("a dedicated, confirmed queue-metadata-only deletion action must be available");
+}
+const queueMetadataDeleteSource = script.slice(script.indexOf("function deleteRoomQueueMetadataOnly()"), script.indexOf("function resetRoomCandidates()"));
+if (!queueMetadataDeleteSource.includes("activeRoomPostQueue")
+    || !queueMetadataDeleteSource.includes("roomAttemptApi.STATUS.PROCESSING")
+    || !queueMetadataDeleteSource.includes("delete nextData.roomPostQueue")
+    || !queueMetadataDeleteSource.includes("JSON.stringify(persisted.candidates) !== originalCandidates")
+    || !queueMetadataDeleteSource.includes("JSON.stringify(persisted.history) !== originalHistory")) {
+  throw new Error("queue-metadata deletion must reject active ROOM work and verify candidate/history preservation");
+}
 const queueOnlyStopSource = script.slice(script.indexOf("function stopRoomQueueOnly()"), script.indexOf("function resetRoomCandidates()"));
 if (queueOnlyStopSource.includes("startNextCandidate(") || queueOnlyStopSource.includes("confirmRoomOperationClosed(")
     || queueOnlyStopSource.includes("roomAttempt =") || queueOnlyStopSource.includes("postStatus =")
@@ -101,7 +114,7 @@ if (queueOnlyStopSource.includes("startNextCandidate(") || queueOnlyStopSource.i
   throw new Error("queue-only stop must not start a next item, confirm ROOM closure, or mutate candidate/history state");
 }
 if (!html.includes('src/core/room-sequential-queue.js?v=room-2.7.1.4-queue-progress-separated-result-20261016')
-    || !html.includes('script.js?v=dynamic-room-step-20261016')) throw new Error("queue and ROOM-copy assets must use their expected cache identifiers");
+    || !html.includes('script.js?v=queue-metadata-cleanup-20261016')) throw new Error("queue and ROOM-copy assets must use their expected cache identifiers");
 if (!script.includes('function getPostableRoomCandidates()')
     || !script.includes('updateCandidateViewCounts(postableCandidates)')
     || !script.includes('getDisplayedRoomCandidates(postableCandidates)')
