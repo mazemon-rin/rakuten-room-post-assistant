@@ -31,7 +31,7 @@ const context = {
   crypto: { randomUUID: () => "test-uuid" },
   setTimeout,
   clearTimeout,
-  document: { addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, createElement() { return { innerHTML: "", textContent: "" }; } },
+  document: { addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, getElementById() { return null; }, createElement() { return { innerHTML: "", textContent: "" }; } },
   localStorage: { value: null, fail: false, getItem() { return this.value; }, setItem(key, value) { if (this.fail) { const error = new Error("quota"); error.name = "QuotaExceededError"; throw error; } this.value = value; } },
   fetch: async () => { throw new Error("fetch is not used in scoring tests"); },
   TextEncoder,
@@ -46,7 +46,7 @@ vm.runInContext(affiliateSalesSource, context);
 vm.runInContext(productNormalizationSource, context);
 vm.runInContext(rankingRulesSource, context);
 vm.runInContext(trendRulesSource, context);
-vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, canRecordRoomPosting, saveRoomPostingAndRemoveCandidate, markPosted, completePendingRoomPost, normalizeSnsRecords, normalizeStoredData, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, isRoomResultCheckRequired, getItemCodes, resetRoomCandidateAfterPrePostFailure, canConfirmRoomPostNotSubmitted, confirmRoomPostNotSubmitted, setRoomPostNotSubmittedConfirmation, getProcessingBlocker, validateGeneratedCopy, buildLightweightPostedProduct, getCandidateProductForDisplay, candidateCard, data, ROOM_COPY_HOOKS, cleanRoomProductTitle, extractVerifiedRoomFeatures, buildRoomIntroVariants, chooseRoomIntroVariant, getSafeRoomCopyTags, openDetail, generatePrompt, generateRoomCopy, selectRoomCopyVariant, saveRoomCopyDraft, startCodexPost, startSequentialProcessing, getCurrentData: () => data, setCurrentData: (value) => { data = value; }, reloadData: () => { data = loadData(); return data; } };`, context);
+vm.runInContext(`${identitySource}\n${duplicateSource}\n${source}\nthis.__scoring = { calculateSelectionScore, calculateTrendSelectionScore, calculateTrendFitScore, calculateTrendOpportunityScore, calculateRankingScore, getSelectionTotal, trendSelectionGrade, checkProductTrust, getRankingPageForRange, getRankingPagesForRange, getRankingRange, applyOfficialRankingRank, createSnsPosts, buildSnsPrompt, buildThreadsPerformancePrompt, buildThreadsOnlyCodexInstructions, buildCombinedSnsPrompt, buildCombinedContentPrompt, buildSnsCodexInstructions, canStartSnsCodex, parseCombinedContentResult, validateCombinedSnsLinks, validateSnsPostText, parseSnsPostsResult, validateSnsPostsResult, applySnsPostsToItem, isLikelyRoomUrl, getRoomUrlNotice, findPostedHistoryRecord, createHistoryRecord, recordRoomPosting, canRecordRoomPosting, saveRoomPostingAndRemoveCandidate, markPosted, setRoomPostedConfirmation, roomPostedConfirmation, completePendingRoomPost, normalizeSnsRecords, normalizeStoredData, normalizeRakutenItems, addAffiliateIdParam, getThreadsLink, isValidAffiliateShortUrl, isThreadsOnlyItem, isRoomCandidate, createThreadsOnlyCandidate, buildQueueCandidate, buildThreadsOnlyDraft, ensureThreadsOnlyDraft, validateThreadsOnlyResult, applyThreadsOnlyResultToItem, getCouponEvidence, extractDiscountCandidate, extractDiscountLabel, extractDeadlineCandidate, extractCouponCandidates, getCouponCandidateInputValue, applyCouponEvidenceToCandidate, saveRoomDiscountEvidence, matchesCouponDiscountFilter, evaluateDealStatus, summarizeDealStatuses, prepareCouponSearchProduct, getCouponDisplayState, buildDiscountSearchTerms, buildDiscountSearchTermsForMinimum, buildDealHeader, mergeConfirmedDealHeader, getRoomDiscountPromptContext, getRoomIntroPlacementRule, buildRoomFinalDiscountHeader, finalizeRoomIntro, validateRoomPostingPayload, getImage, getPerformanceAudienceGuidance, getPerformanceAudience, getPerformanceProductFeature, findDuplicate, canSaveRoomCandidate, rankingIdentity, postedHistoryMatch, filterAvailableProducts, isVisibleRoomCandidate, isRoomResultCheckRequired, getItemCodes, resetRoomCandidateAfterPrePostFailure, canConfirmRoomPostNotSubmitted, confirmRoomPostNotSubmitted, setRoomPostNotSubmittedConfirmation, getProcessingBlocker, validateGeneratedCopy, buildLightweightPostedProduct, getCandidateProductForDisplay, candidateCard, data, ROOM_COPY_HOOKS, cleanRoomProductTitle, extractVerifiedRoomFeatures, buildRoomIntroVariants, chooseRoomIntroVariant, getSafeRoomCopyTags, openDetail, generatePrompt, generateRoomCopy, selectRoomCopyVariant, saveRoomCopyDraft, startCodexPost, startSequentialProcessing, getCurrentData: () => data, setCurrentData: (value) => { data = value; }, reloadData: () => { data = loadData(); return data; } };`, context);
 vm.runInContext("this.__roomPostTest = { cleanRoomCopySource, buildRoomIntroVariants, buildCodexPostInstructions };", context);
 
 context.__scoring.resetRoomCandidateAfterPrePostFailure = context.resetRoomCandidateAfterPrePostFailure;
@@ -767,14 +767,19 @@ const oldToast = context.toast;
 const oldShowTab = context.showTab;
 const oldSaveData = context.saveData;
 const oldRenderAll = context.renderAll;
+const oldRenderCandidates = context.renderCandidates;
+const roomConfirmationElements = new Map();
+context.document.getElementById = (id) => roomConfirmationElements.get(id) || null;
 let forceRoomSaveFailure = false;
 postingData.candidates = [yogaCandidate, yakeanuKeepCandidate, protectedDevirock];
 postingData.history = [];
 postingData.pendingRoomPost = { candidateId: protectedDevirock.id, itemCode: protectedDevirock.itemCode, title: protectedDevirock.title };
-context.confirm = () => true;
+let confirmCount = 0;
+context.confirm = () => { confirmCount += 1; return true; };
 context.toast = () => {};
 context.showTab = () => {};
 context.renderAll = () => {};
+context.renderCandidates = () => {};
 context.localStorage.value = scoring.getSerializedDataSnapshot(postingData).json;
 context.saveData = (nextData) => {
   if (forceRoomSaveFailure) return { ok: false, error: new Error("simulated save failure") };
@@ -784,10 +789,24 @@ context.saveData = (nextData) => {
   return { ok: true };
 };
 assert(scoring.canRecordRoomPosting(yogaCandidate), "ROOM completion: an unrelated, correctly bound result-check item does not block the confirmed target");
+assert(scoring.markPosted(yogaCandidate.id) === false, "ROOM completion: opening confirmation does not record before checkbox selection");
+assert(postingData.candidates.some((candidate) => candidate.id === yogaCandidate.id) && postingData.history.length === 0, "ROOM completion: unchecked confirmation leaves candidate and history unchanged");
+const postedConfirmationMarkup = scoring.candidateCard(yogaCandidate);
+assert(postedConfirmationMarkup.includes("ROOM側で「コレ！完了！」を確認しましたか？") && postedConfirmationMarkup.includes("ROOM投稿成功を確認しました") && postedConfirmationMarkup.includes("投稿済みとして記録"), "ROOM completion: card renders explicit in-app confirmation");
+assert(postedConfirmationMarkup.includes('id="room-posted-confirm-submit-cc811630-8586-4895-a8ca-0b245b777093" type="button" disabled'), "ROOM completion: record button is disabled before confirmation");
+const confirmationSubmitButton = { disabled: true };
+roomConfirmationElements.set(`room-posted-confirm-submit-${yogaCandidate.id}`, confirmationSubmitButton);
+assert(scoring.setRoomPostedConfirmation(yogaCandidate.id, true), "ROOM completion: explicit checkbox selection is accepted");
+assert(confirmationSubmitButton.disabled === false, "ROOM completion: record button becomes enabled only after the checkbox selection");
 assert(scoring.markPosted(yogaCandidate.id) === true, "ROOM completion: normal UI record action accepts the exact confirmed candidate");
+assert(confirmCount === 0, "ROOM completion: no browser-native confirmation is invoked");
 assert(!postingData.candidates.some((candidate) => candidate.id === yogaCandidate.id) && postingData.history.length === 1, "ROOM completion: successful Yoga candidate is removed in the same save that records history");
 assert(postingData.history[0].id === yogaCandidate.id && postingData.history[0].itemCode === yogaCandidate.itemCode, "ROOM completion: history preserves exact candidate ID and itemCode");
 assert(Boolean(postingData.history[0].postedAt), "ROOM completion: postedAt is saved with the history record");
+const yogaPersistedSnapshot = JSON.parse(context.localStorage.value);
+assert(!yogaPersistedSnapshot.candidates.some((candidate) => candidate.id === yogaCandidate.id) && yogaPersistedSnapshot.history.some((entry) => entry.id === yogaCandidate.id && entry.itemCode === yogaCandidate.itemCode), "ROOM completion: one persisted snapshot atomically contains history and candidate removal");
+postingData = scoring.reloadData();
+assert(!postingData.candidates.some((candidate) => candidate.id === yogaCandidate.id) && postingData.history.some((entry) => entry.id === yogaCandidate.id && entry.itemCode === yogaCandidate.itemCode), "ROOM completion: history and candidate removal survive a storage reload");
 assert(postingData.candidates.some((candidate) => candidate.id === yakeanuKeepCandidate.id && candidate.postStatus === "投稿待ち" && candidate.introText === "ヤケーヌ保存文" && candidate.hashTags === "#ヤケーヌ"), "ROOM completion: unposted Yakeanu and its copy remain in candidates");
 assert(postingData.pendingRoomPost.candidateId === protectedDevirock.id && postingData.candidates.some((candidate) => candidate.id === protectedDevirock.id && candidate.postStatus === "確認待ち"), "ROOM completion: unrelated devirock pending/result-check state remains unchanged");
 const activeOtherPending = { ...postingData.pendingRoomPost, candidateId: "unresolved-active", itemCode: "other:active" };
@@ -811,8 +830,14 @@ postingData.history = [];
 postingData.pendingRoomPost = null;
 context.localStorage.value = scoring.getSerializedDataSnapshot(postingData).json;
 forceRoomSaveFailure = true;
+scoring.roomPostedConfirmation.delete(failedRoomCandidate.id);
+assert(scoring.markPosted(failedRoomCandidate.id) === false, "ROOM completion: save-failure case first opens inline confirmation");
+const failedRoomFeedback = { textContent: "" };
+roomConfirmationElements.set(`room-posted-confirm-feedback-${failedRoomCandidate.id}`, failedRoomFeedback);
+scoring.setRoomPostedConfirmation(failedRoomCandidate.id, true);
 assert(scoring.markPosted(failedRoomCandidate.id) === false, "ROOM completion: history save failure is reported as unsuccessful");
 assert(postingData.candidates.some((candidate) => candidate.id === failedRoomCandidate.id) && postingData.history.length === 0, "ROOM completion: failed history save keeps the candidate and does not create history");
+assert(failedRoomFeedback.textContent.includes("投稿履歴を保存できなかったため、候補は削除していません"), "ROOM completion: save failure is shown in the in-app confirmation UI");
 forceRoomSaveFailure = false;
 
 const quotaFailedCandidate = { id: "room-quota-failure", itemCode: "shop:quota-failure", title: "容量エラーテスト", status: "投稿待ち", postStatus: "投稿待ち" };
@@ -821,6 +846,9 @@ postingData.history = [];
 context.localStorage.value = scoring.getSerializedDataSnapshot(postingData).json;
 context.localStorage.fail = true;
 context.saveData = oldSaveData;
+scoring.roomPostedConfirmation.delete(quotaFailedCandidate.id);
+assert(scoring.markPosted(quotaFailedCandidate.id) === false, "ROOM completion: quota-failure case first opens inline confirmation");
+scoring.setRoomPostedConfirmation(quotaFailedCandidate.id, true);
 assert(scoring.markPosted(quotaFailedCandidate.id) === false, "ROOM completion: real storage write failure stops completion");
 const quotaFailureSnapshot = JSON.parse(context.localStorage.value);
 assert(quotaFailureSnapshot.candidates.some((candidate) => candidate.id === quotaFailedCandidate.id) && quotaFailureSnapshot.history.length === 0, "ROOM completion: real storage failure leaves both the candidate and history unchanged");
@@ -834,16 +862,17 @@ context.saveData = (nextData) => {
   return { ok: true };
 };
 
-const alreadyRecordedYoga = { id: "already-recorded-yoga", itemCode: "lively777/yujiadian003", title: "Gruper ヨガマット", status: "投稿待ち", postStatus: "投稿待ち" };
-postingData.candidates = [alreadyRecordedYoga, yakeanuKeepCandidate, protectedDevirock];
-postingData.history = [{ id: alreadyRecordedYoga.id, itemCode: alreadyRecordedYoga.itemCode, title: alreadyRecordedYoga.title, postedAt: "2026-10-16T10:00:00.000Z" }];
+const alreadyRecordedMasinca = { id: "83078294-9d2e-49b7-b512-32f94e7cf7cb", itemCode: "goodlifegoooods:10000075", title: "Masinca 自転車カバー", status: "投稿待ち", postStatus: "投稿待ち" };
+postingData.candidates = [alreadyRecordedMasinca, yakeanuKeepCandidate, protectedDevirock];
+postingData.history = [{ id: alreadyRecordedMasinca.id, itemCode: alreadyRecordedMasinca.itemCode, title: alreadyRecordedMasinca.title, postedAt: "2026-10-16T10:00:00.000Z" }];
 postingData.pendingRoomPost = null;
 context.localStorage.value = scoring.getSerializedDataSnapshot(postingData).json;
-let confirmCount = 0;
-context.confirm = () => { confirmCount += 1; return true; };
-assert(scoring.markPosted(alreadyRecordedYoga.id) === true, "ROOM completion: an exactly matching existing success record can clean up the remaining candidate without reposting");
-assert(postingData.history.length === 1 && postingData.history[0].id === alreadyRecordedYoga.id && postingData.history[0].itemCode === alreadyRecordedYoga.itemCode, "ROOM completion: existing Yoga history is not duplicated or assigned another ID");
-assert(!postingData.candidates.some((candidate) => candidate.id === alreadyRecordedYoga.id) && confirmCount === 0, "ROOM completion: recorded Yoga candidate is removed without another ROOM action");
+scoring.roomPostedConfirmation.delete(alreadyRecordedMasinca.id);
+assert(scoring.markPosted(alreadyRecordedMasinca.id) === false, "ROOM completion: existing exact Masinca history still requires inline confirmation before candidate cleanup");
+scoring.setRoomPostedConfirmation(alreadyRecordedMasinca.id, true);
+assert(scoring.markPosted(alreadyRecordedMasinca.id) === true, "ROOM completion: exact existing Masinca success record can clean up the remaining candidate without reposting");
+assert(postingData.history.length === 1 && postingData.history[0].id === alreadyRecordedMasinca.id && postingData.history[0].itemCode === alreadyRecordedMasinca.itemCode, "ROOM completion: existing Masinca history is not duplicated or assigned another ID");
+assert(!postingData.candidates.some((candidate) => candidate.id === alreadyRecordedMasinca.id) && confirmCount === 0, "ROOM completion: recorded Masinca candidate is removed without another ROOM action");
 postingData.candidates = oldCandidates;
 postingData.history = oldHistory;
 postingData.pendingRoomPost = oldPending;
@@ -854,6 +883,7 @@ context.toast = oldToast;
 context.showTab = oldShowTab;
 context.saveData = oldSaveData;
 context.renderAll = oldRenderAll;
+context.renderCandidates = oldRenderCandidates;
 
 const introCandidate = {
   id: "intro-persistence-candidate",

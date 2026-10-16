@@ -350,6 +350,8 @@ function isRoomCandidate(item = {}) {
 }
 
 let data = loadData();
+// 投稿成功の確認は一時的な画面状態として保持し、保存データには含めません。
+const roomPostedConfirmation = new Map();
 let currentProduct = null;
 let currentRoomCopySession = { itemCode: "", candidateId: "", variants: [], mode: "" };
 let searchResults = [];
@@ -3086,6 +3088,12 @@ function candidateCard(item) {
           <button class="secondary-button" type="button" onclick="startCodexPost('${item.id}', 'continuous')">連続実投稿用の指示を作成</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
+          ${roomPostedConfirmation.has(item.id) ? `<div class="room-posted-confirmation">
+            <p>ROOM側で「コレ！完了！」を確認しましたか？</p>
+            <label><input type="checkbox" id="room-posted-confirm-check-${escapeAttr(item.id)}" ${roomPostedConfirmation.get(item.id) ? "checked" : ""} onchange="setRoomPostedConfirmation('${item.id}', this.checked)"> ROOM投稿成功を確認しました</label>
+            <button class="primary-button" id="room-posted-confirm-submit-${escapeAttr(item.id)}" type="button" ${roomPostedConfirmation.get(item.id) ? "" : "disabled"} onclick="markPosted('${item.id}')">投稿済みとして記録</button>
+            <p class="message" id="room-posted-confirm-feedback-${escapeAttr(item.id)}" role="status" aria-live="polite"></p>
+          </div>` : ""}
           ${data.pendingRoomPost?.candidateId === item.id ? `<div class="room-unposted-confirmation"><label><input type="checkbox" id="room-unposted-confirm-${escapeAttr(item.id)}" onchange="setRoomPostNotSubmittedConfirmation('${item.id}', this.checked)"> 未投稿を確認しました（ROOM投稿操作は開始していません）</label><button class="secondary-button" id="room-unposted-submit-${escapeAttr(item.id)}" type="button" disabled onclick="confirmRoomPostNotSubmitted('${item.id}')">確認して準備状態を解除</button><p class="message" id="room-unposted-feedback-${escapeAttr(item.id)}" role="status" aria-live="polite"></p></div>` : ""}
           ${data.pendingRoomPost?.itemCode && data.pendingRoomPost.itemCode === (item.itemCode || item.product?.itemCode || "") ? `<button class="primary-button" type="button" onclick="completePendingRoomPost()">ROOM投稿完了を記録</button>` : ""}
           ${["注意喚起候補", "要確認"].includes(trust.trustStatus) ? `<button class="secondary-button" type="button" onclick="generateWarningPrompt('${item.id}')">注意喚起文を生成</button>` : ""}
@@ -4653,29 +4661,59 @@ function completePendingRoomPost() {
   return true;
 }
 
+function setRoomPostedConfirmation(id, checked) {
+  if (!data.candidates.some((candidate) => candidate.id === id) || !roomPostedConfirmation.has(id)) return false;
+  const confirmed = Boolean(checked);
+  roomPostedConfirmation.set(id, confirmed);
+  const submit = document.getElementById(`room-posted-confirm-submit-${id}`);
+  if (submit) submit.disabled = !confirmed;
+  const feedback = document.getElementById(`room-posted-confirm-feedback-${id}`);
+  if (feedback && confirmed) feedback.textContent = "";
+  return true;
+}
+
 function markPosted(id) {
   const item = data.candidates.find((candidate) => candidate.id === id);
   if (!item) return;
+  if (!roomPostedConfirmation.has(id)) {
+    roomPostedConfirmation.set(id, false);
+    renderCandidates();
+    return false;
+  }
+  if (roomPostedConfirmation.get(id) !== true) {
+    const feedback = document.getElementById(`room-posted-confirm-feedback-${id}`);
+    if (feedback) feedback.textContent = "「ROOM投稿成功を確認しました」にチェックしてください。";
+    return false;
+  }
   const itemCode = item.itemCode || item.product?.itemCode || "";
   const pending = data.pendingRoomPost;
   if (!canRecordRoomPosting(item, pending, data.candidates)) {
-    toast("対象候補のID・itemCode、または別候補の確認待ち状態を照合できないため、投稿済みには変更しませんでした。");
+    const message = "対象候補のID・itemCode、または別候補の確認待ち状態を照合できないため、投稿済みには変更しませんでした。";
+    const feedback = document.getElementById(`room-posted-confirm-feedback-${id}`);
+    if (feedback) feedback.textContent = message;
+    else toast(message);
     return false;
   }
   const existingHistory = findAnyHistoryRecord(item);
   if (existingHistory) {
     if (existingHistory.id !== item.id || String(existingHistory.itemCode || existingHistory.product?.itemCode || "").trim() && String(existingHistory.itemCode || existingHistory.product?.itemCode || "").trim() !== String(itemCode).trim()) {
-      toast("同じ商品コードまたは候補IDの履歴が別の識別情報と結び付いています。重複登録を避けるため変更しませんでした。");
+      const message = "同じ商品コードまたは候補IDの履歴が別の識別情報と結び付いています。重複登録を避けるため変更しませんでした。";
+      const feedback = document.getElementById(`room-posted-confirm-feedback-${id}`);
+      if (feedback) feedback.textContent = message;
+      else toast(message);
       return false;
     }
-  } else if (!window.confirm(`ROOM側で「コレ！完了」と投稿成功を確認しましたか？\n\n${item.title || item.product?.itemName || "商品"}\n${itemCode}\n\n成功を確認した場合だけ履歴を記録し、候補一覧から取り除きます。`)) {
-    return false;
   }
   const result = saveRoomPostingAndRemoveCandidate(id);
   if (!result.ok) {
-    toast(`投稿履歴を保存できなかったため、候補は削除していません。${result.error}`);
+    renderCandidates();
+    const feedback = document.getElementById(`room-posted-confirm-feedback-${id}`);
+    const message = `投稿履歴を保存できなかったため、候補は削除していません。${result.error}`;
+    if (feedback) feedback.textContent = message;
+    else toast(message);
     return false;
   }
+  roomPostedConfirmation.delete(id);
   showTab("history");
   toast("投稿履歴を保存し、候補一覧から取り除きました。");
   return true;

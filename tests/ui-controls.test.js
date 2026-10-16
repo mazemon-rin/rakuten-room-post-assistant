@@ -5,7 +5,7 @@ const discovery = fs.readFileSync("src/sns-trend-discovery.js", "utf8");
 const css = fs.readFileSync("src/sns-trend.css", "utf8");
 const appCss = fs.readFileSync("style.css", "utf8");
 
-if (!html.includes('script.js?v=room-unposted-reset-20261017-r1')) throw new Error("Main script cache identifier must be updated for the current release source");
+if (!html.includes('script.js?v=room-posted-confirm-20261017-r1')) throw new Error("Main script cache identifier must be updated for the current release source");
 
 if (!html.includes('id="clearSearchConditions"') || !html.includes('id="clearSearchConditions" class="secondary-button" type="button">クリア')) {
   throw new Error("search clear button is missing or mislabeled");
@@ -39,6 +39,13 @@ if (!unpostedResetHandler.includes('保存に失敗しました。投稿準備�
 if (!script.includes('candidate.postStatus === "確認待ち" || isRoomResultCheckRequired(candidate)') || !script.includes('candidate.postStatus = "投稿待ち";')) throw new Error("Pre-post errors must return to unposted without clearing an uncertain result");
 if (!script.includes('const candidates = normalizeSnsRecords') || !script.includes('candidate.postStatus === "Codex処理中") {') || !script.includes('candidate.postStatus = "確認待ち"')) throw new Error("Legacy processing state must migrate conservatively to result confirmation");
 if (!script.includes('ROOM側で「コレ！完了」と投稿成功を確認しましたか？')) throw new Error("Posting history requires explicit ROOM success confirmation");
+const markPostedStart = script.indexOf("function markPosted(id) {");
+const markPostedEnd = script.indexOf("\nfunction generateCandidatePrompt", markPostedStart);
+const markPostedHandler = script.slice(markPostedStart, markPostedEnd);
+if (markPostedStart < 0 || markPostedEnd < 0 || /window\.(confirm|alert)\s*\(/.test(markPostedHandler)) throw new Error("ROOM posted-record flow must not invoke browser-native dialogs");
+if (!script.includes('class="room-posted-confirmation"') || !script.includes('ROOM投稿成功を確認しました') || !script.includes('投稿済みとして記録') || !script.includes('type="button" ${roomPostedConfirmation.get(item.id) ? "" : "disabled"}')) throw new Error("ROOM success confirmation UI must require an explicit checked state");
+if (!script.includes('function setRoomPostedConfirmation(id, checked)') || !script.includes('aria-live="polite"')) throw new Error("ROOM success confirmation must be accessible and inline");
+if (!markPostedHandler.includes('saveRoomPostingAndRemoveCandidate(id)') || !markPostedHandler.includes('roomPostedConfirmation.get(id) !== true')) throw new Error("ROOM success record must use the existing atomic save only after explicit confirmation");
 if (!script.includes('function saveRoomPostingAndRemoveCandidate') || !script.includes('nextData.candidates = nextData.candidates.filter((entry) => entry.id !== candidateId)')) throw new Error("ROOM success must save history and remove only the exact candidate in one data transaction");
 if (!script.includes('if (isRoomCopySandboxMode()) {\n    return { ok: false') || !script.includes('テスト文面を隔離保存')) throw new Error("Sandbox mode does not block normal data writes or expose isolated save UI");
 if (!script.includes('document.body.classList.add("room-copy-sandbox-mode")') || script.includes("document.body.innerHTML = `")) throw new Error("Sandbox mode must preserve the normal app DOM");
