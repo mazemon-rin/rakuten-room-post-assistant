@@ -3086,7 +3086,7 @@ function candidateCard(item) {
           <button class="secondary-button" type="button" onclick="startCodexPost('${item.id}', 'continuous')">連続実投稿用の指示を作成</button>
           <button class="secondary-button" type="button" onclick="setPostStatus('${item.id}', '確認待ち')">確認待ちにする</button>
           <button class="secondary-button" type="button" onclick="markPosted('${item.id}')">投稿済みにする</button>
-          ${data.pendingRoomPost?.candidateId === item.id ? `<button class="secondary-button" type="button" onclick="confirmRoomPostNotSubmitted('${item.id}')">未投稿を確認して投稿待ちに戻す</button>` : ""}
+          ${data.pendingRoomPost?.candidateId === item.id ? `<div class="room-unposted-confirmation"><label><input type="checkbox" id="room-unposted-confirm-${escapeAttr(item.id)}" onchange="setRoomPostNotSubmittedConfirmation('${item.id}', this.checked)"> 未投稿を確認しました（ROOM投稿操作は開始していません）</label><button class="secondary-button" id="room-unposted-submit-${escapeAttr(item.id)}" type="button" disabled onclick="confirmRoomPostNotSubmitted('${item.id}')">確認して準備状態を解除</button><p class="message" id="room-unposted-feedback-${escapeAttr(item.id)}" role="status" aria-live="polite"></p></div>` : ""}
           ${data.pendingRoomPost?.itemCode && data.pendingRoomPost.itemCode === (item.itemCode || item.product?.itemCode || "") ? `<button class="primary-button" type="button" onclick="completePendingRoomPost()">ROOM投稿完了を記録</button>` : ""}
           ${["注意喚起候補", "要確認"].includes(trust.trustStatus) ? `<button class="secondary-button" type="button" onclick="generateWarningPrompt('${item.id}')">注意喚起文を生成</button>` : ""}
           ${item.postStatus === "投稿済み" ? `<button class="secondary-button" type="button" onclick="startNextCandidate('${item.id}')">次の商品を処理</button>` : ""}
@@ -3998,34 +3998,66 @@ function canConfirmRoomPostNotSubmitted(candidate, pending = data.pendingRoomPos
   ));
 }
 
+function setRoomPostNotSubmittedConfirmation(id, checked) {
+  const button = document.getElementById(`room-unposted-submit-${id}`);
+  if (button) button.disabled = !checked;
+  const feedback = document.getElementById(`room-unposted-feedback-${id}`);
+  if (feedback) feedback.textContent = "";
+}
+
+function setRoomPostNotSubmittedFeedback(id, message) {
+  const feedback = document.getElementById(`room-unposted-feedback-${id}`);
+  if (feedback) feedback.textContent = message;
+}
+
 function confirmRoomPostNotSubmitted(id) {
   const candidate = data.candidates.find((item) => item.id === id && isRoomCandidate(item));
   const pending = data.pendingRoomPost;
   if (!canConfirmRoomPostNotSubmitted(candidate, pending)) {
-    toast("候補ID・itemCode・履歴を確認できないか、結果確認待ちのため状態を変更しませんでした。");
+    setRoomPostNotSubmittedFeedback(id, "候補ID・itemCode・履歴を確認できないか、結果確認待ちのため状態を変更しませんでした。");
+    return false;
+  }
+  const confirmation = document.getElementById(`room-unposted-confirm-${id}`);
+  if (!confirmation?.checked) {
+    setRoomPostNotSubmittedFeedback(id, "「未投稿を確認しました」にチェックしてください。状態は変更していません。");
     return false;
   }
   const itemCode = candidate.itemCode || candidate.product?.itemCode || "";
   const title = candidate.title || candidate.product?.itemName || "商品";
-  if (!window.confirm(`ROOMへの投稿操作を開始しておらず、未投稿であることを確認しましたか？\n\n${title}\n${itemCode}\n\n確認した場合だけ、投稿待ちに戻して準備状態を解除します。紹介文・候補は保持されます。`)) return false;
   const previous = structuredClone(data);
-  candidate.postStatus = "投稿待ち";
-  candidate.status = "投稿待ち";
-  data.pendingRoomPost = null;
-  const result = saveData();
+  const nextData = structuredClone(data);
+  const nextCandidate = nextData.candidates.find((item) => item.id === id && isRoomCandidate(item));
+  if (!nextCandidate || (nextCandidate.itemCode || nextCandidate.product?.itemCode || "") !== itemCode) {
+    setRoomPostNotSubmittedFeedback(id, "保存対象の候補ID・itemCodeが一致しないため、状態を変更しませんでした。");
+    return false;
+  }
+  nextCandidate.postStatus = "投稿待ち";
+  nextCandidate.status = "投稿待ち";
+  nextData.pendingRoomPost = null;
+  const result = saveData(nextData, { render: false });
   if (!result.ok) {
     data = previous;
     renderAll();
+    setRoomPostNotSubmittedFeedback(id, "保存に失敗しました。投稿準備状態は維持されています。時間をおいてから保存状態を確認してください。");
     return false;
   }
-  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+  } catch {
+    saved = null;
+  }
   const savedCandidate = saved?.candidates?.find((item) => item.id === id);
   if (!savedCandidate || savedCandidate.id !== id || (savedCandidate.itemCode || savedCandidate.product?.itemCode || "") !== itemCode || savedCandidate.postStatus !== "投稿待ち" || savedCandidate.introText !== candidate.introText || savedCandidate.hashTags !== candidate.hashTags || saved?.pendingRoomPost) {
+    const rollback = saveData(previous, { render: false });
     data = previous;
-    saveData(previous);
-    toast("保存後の確認に失敗したため、変更を取り消しました。");
+    renderAll();
+    setRoomPostNotSubmittedFeedback(id, rollback.ok
+      ? "保存後の確認に失敗したため、変更を取り消しました。投稿準備状態は維持されています。"
+      : "保存後の確認と復元に失敗しました。状態は未確認のため、操作を繰り返さず管理者に確認してください。");
     return false;
   }
+  renderAll();
   toast("未投稿を確認し、候補と紹介文を保持したまま投稿待ちに戻しました。");
   return true;
 }
