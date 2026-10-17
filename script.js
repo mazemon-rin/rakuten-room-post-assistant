@@ -3047,6 +3047,23 @@ function markThreadsOnlyPosted(id) {
   toast("Threads限定投稿を投稿済みにしました。");
 }
 
+function buildCandidateCopyText(candidate = {}) {
+  return [String(candidate.introText || "").trim(), String(candidate.hashTags || "").trim()]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function copyCandidateContent(id) {
+  const candidate = data.candidates.find((item) => item.id === id);
+  if (!candidate) {
+    toast("コピーする候補が見つかりません。");
+    return false;
+  }
+  const copied = await copyText(buildCandidateCopyText(candidate), { silent: true });
+  toast(copied ? "紹介文とハッシュタグをまとめてコピーしました。" : "コピーに失敗しました。");
+  return copied;
+}
+
 function candidateCard(item) {
   const trust = item.trustStatus ? item : { ...item, ...checkProductTrust(item.product || item) };
   const coupon = item.couponCandidate ? getCouponEvidence(item) : null;
@@ -3077,6 +3094,7 @@ function candidateCard(item) {
         ${trustReasonText ? `<details class="trust-details"><summary>判定理由を見る</summary><p>${escapeHtml(trustReasonText).replaceAll("\n", "<br>")}</p></details>` : ""}
         <label>紹介文<textarea id="candidate-intro-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'introText', this.value)">${escapeHtml(item.introText)}</textarea></label>
         <label>ハッシュタグ<textarea id="candidate-hashtags-${escapeAttr(item.id)}" data-item-code="${escapeAttr(item.itemCode || item.product?.itemCode || "")}" data-item-url="${escapeAttr(itemUrl)}" onchange="updateCandidate('${item.id}', 'hashTags', this.value)">${escapeHtml(item.hashTags)}</textarea></label>
+        <div class="record-actions candidate-copy-actions"><button class="secondary-button" type="button" onclick="copyCandidateContent('${escapeAttr(item.id)}')">まとめてコピー</button></div>
         ${renderCombinedContentGenerator(item)}
         ${renderSnsStatusSummary(item)}
         ${renderSnsEditor(item)}
@@ -3109,7 +3127,6 @@ function candidateCard(item) {
           <button class="secondary-button" type="button" onclick="openCandidateForPaste('${item.id}')">紹介文を貼り付け</button>
           <button class="secondary-button" type="button" onclick="pasteCodexResult('${item.id}')">Codex結果を貼り付け</button>
           <button class="secondary-button" type="button" onclick="prepareCandidatePost('${item.id}')">投稿準備</button>
-          <button class="secondary-button" type="button" onclick="copyText(${JSON.stringify(`${item.introText}\n${item.hashTags}`)})">全文コピー</button>
           <select aria-label="投稿状態" onchange="setPostStatus('${item.id}', this.value)">${["投稿待ち", "確認待ち", "投稿済み"].map((status) => `<option ${item.postStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select>
           <select onchange="updateCandidate('${item.id}', 'status', this.value)">${["未作成", "文章作成済み", "投稿待ち", "投稿済み", "保留", "対象外"].map((status) => `<option ${item.status === status ? "selected" : ""}>${status}</option>`).join("")}</select>
           <button class="danger-button" type="button" onclick="deleteCandidate('${item.id}')">削除</button>
