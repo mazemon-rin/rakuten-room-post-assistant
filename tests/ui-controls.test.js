@@ -5,7 +5,8 @@ const discovery = fs.readFileSync("src/sns-trend-discovery.js", "utf8");
 const css = fs.readFileSync("src/sns-trend.css", "utf8");
 const appCss = fs.readFileSync("style.css", "utf8");
 
-if (!html.includes('script.js?v=room-posted-confirm-20261017-r1')) throw new Error("Main script cache identifier must be updated for the current release source");
+if (!html.includes('script.js?v=room-item-code-visible-20261017-r1')) throw new Error("Main script cache identifier must be updated for visible candidate itemCode");
+if (!script.includes('candidate-item-code') || !script.includes('detail-item-code') || !script.includes('itemCode || "未記録"')) throw new Error("Candidate card and detail must visibly show saved itemCode or 未記録");
 
 if (!html.includes('id="clearSearchConditions"') || !html.includes('id="clearSearchConditions" class="secondary-button" type="button">クリア')) {
   throw new Error("search clear button is missing or mislabeled");

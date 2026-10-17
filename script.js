@@ -2151,6 +2151,7 @@ function openDetail(product, draft = {}) {
         <img class="detail-image" src="${escapeAttr(getImage(product))}" alt="">
         <p class="price">${formatYen(product.itemPrice)}</p>
         <p class="meta">${escapeHtml(product.shopName)} / 評価 ${product.reviewAverage || "-"}（${product.reviewCount || 0}件）</p>
+        <p class="meta detail-item-code"><strong>itemCode：</strong>${escapeHtml(linkedItemCode || productItemCode || "未記録")}</p>
         ${duplicate ? `<p class="warning">${escapeHtml(duplicate)}</p>` : ""}
         <a class="secondary-button" href="${escapeAttr(product.itemUrl)}" target="_blank" rel="noopener noreferrer">商品詳細を見る</a>
       </div>
@@ -3064,6 +3065,7 @@ function candidateCard(item) {
         <h3>${escapeHtml(item.title)}</h3>
         <div class="record-actions candidate-product-actions">${productLink}</div>
         <p><span class="badge">${escapeHtml(item.status)}</span> ${formatYen(item.price)} / ${escapeHtml(item.shopName)}</p>
+        <p class="meta candidate-item-code"><strong>itemCode：</strong>${escapeHtml(itemCode || "未記録")}</p>
         ${isOriginalPhotoCandidate(item) ? `<p class="original-photo-badge">📷 オリジナル写真予定</p><p class="meta">投稿時はROOMの完了前で停止します</p>` : ""}
         <p class="meta">${escapeHtml(item.categoryName || "カテゴリー未設定")} / ${item.rank ? `${escapeHtml(item.rank)}位` : "順位未設定"}</p>
         <p class="trust-status" aria-label="商品信頼性判定">${trustLabels[trust.trustStatus] || "🟡 要確認"}（${trust.trustScore ?? "-"}点・検証中）</p>

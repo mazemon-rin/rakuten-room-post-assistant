@@ -1018,6 +1018,10 @@ const roomCopyProduct = {
   itemUrl: "https://example.com/hook-test-umbrella"
 };
 scoring.openDetail(roomCopyProduct);
+assert(roomCopyElements["#detailArea"].html.includes(`<strong>itemCode：</strong>${roomCopyProduct.itemCode}`), "Product detail visibly renders the saved itemCode");
+scoring.openDetail({ itemName: "コード未記録の商品", itemCaption: "確認用", shopName: "確認用ショップ", itemPrice: 0, itemUrl: "" });
+assert(roomCopyElements["#detailArea"].html.includes("<strong>itemCode：</strong>未記録"), "Product detail labels a missing itemCode as 未記録");
+scoring.openDetail(roomCopyProduct);
 assert(roomCopyElements["#detailArea"].html.includes("5パターン比較生成") && roomCopyElements["#detailArea"].html.includes("保存してCodex投稿開始"), "Room copy UI A: generation modes and save/start action are present");
 scoring.generateRoomCopy("compare");
 assert(roomCopyElements["#roomCopyResults"].innerHTML.includes("驚き・ニュース型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("対象者呼びかけ型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("悩み・共感型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("メリット先出し型") && roomCopyElements["#roomCopyResults"].innerHTML.includes("短い一言型"), "Room copy UI B: five hook variants render");
@@ -1132,6 +1136,12 @@ const roomPostPromptCandidate = {
 };
 const roomPostCard = scoring.candidateCard({ ...roomPostPromptCandidate, status: "文章作成済み", price: 1980 });
 assert(roomPostCard.includes("確認モードでROOM画面を準備") && roomPostCard.includes("連続実投稿用の指示を作成"), "ROOM post UI: confirmation and explicit continuous modes are both visible");
+assert(roomPostCard.includes(`<strong>itemCode：</strong>${roomPostPromptCandidate.itemCode}`), "Candidate card visibly renders the saved itemCode");
+const nestedCodeCard = scoring.candidateCard({ ...roomPostPromptCandidate, itemCode: "", product: { ...roomPostPromptCandidate.product, itemCode: "nested-shop:42" } });
+assert(nestedCodeCard.includes("<strong>itemCode：</strong>nested-shop:42"), "Candidate card falls back only to the saved nested product itemCode");
+const missingCodeCard = scoring.candidateCard({ ...roomPostPromptCandidate, itemCode: "", product: { ...roomPostPromptCandidate.product, itemCode: "" } });
+assert(missingCodeCard.includes("<strong>itemCode：</strong>未記録"), "Candidate card labels a missing saved itemCode as 未記録");
+assert(!missingCodeCard.includes("once-in:") && !missingCodeCard.includes("10000270"), "Candidate card does not infer itemCode from a product URL");
 const confirmationPrompt = context.__roomPostTest.buildCodexPostInstructions(roomPostPromptCandidate);
 const continuousPrompt = context.__roomPostTest.buildCodexPostInstructions(roomPostPromptCandidate, { mode: "continuous" });
 assert(confirmationPrompt.includes("確認モード") && confirmationPrompt.includes("ROOM投稿画面と入力済み") && confirmationPrompt.includes("「完了」はクリックしない"), "ROOM post mode: default confirmation instructions stop at the composer without publishing");
