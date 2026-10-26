@@ -2495,7 +2495,7 @@ function renderDashboard() {
   const stats = [
     ["今日の投稿候補数", data.candidates.filter((item) => isVisibleRoomCandidate(item) && String(item.savedAt || "").slice(0, 10) === today).length],
     ["未投稿の商品数", data.candidates.filter((item) => isVisibleRoomCandidate(item) && item.status !== "投稿済み").length],
-    ["今月の投稿数", data.history.filter((item) => item.postedAt.slice(0, 7) === month).length],
+    ["今月の投稿数", data.history.filter((item) => String(item?.postedAt || "").slice(0, 7) === month).length],
     ["重複候補数", duplicateCount]
   ];
   $("#statsGrid").innerHTML = stats.map(([label, value]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join("");
