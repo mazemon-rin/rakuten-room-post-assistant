@@ -39,6 +39,16 @@
     if (!state.origins.length) el("expandedOrigin").innerHTML = "<option value=''>照合できる商品がありません</option>";
   }
 
+  function updateSeasonalPurposes() {
+    const control = el("expandedSeasonPurpose");
+    if (!control) return;
+    const key = value("expandedSeason");
+    const previous = control.value;
+    const options = rules.seasonalPurposeOptions(key);
+    control.innerHTML = options.map((option) => `<option value="${escapeAttr(option.value)}">${escapeHtml(option.label)}</option>`).join("");
+    control.value = options.some((option) => option.value === previous) ? previous : "general";
+  }
+
   function selectedOrigin() {
     const selected = state.origins[Number(value("expandedOrigin"))];
     if (!selected) throw new Error("起点の商品を確認できません。売上履歴は投稿履歴に紐付く行のみ利用できます。");
@@ -53,7 +63,7 @@
       const selected = selectedOrigin();
       terms = rules.suggestRelated(selected.product, value("expandedRelation"), value("expandedProblem"), value("expandedTarget"));
     }
-    if (mode === "seasonal") terms = rules.suggestSeasonal(value("expandedSeason"));
+    if (mode === "seasonal") terms = rules.suggestSeasonal(value("expandedSeason"), value("expandedSeasonPurpose"), value("expandedSeasonIntent"));
     el("expandedKeywords").value = terms.join("\n");
     message(`${countLabel(terms)}の検索語を提案しました。確認・編集してから検索してください。`);
   }
@@ -65,8 +75,9 @@
   function currentContext(terms) {
     const mode = value("expandedMode");
     const origin = mode === "related" ? selectedOrigin() : null;
+    const problem = mode === "seasonal" ? value("expandedSeasonIntent") : value("expandedProblem");
     // 選定理由は商品カードごとに入力する。検索条件だけで商品性能を断定しない。
-    return { ...rules.makeSearchContext({ searchMode: mode, targetUser: value("expandedTarget"), problem: value("expandedProblem"), searchKeywords: terms, origin: origin ? { kind: origin.kind, itemCode: origin.code } : null, selectionReason: "" }), relation: mode === "related" ? value("expandedRelation") : null };
+    return { ...rules.makeSearchContext({ searchMode: mode, targetUser: mode === "seasonal" ? "" : value("expandedTarget"), problem, season: mode === "seasonal" ? value("expandedSeason") : "", seasonPurpose: mode === "seasonal" ? value("expandedSeasonPurpose") : "", searchKeywords: terms, origin: origin ? { kind: origin.kind, itemCode: origin.code } : null, selectionReason: "" }), relation: mode === "related" ? value("expandedRelation") : null };
   }
 
   async function copyPrompt() {
@@ -76,9 +87,10 @@
     const originCategory = relation === "compare" ? rules.identifyProductCategory(origin.product) : null;
     if (relation === "compare" && !originCategory) throw new Error("比較元の商品カテゴリを特定できません。商品情報を確認してから検索語を作成してください。");
     const requestId = crypto.randomUUID();
-    const conditions = { searchMode: mode, problem: value("expandedProblem"), targetUser: value("expandedTarget"), season: mode === "seasonal" ? value("expandedSeason") : "", relation, origin: origin ? { itemCode: origin.code, itemName: origin.product.itemName || origin.record.title || "", categoryName: origin.product.categoryName || "", detectedCategory: originCategory?.label || null } : null };
+    const conditions = { searchMode: mode, problem: mode === "seasonal" ? "" : value("expandedProblem"), targetUser: mode === "seasonal" ? "" : value("expandedTarget"), season: mode === "seasonal" ? value("expandedSeason") : "", seasonPurpose: mode === "seasonal" ? value("expandedSeasonPurpose") : "", customIntent: mode === "seasonal" ? value("expandedSeasonIntent") : "", relation, origin: origin ? { itemCode: origin.code, itemName: origin.product.itemName || origin.record.title || "", categoryName: origin.product.categoryName || "", detectedCategory: originCategory?.label || null } : null };
     const relatedInstruction = relation === "compare" ? `比較検索では起点商品と同じカテゴリ（${originCategory.label}）を優先し、別カテゴリの商品を示す語や販促語だけの検索語は提案しないでください。` : "";
-    const prompt = `楽天市場の商品検索キーワードだけを提案してください。商品情報や効果を推測しないでください。${relatedInstruction}条件: ${JSON.stringify(conditions)}。出力は説明文やMarkdownを付けずJSONのみ。schemaVersion=1、requestId=${requestId}、searchMode=${mode}、keywords=2〜40文字の重複しない検索語1〜5件。`;
+    const intentInstruction = ["problem", "seasonal"].includes(mode) ? "悩み・目的から具体的な商品カテゴリを優先し、同義語を重複させず、便利・対策・おすすめ等だけを機械的に足さないでください。対象者と季節・イベント条件を検索語へ適切に反映し、確かでない商品性能や効果は推測しないでください。" : "";
+    const prompt = `楽天市場の商品検索キーワードだけを提案してください。商品情報や効果を推測しないでください。${intentInstruction}${relatedInstruction}条件: ${JSON.stringify(conditions)}。出力は説明文やMarkdownを付けずJSONのみ。schemaVersion=1、requestId=${requestId}、searchMode=${mode}、keywords=2〜40文字の重複しない検索語1〜5件。`;
     await navigator.clipboard.writeText(prompt);
     state.requestId = requestId;
     state.mode = mode;
@@ -244,6 +256,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     if (!el("expandedSearch")) return;
     el("expandedMode").addEventListener("change", updateMode);
+    el("expandedSeason").addEventListener("change", updateSeasonalPurposes);
     el("expandedOriginType").addEventListener("change", updateOrigins);
     el("expandedSearch").addEventListener("toggle", () => { if (el("expandedSearch").open && value("expandedMode") === "related") updateOrigins(); });
     bind("expandedSuggest", suggest);
@@ -253,5 +266,6 @@
     bind("expandedRetryFailed", retryFailedTerms);
     bind("expandedSave", saveSelected);
     updateMode();
+    updateSeasonalPurposes();
   });
 })();

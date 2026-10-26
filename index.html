@@ -117,6 +117,8 @@
           <label data-expanded="related">商品<select id="expandedOrigin"></select></label>
           <label data-expanded="related">関連の種類<select id="expandedRelation"><option value="same">同じ用途</option><option value="compare">比較候補</option><option value="together">一緒に使う商品</option><option value="problem">同じ悩み</option></select></label>
           <label data-expanded="seasonal">季節・イベント<select id="expandedSeason"><option value="spring">春</option><option value="summer">夏</option><option value="autumn">秋</option><option value="winter">冬</option><option value="newlife">新生活</option><option value="school">入園入学</option><option value="travel">旅行</option><option value="disaster">防災</option><option value="cleaning">大掃除</option></select></label>
+          <label data-expanded="seasonal">検索目的<select id="expandedSeasonPurpose"><option value="general">全般</option></select></label>
+          <label class="expanded-wide" data-expanded="seasonal">自由入力（任意）<input id="expandedSeasonIntent" type="text" maxlength="80" placeholder="例：在宅ワーク中の足元の寒さ対策"></label>
         </div>
         <div class="button-row"><button id="expandedSuggest" type="button" class="secondary-button">検索語を提案</button><button id="expandedPrompt" type="button" class="secondary-button">Codex用プロンプトを作成・コピー</button></div>
         <label class="expanded-wide">検索語（1行1件、最大5件。編集できます）<textarea id="expandedKeywords" rows="5" placeholder="検索語を入力"></textarea></label>
@@ -485,9 +487,9 @@
   <script src="src/core/backup-security.js?v=backup-security-v1-r1"></script>
   <script src="src/core/ranking-rules.js"></script>
   <script src="src/core/trend-rules.js"></script>
-  <script src="src/core/expanded-search.js?v=expanded-search-category-hierarchy-r1"></script>
+  <script src="src/core/expanded-search.js?v=expanded-search-keyword-intent-r1"></script>
   <script src="script.js?v=expanded-search-rate-limit-20261026-r1"></script>
-  <script src="src/expanded-search-ui.js?v=expanded-search-category-hierarchy-r1"></script>
+  <script src="src/expanded-search-ui.js?v=expanded-search-keyword-intent-r1"></script>
   <script src="src/sns-trend.js"></script>
   <script src="src/sns-trend-discovery.js?v=adoption-feedback-20260929"></script>
 </body>

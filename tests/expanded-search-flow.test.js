@@ -5,7 +5,7 @@ const vm = require("node:vm");
 function element() {
   return { value: "", textContent: "", innerHTML: "", hidden: false, disabled: false, listeners: {}, addEventListener(name, callback) { this.listeners[name] = callback; }, replaceChildren() { this.innerHTML = ""; } };
 }
-const ids = Object.fromEntries(["expandedSearch", "expandedMode", "expandedOriginType", "expandedOrigin", "expandedRelation", "expandedProblem", "expandedTarget", "expandedSeason", "expandedSuggest", "expandedPrompt", "expandedKeywords", "expandedJson", "expandedImport", "expandedRun", "expandedRetryFailed", "expandedFailures", "expandedMessage", "expandedResults", "expandedSave", "expandedSaveMessage"].map((id) => [id, element()]));
+const ids = Object.fromEntries(["expandedSearch", "expandedMode", "expandedOriginType", "expandedOrigin", "expandedRelation", "expandedProblem", "expandedTarget", "expandedSeason", "expandedSeasonPurpose", "expandedSeasonIntent", "expandedSuggest", "expandedPrompt", "expandedKeywords", "expandedJson", "expandedImport", "expandedRun", "expandedRetryFailed", "expandedFailures", "expandedMessage", "expandedResults", "expandedSave", "expandedSaveMessage"].map((id) => [id, element()]));
 ids.expandedMode.value = "problem";
 ids.expandedOriginType.value = "history";
 ids.expandedRelation.value = "same";
@@ -71,6 +71,48 @@ document.listeners.DOMContentLoaded();
 const click = async (id) => ids[id].listeners.click();
 
 (async () => {
+  assert.match(ids.expandedSeasonPurpose.innerHTML, /value="newlife"/, "initial season purpose options are populated for the default spring season");
+  ids.expandedKeywords.value = "手動編集済み検索語";
+  ids.expandedSeason.value = "winter";
+  ids.expandedSeason.listeners.change();
+  assert.equal(ids.expandedKeywords.value, "手動編集済み検索語", "changing season never regenerates or overwrites search terms");
+  assert.match(ids.expandedSeasonPurpose.innerHTML, /value="dry"/, "purpose options follow the selected season");
+  ids.expandedMode.value = "seasonal";
+  ids.expandedMode.listeners.change();
+  ids.expandedSeasonPurpose.value = "cold";
+  await click("expandedSuggest");
+  assert.equal(ids.expandedKeywords.value, "電気毛布\n湯たんぽ\n防寒手袋\n断熱カーテン\nあったか靴下", "winter cold purpose suggests concrete product categories");
+  const winterTerms = ids.expandedKeywords.value;
+  ids.expandedSeasonPurpose.value = "dry";
+  assert.equal(ids.expandedKeywords.value, winterTerms, "changing purpose does not overwrite the current keywords");
+  await click("expandedSuggest");
+  assert.equal(ids.expandedKeywords.value, "加湿器\n卓上加湿器\n保湿クリーム\nリップクリーム\n加湿フィルター");
+  ids.expandedSeasonIntent.value = "在宅ワーク中の足元の寒さ対策";
+  await click("expandedSuggest");
+  assert.equal(ids.expandedKeywords.value, "デスクヒーター\n足元パネルヒーター\n電気フットウォーマー\nルームシューズ 防寒\n足元用ブランケット", "free intent takes priority and maps to relevant categories");
+  const savedTermsBeforeConflict = ids.expandedKeywords.value;
+  ids.expandedSeasonIntent.value = "夏の暑さ対策";
+  await click("expandedSuggest");
+  assert.equal(ids.expandedKeywords.value, savedTermsBeforeConflict, "conflicting input leaves existing terms untouched");
+  assert.match(ids.expandedMessage.textContent, /矛盾/);
+  ids.expandedSeasonIntent.value = "在宅ワーク中の足元の寒さ対策";
+  await click("expandedPrompt");
+  const seasonalRequestId = copiedPrompt.match(/requestId=([^、]+)/)[1];
+  assert.match(copiedPrompt, /"seasonPurpose":"dry"/);
+  assert.match(copiedPrompt, /"customIntent":"在宅ワーク中の足元の寒さ対策"/);
+  ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: seasonalRequestId, searchMode: "seasonal", keywords: ["検索語 1", "検索語 2"] });
+  await click("expandedImport");
+  assert.equal(ids.expandedKeywords.value, "検索語 1\n検索語 2", "matching seasonal JSON replaces terms without automatic regeneration");
+
+  ids.expandedMode.value = "problem";
+  ids.expandedMode.listeners.change();
+  ids.expandedProblem.value = "冬の寒さ対策";
+  ids.expandedTarget.value = "在宅ワーカー";
+  await click("expandedSuggest");
+  assert.match(ids.expandedKeywords.value, /デスクヒーター|足元パネルヒーター/, "target user influences problem suggestions");
+  assert.doesNotMatch(ids.expandedKeywords.value, /便利|対策|おすすめ/);
+
+  ids.expandedKeywords.value = "";
   await click("expandedPrompt");
   const initialRequestId = copiedPrompt.match(/requestId=([^、]+)/)[1];
   ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: "wrong", searchMode: "problem", keywords: ["誤った 語句"] });

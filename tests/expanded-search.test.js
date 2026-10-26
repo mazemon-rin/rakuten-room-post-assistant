@@ -9,6 +9,11 @@ const rules = context.RoomExpandedSearch;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 assert.deepEqual(plain(rules.suggestProblem("デスク周りが狭い", "在宅ワーカー")), ["デスク収納ラック", "モニター台 収納", "デスク下 収納", "デスク上 収納", "在宅ワーク デスク収納"]);
+assert.deepEqual(plain(rules.suggestProblem("冬の寒さ対策", "")), ["電気毛布", "湯たんぽ", "デスクヒーター", "あったか靴下", "断熱カーテン"]);
+assert.ok(plain(rules.suggestProblem("冬の寒さ対策", "在宅ワーカー")).some((term) => /デスクヒーター|足元パネルヒーター/.test(term)), "target user changes cold-weather categories toward desk and foot warming");
+assert.deepEqual(plain(rules.suggestProblem("冬の乾燥対策", "")), ["加湿器", "卓上加湿器", "保湿クリーム", "リップクリーム", "加湿フィルター"]);
+assert.ok(!plain(rules.suggestProblem("冬の寒さ対策", "")).some((term) => /便利|対策|おすすめ/.test(term)), "generic modifiers are not appended mechanically");
+assert.throws(() => rules.suggestProblem("なんとなく気になる", ""), /Codex用プロンプト/);
 assert.throws(() => rules.suggestRelated({ itemName: "収納ラック", categoryName: "収納" }, "compare"), /カテゴリを特定できません/);
 assert.ok(rules.suggestRelated({ itemName: "収納ラック" }, "together")[0].includes("併用"));
 assert.ok(rules.suggestRelated({ itemName: "収納ラック" }, "problem", "机が狭い")[0].includes("机が狭い"));
@@ -16,7 +21,15 @@ const pantsOrigin = { itemName: "ニューバランス メンズ ニットワイ
 const compareKeywords = plain(rules.suggestRelated(pantsOrigin, "compare"));
 assert.deepEqual(compareKeywords, ["メンズ テーパードパンツ", "メンズ ニットパンツ", "メンズ ワイドパンツ", "メンズ ロングパンツ", "ニューバランス メンズ パンツ"]);
 assert.throws(() => rules.suggestRelated({ itemName: "ニューバランス 30%OFF" }, "compare"), /カテゴリを特定できません/);
-assert.deepEqual(plain(rules.suggestSeasonal("winter")), ["防寒 グッズ", "大掃除 便利", "年末年始 キッチン"]);
+assert.deepEqual(plain(rules.suggestSeasonal("winter")), ["電気毛布", "湯たんぽ", "デスクヒーター", "あったか靴下", "断熱カーテン"]);
+assert.deepEqual(plain(rules.seasonalPurposeOptions("winter").map((option) => option.value)), ["general", "cold", "dry", "heating", "fashion", "yearEnd", "travel"]);
+assert.deepEqual(plain(rules.seasonalPurposeOptions("summer").map((option) => option.value)), ["general", "heat", "uv", "rain", "fashion", "travel"]);
+assert.deepEqual(plain(rules.suggestSeasonal("winter", "cold")), ["電気毛布", "湯たんぽ", "防寒手袋", "断熱カーテン", "あったか靴下"]);
+assert.deepEqual(plain(rules.suggestSeasonal("winter", "dry")), ["加湿器", "卓上加湿器", "保湿クリーム", "リップクリーム", "加湿フィルター"]);
+assert.deepEqual(plain(rules.suggestSeasonal("winter", "cold", "在宅ワーク中の足元の寒さ対策")), ["デスクヒーター", "足元パネルヒーター", "電気フットウォーマー", "ルームシューズ 防寒", "足元用ブランケット"]);
+assert.throws(() => rules.suggestSeasonal("winter", "cold", "夏の暑さ対策"), /矛盾/);
+assert.throws(() => rules.suggestSeasonal("winter", "cold", "人間関係に悩んでいる"), /Codex/);
+assert.ok(plain(rules.suggestSeasonal("school", "general")).some((term) => /入園|通園|文具|水筒/.test(term)), "season/event options have practical product categories");
 assert.deepEqual(plain(rules.validateKeywords(["語句 1", "語句 2", "語句 3", "語句 4", "語句 5"])).length, 5);
 assert.throws(() => rules.validateKeywords(["重複", "重複"]));
 assert.throws(() => rules.validateKeywords(["<script>"]));
@@ -62,12 +75,17 @@ const searchContext = plain(rules.makeSearchContext({ searchMode: "problem", tar
 assert.equal(searchContext.version, 1);
 assert.equal(searchContext.selectionReason, "収納");
 assert.equal(searchContext.origin, null);
+const seasonalContext = plain(rules.makeSearchContext({ searchMode: "seasonal", season: "winter", seasonPurpose: "cold", problem: "在宅ワーク中の足元の寒さ対策", searchKeywords: ["デスクヒーター"] }));
+assert.equal(seasonalContext.season, "winter");
+assert.equal(seasonalContext.seasonPurpose, "cold");
+assert.equal(seasonalContext.problem, "在宅ワーク中の足元の寒さ対策");
+assert.equal(searchContext.season, undefined, "legacy search-context modes do not gain empty seasonal fields");
 
 const html = fs.readFileSync("index.html", "utf8");
-assert.ok(html.includes('id="expandedSearch"') && html.includes('id="expandedSave"') && html.includes('id="expandedRetryFailed"') && html.includes('id="expandedFailures"'));
+assert.ok(html.includes('id="expandedSearch"') && html.includes('id="expandedSave"') && html.includes('id="expandedRetryFailed"') && html.includes('id="expandedFailures"') && html.includes('id="expandedSeasonPurpose"') && html.includes('id="expandedSeasonIntent"'));
 assert.ok(html.includes('id="searchForm"') && html.includes('id="rankingForm"'));
 assert.ok(/src="src\/core\/expanded-search\.js(?:\?[^\"]+)?"/.test(html) && /src="src\/expanded-search-ui\.js(?:\?[^\"]+)?"/.test(html));
-assert.ok(html.includes("expanded-search-category-hierarchy-r1"), "category hierarchy changes use fresh cache identifiers");
+assert.ok(html.includes("expanded-search-keyword-intent-r1"), "keyword suggestion changes use fresh cache identifiers");
 const css = fs.readFileSync("style.css", "utf8");
 assert.ok(css.includes(".expanded-search-fields") && css.includes("max-width: 620px"));
 console.log("expanded search rules and UI structure: passed");
