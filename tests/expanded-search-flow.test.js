@@ -5,7 +5,7 @@ const vm = require("node:vm");
 function element() {
   return { value: "", textContent: "", innerHTML: "", hidden: false, disabled: false, listeners: {}, addEventListener(name, callback) { this.listeners[name] = callback; }, replaceChildren() { this.innerHTML = ""; } };
 }
-const ids = Object.fromEntries(["expandedSearch", "expandedMode", "expandedOriginType", "expandedOrigin", "expandedRelation", "expandedProblem", "expandedTarget", "expandedSeason", "expandedSeasonPurpose", "expandedSeasonIntent", "expandedSuggest", "expandedPrompt", "expandedKeywords", "expandedJson", "expandedImport", "expandedRun", "expandedRetryFailed", "expandedFailures", "expandedMessage", "expandedResults", "expandedSave", "expandedSaveMessage", "expandedClearResults"].map((id) => [id, element()]));
+const ids = Object.fromEntries(["expandedSearch", "expandedMode", "expandedOriginType", "expandedOrigin", "expandedRelation", "expandedProblem", "expandedTarget", "expandedSeason", "expandedSeasonPurpose", "expandedSeasonIntent", "expandedSuggest", "expandedPrompt", "expandedKeywords", "expandedJson", "expandedImport", "expandedRun", "expandedRetryFailed", "expandedFailures", "expandedMessage", "expandedTermStats", "expandedResults", "expandedSave", "expandedSaveMessage", "expandedClearResults"].map((id) => [id, element()]));
 ids.expandedMode.value = "problem";
 ids.expandedOriginType.value = "history";
 ids.expandedRelation.value = "same";
@@ -27,7 +27,7 @@ let sequence = 0;
 let copiedPrompt = "";
 const catalog = {
   "検索 1": [{ itemCode: "a:1", itemName: "商品A", itemCaption: "収納に便利", shopName: "店A", itemUrl: "https://item.rakuten.co.jp/shop/item/?scid=affiliate-value", mediumImageUrls: [{ imageUrl: "https://example.test/a.jpg" }] }, { itemCode: "old:1", itemName: "投稿済み商品" }],
-  "検索 2": [{ itemCode: "a:1", itemName: "商品A" }, { itemCode: "b:2", itemName: "商品B" }],
+  "検索 2": [{ itemCode: "a:1", itemName: "商品A" }, { itemCode: "b:2", itemName: "商品B" }, { itemCode: "unavailable:1", itemName: "販売終了商品" }],
   "検索 3": [{ itemCode: "c:3", itemName: "商品C" }],
   "検索 4": [{ itemCode: "d:4", itemName: "商品D" }],
   "検索 5": [{ itemCode: "e:5", itemName: "商品E" }],
@@ -52,7 +52,7 @@ const context = {
     return { status: "ok", products: catalog[term] || [] };
   },
   sleep: async (milliseconds) => { waits.push(milliseconds); fakeNow += milliseconds; },
-  isUnavailableProduct: () => false,
+  isUnavailableProduct: (product) => product.itemCode === "unavailable:1",
   rankingIdentity: (product) => product.itemCode,
   getItemCode: (product) => product.itemCode || "",
   normalizeItemCode: (code) => String(code || "").trim(),
@@ -139,6 +139,11 @@ const click = async (id) => ids[id].listeners.click();
   assert.match(ids.expandedResults.innerHTML, /href="https:\/\/item\.rakuten\.co\.jp\/shop\/item\/\?scid=affiliate-value" target="_blank" rel="noopener noreferrer">楽天市場で商品を見る ↗<\/a>/, "product URL is retained as a safe external link");
   assert.doesNotMatch(ids.expandedResults.innerHTML, /商品URL：|商品URL:/, "long product URLs are not printed as text");
   assert.match(ids.expandedResults.innerHTML, /この商品を候補登録/, "eligible product cards have an individual registration action");
+  assert.match(ids.expandedResults.innerHTML, /取得元の検索語：検索 1 \/ 検索 2/, "merged product retains all successful query sources");
+  assert.match(ids.expandedResults.innerHTML, /商品固有の選定理由（任意・手入力）[\s\S]*value="" placeholder="任意。根拠がある場合だけ入力"/, "product description is not automatically extracted into a new selection reason");
+  assert.match(ids.expandedTermStats.innerHTML, /検索 1[\s\S]*API取得<\/dt><dd>2件<\/dd>/, "per-query API count uses the response item count");
+  assert.match(ids.expandedTermStats.innerHTML, /検索 2[\s\S]*API取得<\/dt><dd>3件<\/dd>[\s\S]*重複除外<\/dt><dd>1件<\/dd>[\s\S]*販売状態による除外<\/dt><dd>1件<\/dd>/, "duplicates and unavailable products are counted separately for the query");
+  assert.match(ids.expandedTermStats.innerHTML, /検索 4[\s\S]*API：失敗：HTTP 500[\s\S]*API取得<\/dt><dd>—件<\/dd>/, "failed query shows failure without fabricating a zero result count");
   assert.match(ids.expandedResults.innerHTML, /class="secondary-button expanded-register" data-index="1" disabled\s*>登録済み<\/button>/, "duplicate product registration button is disabled");
   const productBCard = ids.expandedResults.innerHTML.split(/<article class="expanded-result">/).find((card) => card.includes("商品B")) || "";
   assert.doesNotMatch(productBCard, /expanded-result-link/, "products without a URL do not render a link");
@@ -150,12 +155,15 @@ const click = async (id) => ids[id].listeners.click();
   assert.equal((ids.expandedResults.innerHTML.match(/class="expanded-result"/g) || []).length, 6, "successful earlier results remain and retried results are merged");
   assert.equal(ids.expandedRetryFailed.hidden, true, "retry control hides after recovery");
 
-  selected.push({ dataset: { index: "0" }, closest: () => ({ querySelector: () => ({ value: "収納" }) }) });
+  const manualReasonInput = { dataset: { index: "0" }, value: "収納", closest: () => null };
+  ids.expandedResults.listeners.input({ target: { closest: (selector) => selector === ".expanded-reason" ? manualReasonInput : null } });
+  selected.push({ dataset: { index: "0" }, closest: () => ({ querySelector: () => manualReasonInput }) });
   selected.push({ dataset: { index: "1" }, closest: () => ({ querySelector: () => ({ value: "" }) }) });
   await click("expandedSave");
   assert.equal(persisted.candidates.length, 1, "posted product is excluded");
   assert.equal(persisted.candidates[0].itemCode, "a:1");
   assert.equal(persisted.candidates[0].searchContext.selectionReason, "収納");
+  assert.match(ids.expandedResults.innerHTML, /class="expanded-reason" data-index="0" maxlength="160" value="収納"/, "manual selection reason remains after successful registration rerender");
   assert.match(ids.expandedSaveMessage.textContent, /登録成功1件、重複除外1件/);
   assert.equal(persisted.history.length, 1, "history remains unchanged");
 
@@ -251,6 +259,8 @@ const click = async (id) => ids[id].listeners.click();
   assert.deepEqual(waits.slice(-2), [1000, 1000], "new searches retain the request interval across batches");
   assert.match(ids.expandedMessage.textContent, /HTTP 429が続いたため、残りの検索語を停止/);
   assert.match(ids.expandedFailures.innerHTML, /検索 3.*未実行/);
+  assert.match(ids.expandedTermStats.innerHTML, /検索 2[\s\S]*API：失敗：HTTP 429[\s\S]*API取得<\/dt><dd>—件<\/dd>/, "rate-limited query is marked failed without an invented count");
+  assert.match(ids.expandedTermStats.innerHTML, /検索 3[\s\S]*API：未実行：HTTP 429が続いたため今回の検索では実行していません。[\s\S]*API取得<\/dt><dd>—件<\/dd>/, "deferred query is distinguished from an attempted failure");
   assert.match(ids.expandedResults.innerHTML, /商品A/, "successful query results remain visible after a later 429");
   ids.expandedKeywords.value = "手動編集した検索語";
   const searchesBeforeClear = calls.length;
@@ -261,6 +271,7 @@ const click = async (id) => ids[id].listeners.click();
   assert.equal(ids.expandedFailures.innerHTML, "", "clear resets failed-term details");
   assert.equal(ids.expandedRetryFailed.hidden, true, "clear hides the failed-term retry control");
   assert.equal(ids.expandedSave.hidden, true, "clear hides bulk registration when no results remain");
+  assert.equal(ids.expandedTermStats.innerHTML, "", "clear removes per-search-term statistics");
   assert.equal(ids.expandedKeywords.value, "手動編集した検索語", "clear preserves the search terms");
   assert.equal(ids.expandedMessage.textContent, "検索結果をクリアしました。検索条件と検索語は保持しています。");
   assert.equal(selected.at(-1).checked, false, "clear unchecks selected products");

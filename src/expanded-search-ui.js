@@ -1,7 +1,7 @@
 (function () {
   const SEARCH_REQUEST_INTERVAL_MS = 1000;
   const rules = window.RoomExpandedSearch;
-  const state = { requestId: "", mode: "", keywords: [], products: [], origins: [], origin: null, context: null, relevanceContext: null, termResults: new Map(), failedTerms: [], lastRequestAt: null, busy: false };
+  const state = { requestId: "", mode: "", keywords: [], products: [], origins: [], origin: null, context: null, relevanceContext: null, termResults: new Map(), termStats: new Map(), productSearchTerms: new Map(), reasonDrafts: new Map(), failedTerms: [], lastRequestAt: null, busy: false };
   const el = (id) => document.getElementById(id);
   const value = (id) => el(id)?.value?.trim() || "";
   const message = (text) => { el("expandedMessage").textContent = text; };
@@ -15,7 +15,12 @@
     state.products = [];
     state.context = null;
     state.relevanceContext = null;
+    state.termResults.clear();
+    state.termStats.clear();
+    state.productSearchTerms.clear();
+    state.reasonDrafts.clear();
     el("expandedResults").replaceChildren();
+    el("expandedTermStats").replaceChildren();
     el("expandedSave").hidden = true;
     el("expandedSaveMessage").textContent = "";
     if (mode === "related") updateOrigins();
@@ -109,6 +114,7 @@
     el("expandedResults").innerHTML = products.map((product, index) => {
       const duplicate = !canSaveRoomCandidate(product);
       const code = String(product.itemCode || "");
+      const identity = rankingIdentity(product);
       const relevance = rules.classifyRelevance(product, state.relevanceContext || { problem: state.context?.problem || "", keywords: state.keywords });
       const compareSearch = state.context?.searchMode === "related" && state.context.relation === "compare";
       const imageUrl = getImage(product);
@@ -118,10 +124,23 @@
       const relevanceLabel = relevance.status === "low" ? "関連性なし（候補登録対象外）" : relevance.status === "review" ? (compareSearch ? "要確認（判定確定まで候補登録不可）" : "要確認") : "関連性あり";
       const disabled = duplicate || !code || relevance.status === "low" || (compareSearch && relevance.status !== "relevant");
       const singleButtonLabel = duplicate ? "登録済み" : "この商品を候補登録";
-      return `<article class="expanded-result"><label><input type="checkbox" class="expanded-select" data-index="${index}" ${disabled ? "disabled" : ""}> <strong>${escapeHtml(product.itemName || "商品名未設定")}</strong></label>${image}<p>${escapeHtml(product.shopName || "ショップ未設定")} / 商品ID（itemCode）: ${escapeHtml(code || "未記録")}</p>${productLink}<p>${duplicate ? "候補または履歴に登録済み" : !code ? "商品コード未記録のため登録不可" : formatYen(product.itemPrice)}</p><p class="expanded-relevance expanded-relevance-${relevance.status}"><strong>${escapeHtml(relevanceLabel)}</strong>：${escapeHtml(relevance.reason)}</p><label>商品固有の選定理由（商品情報の確認済み表現のみ。任意）<input class="expanded-reason" data-index="${index}" maxlength="160" value="${escapeAttr(rules.suggestSelectionReason(product))}" placeholder="根拠がなければ空欄"></label><button type="button" class="secondary-button expanded-register" data-index="${index}" ${disabled ? "disabled" : ""}>${singleButtonLabel}</button></article>`;
+      const sourceTerms = state.productSearchTerms.get(identity) || [];
+      const sourceLabel = sourceTerms.length ? `<p class="expanded-result-sources">取得元の検索語：${sourceTerms.map(escapeHtml).join(" / ")}</p>` : "";
+      const reason = state.reasonDrafts.get(identity) || "";
+      return `<article class="expanded-result"><label><input type="checkbox" class="expanded-select" data-index="${index}" ${disabled ? "disabled" : ""}> <strong>${escapeHtml(product.itemName || "商品名未設定")}</strong></label>${image}<p>${escapeHtml(product.shopName || "ショップ未設定")} / 商品ID（itemCode）: ${escapeHtml(code || "未記録")}</p>${productLink}${sourceLabel}<p>${duplicate ? "候補または履歴に登録済み" : !code ? "商品コード未記録のため登録不可" : formatYen(product.itemPrice)}</p><p class="expanded-relevance expanded-relevance-${relevance.status}"><strong>${escapeHtml(relevanceLabel)}</strong>：${escapeHtml(relevance.reason)}</p><label>商品固有の選定理由（任意・手入力）<input class="expanded-reason" data-index="${index}" maxlength="160" value="${escapeAttr(reason)}" placeholder="任意。根拠がある場合だけ入力"></label><button type="button" class="secondary-button expanded-register" data-index="${index}" ${disabled ? "disabled" : ""}>${singleButtonLabel}</button></article>`;
     }).join("");
     el("expandedSave").hidden = products.length === 0;
     el("expandedSaveMessage").textContent = "";
+  }
+
+  function renderTermStats() {
+    const rows = [...state.termStats.values()];
+    el("expandedTermStats").innerHTML = rows.map((row) => {
+      const complete = row.apiCount !== null;
+      const number = (key) => complete ? row[key] : "—";
+      const status = row.status === "success" ? "成功" : row.status === "failed" ? `失敗：${row.error}` : row.status === "deferred" ? `未実行：${row.error}` : row.status === "pending" ? "検索中" : "待機中";
+      return `<article class="expanded-term-stat"><h4>${escapeHtml(row.term)}</h4><p class="expanded-term-status expanded-term-status-${escapeAttr(row.status)}">API：${escapeHtml(status)}</p><dl><div><dt>API取得</dt><dd>${number("apiCount")}件</dd></div><div><dt>重複除外</dt><dd>${number("duplicateCount")}件</dd></div><div><dt>販売状態による除外</dt><dd>${number("unavailableCount")}件</dd></div><div><dt>商品ID不明</dt><dd>${number("identityMissingCount")}件</dd></div><div><dt>関連性あり</dt><dd>${complete ? row.relevance.relevant : "—"}件</dd></div><div><dt>要確認</dt><dd>${complete ? row.relevance.review : "—"}件</dd></div><div><dt>関連性なし</dt><dd>${complete ? row.relevance.low : "—"}件</dd></div></dl></article>`;
+    }).join("");
   }
 
   function renderFailures() {
@@ -131,7 +150,17 @@
   }
 
   function renderMergedResults() {
-    const merged = rules.mergeResults([...state.termResults.values()], rankingIdentity);
+    const groups = [...state.termResults.entries()];
+    const sources = new Map();
+    groups.forEach(([term, result]) => result.products.forEach((product) => {
+      const identity = rankingIdentity(product);
+      if (!identity) return;
+      const terms = sources.get(identity) || [];
+      if (!terms.includes(term)) terms.push(term);
+      sources.set(identity, terms);
+    }));
+    const merged = rules.mergeResults(groups.map(([, result]) => result.products), rankingIdentity);
+    state.productSearchTerms = sources;
     renderProducts(merged);
     return merged;
   }
@@ -141,10 +170,14 @@
     document.querySelectorAll(".expanded-select:checked").forEach((input) => { input.checked = false; });
     state.products = [];
     state.termResults.clear();
+    state.termStats.clear();
+    state.productSearchTerms.clear();
+    state.reasonDrafts.clear();
     state.failedTerms = [];
     state.context = null;
     state.relevanceContext = null;
     renderProducts([]);
+    renderTermStats();
     el("expandedFailures").replaceChildren();
     el("expandedRetryFailed").hidden = true;
     el("expandedRetryFailed").disabled = false;
@@ -160,10 +193,16 @@
     el("expandedClearResults").disabled = true;
     if (reset) {
       state.termResults.clear();
+      state.termStats.clear();
+      state.productSearchTerms.clear();
+      state.reasonDrafts.clear();
       state.failedTerms = [];
       renderProducts([]);
+      renderTermStats();
       el("expandedFailures").replaceChildren();
     }
+    terms.forEach((term) => state.termStats.set(term, { term, status: "waiting", apiCount: null, duplicateCount: null, unavailableCount: null, identityMissingCount: null, relevance: null, error: "" }));
+    renderTermStats();
     message(`${countLabel(terms)}の検索語で順番に検索します（API呼び出し間隔 ${SEARCH_REQUEST_INTERVAL_MS / 1000}秒）。`);
     let stoppedByRateLimit = false;
     let attemptedTerms = 0;
@@ -176,18 +215,47 @@
           if (waitMs > 0) await sleep(waitMs);
         }
         try {
+          state.termStats.set(term, { term, status: "pending", apiCount: null, duplicateCount: null, unavailableCount: null, identityMissingCount: null, relevance: null, error: "" });
+          renderTermStats();
           attemptedTerms += 1;
           const response = await requestRakutenItemSearch(term, { hits: 10, retry429: true });
           if (response.status !== "ok") throw new Error("楽天APIを利用できません。");
-          state.termResults.set(term, response.products.filter((item) => !isUnavailableProduct(item)));
+          if (!Array.isArray(response.products)) throw new Error("楽天APIの検索結果形式を確認できません。");
+          const previousIdentities = new Set([...state.termResults.entries()].filter(([savedTerm]) => savedTerm !== term).flatMap(([, result]) => result.products.map(rankingIdentity).filter(Boolean)));
+          const seenInTerm = new Set();
+          const relevance = { relevant: 0, review: 0, low: 0 };
+          let duplicateCount = 0;
+          let unavailableCount = 0;
+          let identityMissingCount = 0;
+          const eligibleProducts = [];
+          response.products.forEach((item) => {
+            if (isUnavailableProduct(item)) { unavailableCount += 1; return; }
+            const identity = rankingIdentity(item);
+            if (!identity) { identityMissingCount += 1; return; }
+            eligibleProducts.push(item);
+            if (previousIdentities.has(identity) || seenInTerm.has(identity)) { duplicateCount += 1; return; }
+            seenInTerm.add(identity);
+            const result = rules.classifyRelevance(item, { ...state.relevanceContext, keywords: [term] });
+            relevance[result.status] = (relevance[result.status] || 0) + 1;
+          });
+          state.termResults.set(term, { products: eligibleProducts });
+          state.termStats.set(term, { term, status: "success", apiCount: response.products.length, duplicateCount, unavailableCount, identityMissingCount, relevance, error: "" });
           successfulTerms += 1;
           state.failedTerms = state.failedTerms.filter((failure) => failure.term !== term);
+          renderTermStats();
         } catch (error) {
           state.failedTerms = state.failedTerms.filter((failure) => failure.term !== term);
           state.failedTerms.push({ term, reason: error.message || "検索エラー", deferred: false });
+          state.termStats.set(term, { term, status: "failed", apiCount: null, duplicateCount: null, unavailableCount: null, identityMissingCount: null, relevance: null, error: error.message || "検索エラー" });
+          renderTermStats();
           if (error.status === 429) {
             stoppedByRateLimit = true;
-            for (const unattempted of terms.slice(index + 1)) state.failedTerms.push({ term: unattempted, reason: "HTTP 429が続いたため今回の検索では実行していません。", deferred: true });
+            for (const unattempted of terms.slice(index + 1)) {
+              const reason = "HTTP 429が続いたため今回の検索では実行していません。";
+              state.failedTerms.push({ term: unattempted, reason, deferred: true });
+              state.termStats.set(unattempted, { term: unattempted, status: "deferred", apiCount: null, duplicateCount: null, unavailableCount: null, identityMissingCount: null, relevance: null, error: reason });
+            }
+            renderTermStats();
             break;
           }
         } finally {
@@ -196,6 +264,7 @@
         }
       }
       const merged = renderMergedResults();
+      renderTermStats();
       renderFailures();
       const status = stoppedByRateLimit ? "HTTP 429が続いたため、残りの検索語を停止しました。" : "";
       message(`今回${attemptedTerms}/${terms.length}検索語を実行（成功${successfulTerms}・失敗${attemptedTerms - successfulTerms}）。入力全体は${state.keywords.length}語、商品${countLabel(merged)}。${state.failedTerms.length ? `失敗・未実行${state.failedTerms.length}件は下に表示しています。` : "失敗なし。"} ${status}`);
@@ -244,7 +313,8 @@
       const compareSearch = state.context.searchMode === "related" && state.context.relation === "compare";
       if (relevance.status === "low" || (compareSearch && relevance.status !== "relevant")) { failed++; return; }
       if (seenCodes.has(code) || !window.DuplicateDetection.canSaveRoomCandidate(product, next.candidates, next.history)) { duplicates++; return; }
-      const reason = card?.querySelector(".expanded-reason")?.value.trim() || "";
+      const reasonInput = card?.querySelector(".expanded-reason");
+      const reason = (reasonInput ? reasonInput.value : state.reasonDrafts.get(rankingIdentity(product)) || "").trim();
       let verifiedReason;
       try { verifiedReason = rules.supportedSelectionReason(reason, product); }
       catch { failed++; return; }
@@ -289,6 +359,13 @@
     el("expandedOriginType").addEventListener("change", updateOrigins);
     el("expandedResults").addEventListener("click", (event) => {
       try { saveSingle(event); } catch (error) { message(error.message || "処理に失敗しました。"); }
+    });
+    el("expandedResults").addEventListener("input", (event) => {
+      const input = event.target.closest(".expanded-reason");
+      if (!input) return;
+      const product = state.products[Number(input.dataset.index)];
+      const identity = product && rankingIdentity(product);
+      if (identity) state.reasonDrafts.set(identity, input.value);
     });
     el("expandedSearch").addEventListener("toggle", () => { if (el("expandedSearch").open && value("expandedMode") === "related") updateOrigins(); });
     bind("expandedSuggest", suggest);

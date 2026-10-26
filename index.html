@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <title>楽天ROOM投稿アシスタント</title>
-  <link rel="stylesheet" href="style.css?v=expanded-search-v1-r3">
+  <link rel="stylesheet" href="style.css?v=expanded-search-term-stats-r1">
   <link rel="stylesheet" href="src/sns-trend.css">
 </head>
 <body>
@@ -125,6 +125,7 @@
         <label class="expanded-wide">Codex結果のJSONを貼り付け<textarea id="expandedJson" rows="4" placeholder='{"schemaVersion":1,"requestId":"...","searchMode":"problem","keywords":["...包"]}'></textarea></label>
         <div class="button-row"><button id="expandedImport" type="button" class="secondary-button">JSONから検索語を取り込む</button><button id="expandedRun" type="button" class="primary-button">検索語で楽天商品を検索</button><button id="expandedRetryFailed" type="button" class="secondary-button" hidden>失敗した検索語だけ再検索</button></div>
         <p id="expandedMessage" class="message" role="status" aria-live="polite"></p>
+        <div id="expandedTermStats" class="expanded-term-stats" aria-label="検索語ごとの取得状況" aria-live="polite"></div>
         <ul id="expandedFailures" class="expanded-failures" aria-label="失敗した検索語"></ul>
         <div class="button-row"><button id="expandedClearResults" type="button" class="secondary-button">検索結果をクリア</button></div>
         <div id="expandedResults" class="expanded-results"></div>
@@ -490,7 +491,7 @@
   <script src="src/core/trend-rules.js"></script>
   <script src="src/core/expanded-search.js?v=expanded-search-keyword-intent-r1"></script>
   <script src="script.js?v=expanded-search-rate-limit-20261026-r1"></script>
-  <script src="src/expanded-search-ui.js?v=expanded-search-keyword-intent-r1"></script>
+  <script src="src/expanded-search-ui.js?v=expanded-search-term-stats-r1"></script>
   <script src="src/sns-trend.js"></script>
   <script src="src/sns-trend-discovery.js?v=adoption-feedback-20260929"></script>
 </body>

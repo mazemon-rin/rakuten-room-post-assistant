@@ -88,8 +88,10 @@ assert.equal(searchContext.season, undefined, "legacy search-context modes do no
 const html = fs.readFileSync("index.html", "utf8");
 assert.ok(html.includes('id="expandedSearch"') && html.includes('id="expandedSave"') && html.includes('id="expandedRetryFailed"') && html.includes('id="expandedFailures"') && html.includes('id="expandedSeasonPurpose"') && html.includes('id="expandedSeasonIntent"'));
 assert.ok(html.includes('id="searchForm"') && html.includes('id="rankingForm"'));
+assert.ok(html.includes('id="expandedTermStats"'), "per-search-term statistics have a render target");
 assert.ok(/src="src\/core\/expanded-search\.js(?:\?[^\"]+)?"/.test(html) && /src="src\/expanded-search-ui\.js(?:\?[^\"]+)?"/.test(html));
-assert.ok(html.includes("expanded-search-keyword-intent-r1"), "keyword suggestion changes use fresh cache identifiers");
+assert.ok(html.includes("expanded-search-term-stats-r1"), "expanded search UI changes use a fresh cache identifier");
+assert.ok(html.includes("expanded-search-term-stats-r1") && html.includes("style.css?v=expanded-search-term-stats-r1"), "expanded search statistics CSS has a fresh cache identifier");
 const css = fs.readFileSync("style.css", "utf8");
 assert.ok(css.includes(".expanded-search-fields") && css.includes("max-width: 620px"));
 console.log("expanded search rules and UI structure: passed");
