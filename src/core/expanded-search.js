@@ -49,25 +49,65 @@
     return validateKeywords([...new Set(terms)].slice(0, 5));
   }
 
-  const productCategories = [
-    { key: "golf-head-cover", label: "ゴルフ用ヘッドカバー", pattern: /ヘッドカバー|クラブカバー|アイアンカバー|パターカバー/ },
-    { key: "outerwear", label: "アウター", pattern: /ジャケット|スイングトップ|ブルゾン|コート|アウター/ },
-    { key: "pants", label: "パンツ", pattern: /テーパードパンツ|ワイドパンツ|ロングパンツ|カジュアルパンツ|ニットパンツ|スラックス|ジーンズ|デニム|パンツ|ズボン/ },
-    { key: "shoes", label: "靴", pattern: /スニーカー|ランニングシューズ|シューズ|ブーツ|パンプス|サンダル/ },
-    { key: "shirts", label: "シャツ・トップス", pattern: /ポロシャツ|ワイシャツ|ブラウス|シャツ|カットソー|Tシャツ/ },
-    { key: "bags", label: "バッグ", pattern: /ショルダーバッグ|トートバッグ|リュック|バックパック|バッグ|かばん/ }
+  const explicitCategories = [
+    { key: "underwear", group: "underwear", label: "下着", pattern: /ボクサー(?:ーパンツ|パンツ)?|トランクス|ブリーフ|パンティー?|ショーツ|アンダーウェア|下着/ },
+    { key: "golf-head-cover", group: "golf", label: "ゴルフ用ヘッドカバー", pattern: /ヘッドカバー|クラブカバー|アイアンカバー|パターカバー/ },
+    { key: "tapered-pants", group: "bottoms", label: "テーパードパンツ", pattern: /テーパード(?:パンツ)?/ },
+    { key: "wide-pants", group: "bottoms", label: "ワイドパンツ", pattern: /ワイド(?:パンツ)?/ },
+    { key: "slacks", group: "bottoms", label: "スラックス", pattern: /スラックス/ },
+    { key: "chino-pants", group: "bottoms", label: "チノパン", pattern: /チノパンツ?|チノ/ },
+    { key: "jogger-pants", group: "bottoms", label: "ジョガーパンツ", pattern: /ジョガーパンツ|ジョガー/ },
+    { key: "denim-pants", group: "bottoms", label: "デニム・ジーンズ", pattern: /ジーンズ|デニム(?:パンツ)?/ },
+    { key: "knit-pants", group: "bottoms", label: "ニットパンツ", pattern: /ニットパンツ/ },
+    { key: "sweat-pants", group: "bottoms", label: "スウェットパンツ", pattern: /スウェットパンツ|スエットパンツ/ },
+    { key: "short-pants", group: "bottoms", label: "ショート・ハーフパンツ", pattern: /ショートパンツ|ハーフパンツ/ },
+    { key: "long-pants", group: "bottoms", label: "ロングパンツ", pattern: /ロングパンツ|カジュアルパンツ|ズボン/ },
+    { key: "jacket", group: "outerwear", label: "ジャケット", pattern: /ジャケット|スイングトップ/ },
+    { key: "blouson", group: "outerwear", label: "ブルゾン", pattern: /ブルゾン/ },
+    { key: "coat", group: "outerwear", label: "コート", pattern: /コート/ },
+    { key: "outerwear", group: "outerwear", label: "アウター", pattern: /アウター/ },
+    { key: "shoes", group: "shoes", label: "靴", pattern: /スニーカー|ランニングシューズ|シューズ|ブーツ|パンプス|サンダル/ },
+    { key: "shirts", group: "tops", label: "シャツ・トップス", pattern: /ポロシャツ|ワイシャツ|ブラウス|シャツ|カットソー|Tシャツ/ },
+    { key: "bags", group: "bags", label: "バッグ", pattern: /ショルダーバッグ|トートバッグ|リュック|バックパック|バッグ|かばん/ }
   ];
   const promoNoise = /(?:\b\d{1,3}\s*[%％]\s*off\b|\b\d{1,3}\s*[%％]|\bSALE\b|OFF|クーポン|比較|おすすめ|人気|公式|送料無料)/gi;
 
-  function identifyProductCategory(product) {
-    const title = clean(product?.itemName || product?.title || product?.product?.itemName, 120);
-    const category = clean(product?.categoryName || product?.product?.categoryName, 120);
-    for (const source of [title, category]) {
-      if (!source) continue;
-      const match = productCategories.find((entry) => entry.pattern.test(source));
-      if (match) return { key: match.key, label: match.label, evidence: source };
+  function categoryIn(source, { genre = false } = {}) {
+    const text = clean(source, 240);
+    if (!text) return null;
+    const matches = explicitCategories.filter((entry) => entry.pattern.test(text));
+    const groups = new Set(matches.map((entry) => entry.group));
+    if (groups.size > 1) return { ambiguous: true, key: null, group: null, label: "カテゴリ要確認", evidence: text };
+    if (matches.length) {
+      const match = matches[0];
+      return { key: match.key, group: match.group, label: match.label, evidence: text };
     }
+    // 「パンツ」だけでは下着かボトムスか確定しない。
+    // 楽天ジャンルの明示的なボトムス階層がある場合だけ大分類を補える。
+    if (genre && /(?:^|[>／/\s　])(?:ボトムス|ズボン・パンツ)(?:$|[>／/\s　])/.test(text) && !/下着|インナー|ボクサー|トランクス|ブリーフ|パンティ/.test(text)) {
+      return { key: "bottoms-unspecified", group: "bottoms", label: "ボトムス", evidence: text };
+    }
+    if (/パンツ|ズボン|ボトムス|ショーツ/.test(text)) return { ambiguous: true, key: null, group: null, label: "カテゴリ要確認", evidence: text };
     return null;
+  }
+
+  function identifyProductCategory(product) {
+    const title = clean(product?.itemName || product?.title || product?.product?.itemName || product?.product?.title, 120);
+    const genre = clean(product?.categoryName || product?.product?.categoryName || product?.genreName || product?.product?.genreName, 240);
+    const caption = clean(product?.itemCaption || product?.product?.itemCaption, 500);
+    const titleCategory = categoryIn(title);
+    const genreCategory = categoryIn(genre, { genre: true });
+    const captionCategory = categoryIn(caption);
+    const evidenceCategories = [titleCategory, genreCategory, captionCategory].filter((category) => category && !category.ambiguous);
+    const groups = new Set(evidenceCategories.map((category) => category.group));
+    if (groups.size > 1) return { ambiguous: true, key: null, group: null, label: "カテゴリ要確認", evidence: [title, genre, caption].filter(Boolean).join(" / ") };
+    if (titleCategory?.ambiguous || genreCategory?.ambiguous || captionCategory?.ambiguous) {
+      // 強い分類語が別の項目にあれば、一般語の曖昧さを解消できる。
+      const strong = evidenceCategories[0];
+      if (!strong) return { ambiguous: true, key: null, group: null, label: "カテゴリ要確認", evidence: [title, genre].filter(Boolean).join(" / ") };
+      return { ...strong, evidence: [title, genre, caption].filter(Boolean).join(" / ") };
+    }
+    return evidenceCategories[0] || null;
   }
 
   function extractGender(product, targetUser = "") {
@@ -85,9 +125,9 @@
     let terms;
     if (relation === "compare") {
       const productCategory = identifyProductCategory(product);
-      if (!productCategory) throw new Error("比較元の商品カテゴリを特定できません。商品情報を確認し、検索語欄へカテゴリを含む語を入力してください。");
+      if (!productCategory || productCategory.ambiguous) throw new Error("比較元の商品カテゴリを特定できません。商品情報を確認し、検索語欄へカテゴリを含む語を入力してください。");
       const gender = extractGender(product, targetUser);
-      if (productCategory.key === "pants") {
+      if (productCategory.group === "bottoms") {
         const prefix = gender ? `${gender} ` : "";
         const titleText = [title, category].join(" ");
         terms = [];
@@ -95,7 +135,7 @@
         if (/ニット/.test(titleText)) terms.push(`${prefix}ニットパンツ`);
         if (/ワイド/.test(titleText)) terms.push(`${prefix}ワイドパンツ`);
         terms.push(`${prefix}ロングパンツ`);
-        const titleCategoryIndex = title.search(/テーパードパンツ|ワイドパンツ|ロングパンツ|カジュアルパンツ|ニットパンツ|スラックス|ジーンズ|デニム|パンツ|ズボン/);
+        const titleCategoryIndex = title.search(/テーパード|ワイド|ロングパンツ|カジュアルパンツ|ニットパンツ|スラックス|チノ|ジョガー|ジーンズ|デニム|パンツ|ズボン/);
         const prefixTokens = (titleCategoryIndex >= 0 ? title.slice(0, titleCategoryIndex) : "").split(/[\s　]+/).map((word) => word.replace(promoNoise, "").trim()).filter((word) => word && !/^(?:メンズ|レディース|男性用|女性用|紳士|婦人|ニット|ワイド|テーパード|ロング|カジュアル)$/i.test(word));
         if (prefixTokens.length) terms.push(`${prefixTokens[0]} ${prefix}パンツ`.trim());
         else if (terms.length < 5) terms.push(`${prefix}パンツ`.trim());
@@ -180,12 +220,13 @@
     if (context.searchMode === "related" && context.relation === "compare") {
       const sourceCategory = identifyProductCategory(context.originProduct);
       const resultCategory = identifyProductCategory(product);
-      if (!sourceCategory || !resultCategory) return { status: "review", reason: "商品カテゴリを確認できず、比較可能か判定できません。" };
-      if (sourceCategory.key !== resultCategory.key) return { status: "low", reason: `検索元は「${sourceCategory.label}」、検索結果は「${resultCategory.label}」のため比較対象外です。` };
+      if (!sourceCategory || !resultCategory || sourceCategory.ambiguous || resultCategory.ambiguous) return { status: "review", reason: "商品名・ジャンル情報からカテゴリを確定できず、比較可能か判定できません。" };
+      if (sourceCategory.group !== resultCategory.group) return { status: "low", reason: `検索元は「${sourceCategory.label}（${sourceCategory.group}）」、検索結果は「${resultCategory.label}（${resultCategory.group}）」のため比較対象外です。` };
       const sourceGender = extractGender(context.originProduct, context.targetUser);
       const resultGender = extractGender(product);
       if (sourceGender && resultGender && sourceGender !== resultGender) return { status: "low", reason: `検索元は${sourceGender}、検索結果は${resultGender}のため対象が異なります。` };
-      return { status: "relevant", reason: `商品名またはカテゴリ情報に同じ「${sourceCategory.label}」カテゴリを確認しました。` };
+      const groupLabel = { bottoms: "ボトムス", underwear: "下着", outerwear: "アウター", golf: "ゴルフ用品", shoes: "靴", tops: "トップス", bags: "バッグ" }[sourceCategory.group] || sourceCategory.group;
+      return { status: "relevant", reason: `商品名・ジャンル情報で「${sourceCategory.label}」と「${resultCategory.label}」を確認し、同じ大分類「${groupLabel}」です。` };
     }
     const problem = String(context.problem || "");
     if (/(デスク|机)/.test(problem) && /(狭|収納|片付|スペース)/.test(problem)) {
