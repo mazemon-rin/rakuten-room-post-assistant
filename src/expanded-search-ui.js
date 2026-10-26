@@ -1,7 +1,7 @@
 (function () {
   const SEARCH_REQUEST_INTERVAL_MS = 1000;
   const rules = window.RoomExpandedSearch;
-  const state = { requestId: "", mode: "", keywords: [], products: [], origins: [], origin: null, context: null, termResults: new Map(), failedTerms: [], lastRequestAt: null, busy: false };
+  const state = { requestId: "", mode: "", keywords: [], products: [], origins: [], origin: null, context: null, relevanceContext: null, termResults: new Map(), failedTerms: [], lastRequestAt: null, busy: false };
   const el = (id) => document.getElementById(id);
   const value = (id) => el(id)?.value?.trim() || "";
   const message = (text) => { el("expandedMessage").textContent = text; };
@@ -13,6 +13,8 @@
     state.requestId = "";
     state.mode = "";
     state.products = [];
+    state.context = null;
+    state.relevanceContext = null;
     el("expandedResults").replaceChildren();
     el("expandedSave").hidden = true;
     el("expandedSaveMessage").textContent = "";
@@ -49,7 +51,7 @@
     if (mode === "problem") terms = rules.suggestProblem(value("expandedProblem"), value("expandedTarget"));
     if (mode === "related") {
       const selected = selectedOrigin();
-      terms = rules.suggestRelated(selected.product, value("expandedRelation"), value("expandedProblem"));
+      terms = rules.suggestRelated(selected.product, value("expandedRelation"), value("expandedProblem"), value("expandedTarget"));
     }
     if (mode === "seasonal") terms = rules.suggestSeasonal(value("expandedSeason"));
     el("expandedKeywords").value = terms.join("\n");
@@ -64,15 +66,19 @@
     const mode = value("expandedMode");
     const origin = mode === "related" ? selectedOrigin() : null;
     // 選定理由は商品カードごとに入力する。検索条件だけで商品性能を断定しない。
-    return rules.makeSearchContext({ searchMode: mode, targetUser: value("expandedTarget"), problem: value("expandedProblem"), searchKeywords: terms, origin: origin ? { kind: origin.kind, itemCode: origin.code } : null, selectionReason: "" });
+    return { ...rules.makeSearchContext({ searchMode: mode, targetUser: value("expandedTarget"), problem: value("expandedProblem"), searchKeywords: terms, origin: origin ? { kind: origin.kind, itemCode: origin.code } : null, selectionReason: "" }), relation: mode === "related" ? value("expandedRelation") : null };
   }
 
   async function copyPrompt() {
     const mode = value("expandedMode");
     const origin = mode === "related" ? selectedOrigin() : null;
+    const relation = mode === "related" ? value("expandedRelation") : "";
+    const originCategory = relation === "compare" ? rules.identifyProductCategory(origin.product) : null;
+    if (relation === "compare" && !originCategory) throw new Error("比較元の商品カテゴリを特定できません。商品情報を確認してから検索語を作成してください。");
     const requestId = crypto.randomUUID();
-    const conditions = { searchMode: mode, problem: value("expandedProblem"), targetUser: value("expandedTarget"), season: mode === "seasonal" ? value("expandedSeason") : "", relation: mode === "related" ? value("expandedRelation") : "", origin: origin ? { itemCode: origin.code, itemName: origin.product.itemName || origin.record.title || "", categoryName: origin.product.categoryName || "" } : null };
-    const prompt = `楽天市場の商品検索キーワードだけを提案してください。商品情報や効果を推測しないでください。条件: ${JSON.stringify(conditions)}。出力は説明文やMarkdownを付けずJSONのみ。schemaVersion=1、requestId=${requestId}、searchMode=${mode}、keywords=2〜40文字の重複しない検索語1〜5件。`;
+    const conditions = { searchMode: mode, problem: value("expandedProblem"), targetUser: value("expandedTarget"), season: mode === "seasonal" ? value("expandedSeason") : "", relation, origin: origin ? { itemCode: origin.code, itemName: origin.product.itemName || origin.record.title || "", categoryName: origin.product.categoryName || "", detectedCategory: originCategory?.label || null } : null };
+    const relatedInstruction = relation === "compare" ? `比較検索では起点商品と同じカテゴリ（${originCategory.label}）を優先し、別カテゴリの商品を示す語や販促語だけの検索語は提案しないでください。` : "";
+    const prompt = `楽天市場の商品検索キーワードだけを提案してください。商品情報や効果を推測しないでください。${relatedInstruction}条件: ${JSON.stringify(conditions)}。出力は説明文やMarkdownを付けずJSONのみ。schemaVersion=1、requestId=${requestId}、searchMode=${mode}、keywords=2〜40文字の重複しない検索語1〜5件。`;
     await navigator.clipboard.writeText(prompt);
     state.requestId = requestId;
     state.mode = mode;
@@ -91,10 +97,10 @@
     el("expandedResults").innerHTML = products.map((product, index) => {
       const duplicate = !canSaveRoomCandidate(product);
       const code = String(product.itemCode || "");
-      const relevance = rules.classifyRelevance(product, { problem: state.context?.problem || "", keywords: state.keywords });
+      const relevance = rules.classifyRelevance(product, state.relevanceContext || { problem: state.context?.problem || "", keywords: state.keywords });
       const imageUrl = getImage(product);
       const image = imageUrl ? `<img class="expanded-result-image" src="${escapeAttr(imageUrl)}" alt="${escapeAttr(product.itemName || "商品画像")}" loading="lazy">` : "<p>商品画像なし</p>";
-      const relevanceLabel = relevance.status === "low" ? "関連性が低いため候補登録対象外" : relevance.status === "review" ? "関連性は要確認" : "検索条件と関連する情報あり";
+      const relevanceLabel = relevance.status === "low" ? "関連性なし（候補登録対象外）" : relevance.status === "review" ? "要確認" : "関連性あり";
       const disabled = duplicate || !code || relevance.status === "low";
       return `<article class="expanded-result"><label><input type="checkbox" class="expanded-select" data-index="${index}" ${disabled ? "disabled" : ""}> <strong>${escapeHtml(product.itemName || "商品名未設定")}</strong></label>${image}<p>${escapeHtml(product.shopName || "ショップ未設定")} / 商品ID（itemCode）: ${escapeHtml(code || "未記録")}</p><p>商品URL: ${escapeHtml(product.itemUrl || "未記録")}</p><p>${duplicate ? "候補または履歴に登録済み" : !code ? "商品コード未記録のため登録不可" : formatYen(product.itemPrice)}</p><p class="expanded-relevance expanded-relevance-${relevance.status}"><strong>${escapeHtml(relevanceLabel)}</strong>：${escapeHtml(relevance.reason)}</p><label>商品固有の選定理由（商品情報の確認済み表現のみ。任意）<input class="expanded-reason" data-index="${index}" maxlength="160" value="${escapeAttr(rules.suggestSelectionReason(product))}" placeholder="根拠がなければ空欄"></label></article>`;
     }).join("");
@@ -127,6 +133,8 @@
     }
     message(`${countLabel(terms)}の検索語で順番に検索します（API呼び出し間隔 ${SEARCH_REQUEST_INTERVAL_MS / 1000}秒）。`);
     let stoppedByRateLimit = false;
+    let attemptedTerms = 0;
+    let successfulTerms = 0;
     try {
       for (let index = 0; index < terms.length; index += 1) {
         const term = terms[index];
@@ -135,9 +143,11 @@
           if (waitMs > 0) await sleep(waitMs);
         }
         try {
+          attemptedTerms += 1;
           const response = await requestRakutenItemSearch(term, { hits: 10, retry429: true });
           if (response.status !== "ok") throw new Error("楽天APIを利用できません。");
           state.termResults.set(term, response.products.filter((item) => !isUnavailableProduct(item)));
+          successfulTerms += 1;
           state.failedTerms = state.failedTerms.filter((failure) => failure.term !== term);
         } catch (error) {
           state.failedTerms = state.failedTerms.filter((failure) => failure.term !== term);
@@ -154,9 +164,8 @@
       }
       const merged = renderMergedResults();
       renderFailures();
-      const successCount = state.termResults.size;
       const status = stoppedByRateLimit ? "HTTP 429が続いたため、残りの検索語を停止しました。" : "";
-      message(`${successCount}/${state.keywords.length}検索語成功、商品${countLabel(merged)}。${state.failedTerms.length ? `失敗・未実行${state.failedTerms.length}件は下に表示しています。` : "失敗なし。"} ${status}`);
+      message(`今回${attemptedTerms}/${terms.length}検索語を実行（成功${successfulTerms}・失敗${attemptedTerms - successfulTerms}）。入力全体は${state.keywords.length}語、商品${countLabel(merged)}。${state.failedTerms.length ? `失敗・未実行${state.failedTerms.length}件は下に表示しています。` : "失敗なし。"} ${status}`);
     } finally {
       state.busy = false;
       el("expandedRun").disabled = false;
@@ -170,6 +179,8 @@
     const terms = readTerms();
     state.keywords = terms;
     state.context = currentContext(terms);
+    const origin = value("expandedMode") === "related" ? selectedOrigin() : null;
+    state.relevanceContext = { searchMode: state.context.searchMode, relation: state.context.relation, originProduct: origin?.product || null, targetUser: state.context.targetUser, problem: state.context.problem, keywords: terms };
     await executeTerms(terms, { reset: true });
   }
 
@@ -197,7 +208,7 @@
       const product = state.products[index];
       const code = getItemCode(product);
       if (!product || !code || code !== String(product.itemCode || "")) { failed++; return; }
-      if (rules.classifyRelevance(product, { problem: state.context.problem, keywords: state.keywords }).status === "low") { failed++; return; }
+      if (rules.classifyRelevance(product, state.relevanceContext || { problem: state.context.problem, keywords: state.keywords }).status === "low") { failed++; return; }
       if (seenCodes.has(code) || !window.DuplicateDetection.canSaveRoomCandidate(product, next.candidates, next.history)) { duplicates++; return; }
       const card = input.closest(".expanded-result");
       const reason = card?.querySelector(".expanded-reason")?.value.trim() || "";

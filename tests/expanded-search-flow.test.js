@@ -24,15 +24,21 @@ let termFourCalls = 0;
 let persistent429 = false;
 let fakeNow = 0;
 let sequence = 0;
+let copiedPrompt = "";
 const catalog = {
   "検索 1": [{ itemCode: "a:1", itemName: "商品A", itemCaption: "収納に便利", shopName: "店A", mediumImageUrls: [{ imageUrl: "https://example.test/a.jpg" }] }, { itemCode: "old:1", itemName: "投稿済み商品" }],
   "検索 2": [{ itemCode: "a:1", itemName: "商品A" }, { itemCode: "b:2", itemName: "商品B" }],
   "検索 3": [{ itemCode: "c:3", itemName: "商品C" }],
   "検索 4": [{ itemCode: "d:4", itemName: "商品D" }],
-  "検索 5": [{ itemCode: "e:5", itemName: "商品E" }]
+  "検索 5": [{ itemCode: "e:5", itemName: "商品E" }],
+  "メンズ ニットパンツ": [
+    { itemCode: "pants:2", itemName: "メンズ ニットパンツ" },
+    { itemCode: "cover:2", itemName: "ゴルフ用ヘッドカバー", itemCaption: "30%OFF 比較" },
+    { itemCode: "outerwear:1", itemName: "メンズ スイングトップ" }
+  ]
 };
 const context = {
-  console, document, data: current, searchResults: [], Date: { now: () => fakeNow }, crypto: { randomUUID: () => `candidate-${++sequence}` }, navigator: { clipboard: { writeText: async () => {} } },
+  console, document, data: current, searchResults: [], Date: { now: () => fakeNow }, crypto: { randomUUID: () => `candidate-${++sequence}` }, navigator: { clipboard: { writeText: async (text) => { copiedPrompt = text; } } },
   hasRakutenCredentials: () => true,
   requestRakutenItemSearch: async (term) => {
     calls.push(term);
@@ -65,17 +71,20 @@ const click = async (id) => ids[id].listeners.click();
 
 (async () => {
   await click("expandedPrompt");
+  const initialRequestId = copiedPrompt.match(/requestId=([^、]+)/)[1];
   ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: "wrong", searchMode: "problem", keywords: ["誤った 語句"] });
   await click("expandedImport");
   assert.equal(ids.expandedKeywords.value, "", "invalid Codex JSON never changes search terms");
-  ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: "candidate-1", searchMode: "problem", keywords: ["収納 ラック"] });
+  const fiveKeywords = [1, 2, 3, 4, 5].map((n) => `検索 ${n}`);
+  ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: initialRequestId, searchMode: "problem", keywords: fiveKeywords });
   await click("expandedImport");
-  assert.equal(ids.expandedKeywords.value, "収納 ラック", "matching Codex JSON is imported for review");
-  ids.expandedKeywords.value = [1, 2, 3, 4, 5].map((n) => `検索 ${n}`).join("\n");
+  assert.equal(ids.expandedKeywords.value, fiveKeywords.join("\n"), "all five matching JSON terms replace the previous field content");
   const firstRun = click("expandedRun");
   const duplicateRun = click("expandedRun");
   await Promise.all([firstRun, duplicateRun]);
+  assert.deepEqual(calls.slice(0, 5), fiveKeywords, "the API receives the exact five terms imported from JSON");
   assert.equal(calls.length, 5, "five searches are attempted");
+  assert.match(ids.expandedMessage.textContent, /今回5\/5検索語を実行（成功4・失敗1）/);
   assert.equal(maxInFlight, 1, "search requests never run concurrently");
   assert.deepEqual(waits, [1000, 1000, 1000, 1000], "sequential requests are separated by one second");
   assert.match(ids.expandedMessage.textContent, /失敗・未実行1件/);
@@ -115,13 +124,49 @@ const click = async (id) => ids[id].listeners.click();
 
   ids.expandedMode.value = "related";
   ids.expandedMode.listeners.change();
+  ids.expandedRelation.value = "compare";
+  assert.equal(ids.expandedKeywords.value, fiveKeywords.join("\n"), "switching modes leaves the visible keyword field unchanged");
   assert.match(ids.expandedOrigin.innerHTML, /old:1/, "posted history can be a related-search origin");
+  ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: initialRequestId, searchMode: "problem", keywords: ["古い条件"] });
+  await click("expandedImport");
+  assert.equal(ids.expandedKeywords.value, fiveKeywords.join("\n"), "JSON from an earlier mode cannot overwrite the current keywords");
+  assert.match(ids.expandedMessage.textContent, /現在の条件でCodex用プロンプト/);
+  const previousPrompt = copiedPrompt;
+  await click("expandedPrompt");
+  assert.equal(copiedPrompt, previousPrompt, "compare prompt is not generated when the origin category is unknown");
+  assert.match(ids.expandedMessage.textContent, /カテゴリを特定できません/);
   ids.expandedOriginType.value = "sales";
   ids.expandedOriginType.listeners.change();
   assert.match(ids.expandedOrigin.innerHTML, /照合できる商品がありません/, "unlinked sales are not treated as identified products");
   current.sales = [{ historyId: "history-1", itemCode: "old:1" }];
   ids.expandedOriginType.listeners.change();
   assert.match(ids.expandedOrigin.innerHTML, /old:1/, "linked sales can be a related-search origin");
+
+  history.unshift({ id: "pants-history", itemCode: "nb:1", title: "ニューバランス メンズ ニットワイドテーパードパンツ", product: { itemName: "ニューバランス メンズ ニットワイドテーパードパンツ", categoryName: "メンズファッション > ズボン・パンツ" } });
+  ids.expandedOriginType.value = "history";
+  ids.expandedOriginType.listeners.change();
+  ids.expandedOrigin.value = "0";
+  ids.expandedTarget.value = "メンズ";
+  await click("expandedSuggest");
+  assert.match(ids.expandedKeywords.value, /メンズ テーパードパンツ[\s\S]*メンズ ワイドパンツ/);
+  ids.expandedKeywords.value = "メンズ ニットパンツ";
+  await click("expandedRun");
+  assert.match(ids.expandedResults.innerHTML, /関連性あり/);
+  assert.match(ids.expandedResults.innerHTML, /関連性なし（候補登録対象外）/);
+  assert.match(ids.expandedResults.innerHTML, /data-index="1" disabled/);
+  assert.match(ids.expandedResults.innerHTML, /data-index="2" disabled/);
+
+  ids.expandedMode.value = "problem";
+  ids.expandedMode.listeners.change();
+  await click("expandedPrompt");
+  const singleRequestId = copiedPrompt.match(/requestId=([^、]+)/)[1];
+  ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: singleRequestId, searchMode: "problem", keywords: ["単独の検索語"] });
+  await click("expandedImport");
+  assert.equal(ids.expandedKeywords.value, "単独の検索語", "one JSON term replaces prior five terms without being padded");
+  calls = [];
+  await click("expandedRun");
+  assert.deepEqual(calls, ["単独の検索語"], "one imported term triggers one API request");
+  assert.match(ids.expandedMessage.textContent, /今回1\/1検索語を実行（成功1・失敗0）/);
 
   calls = [];
   waits.length = 0;

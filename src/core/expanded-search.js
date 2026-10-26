@@ -49,16 +49,65 @@
     return validateKeywords([...new Set(terms)].slice(0, 5));
   }
 
-  function suggestRelated(product, relation, problem = "") {
+  const productCategories = [
+    { key: "golf-head-cover", label: "ゴルフ用ヘッドカバー", pattern: /ヘッドカバー|クラブカバー|アイアンカバー|パターカバー/ },
+    { key: "outerwear", label: "アウター", pattern: /ジャケット|スイングトップ|ブルゾン|コート|アウター/ },
+    { key: "pants", label: "パンツ", pattern: /テーパードパンツ|ワイドパンツ|ロングパンツ|カジュアルパンツ|ニットパンツ|スラックス|ジーンズ|デニム|パンツ|ズボン/ },
+    { key: "shoes", label: "靴", pattern: /スニーカー|ランニングシューズ|シューズ|ブーツ|パンプス|サンダル/ },
+    { key: "shirts", label: "シャツ・トップス", pattern: /ポロシャツ|ワイシャツ|ブラウス|シャツ|カットソー|Tシャツ/ },
+    { key: "bags", label: "バッグ", pattern: /ショルダーバッグ|トートバッグ|リュック|バックパック|バッグ|かばん/ }
+  ];
+  const promoNoise = /(?:\b\d{1,3}\s*[%％]\s*off\b|\b\d{1,3}\s*[%％]|\bSALE\b|OFF|クーポン|比較|おすすめ|人気|公式|送料無料)/gi;
+
+  function identifyProductCategory(product) {
+    const title = clean(product?.itemName || product?.title || product?.product?.itemName, 120);
+    const category = clean(product?.categoryName || product?.product?.categoryName, 120);
+    for (const source of [title, category]) {
+      if (!source) continue;
+      const match = productCategories.find((entry) => entry.pattern.test(source));
+      if (match) return { key: match.key, label: match.label, evidence: source };
+    }
+    return null;
+  }
+
+  function extractGender(product, targetUser = "") {
+    const text = [product?.itemName, product?.title, product?.categoryName, product?.product?.itemName, product?.product?.title, product?.product?.categoryName, targetUser].filter(Boolean).join(" ");
+    if (/メンズ|男性用|紳士/.test(text)) return "メンズ";
+    if (/レディース|女性用|婦人/.test(text)) return "レディース";
+    return "";
+  }
+
+  function suggestRelated(product, relation, problem = "", targetUser = "") {
     const title = clean(product?.itemName || product?.title, 70);
     const category = clean(product?.categoryName || product?.product?.categoryName, 35);
     if (!title) throw new Error("起点商品の名前を確認できません。");
-    const base = title.split(/[\s　【】()（）]/).filter(Boolean)[0]?.slice(0, 28) || title.slice(0, 28);
     const p = clean(problem, 35);
-    const terms = relation === "same" ? [base, category && `${category} ${base}`]
-      : relation === "compare" ? [`${base} 比較`, category && `${category} 比較`]
+    let terms;
+    if (relation === "compare") {
+      const productCategory = identifyProductCategory(product);
+      if (!productCategory) throw new Error("比較元の商品カテゴリを特定できません。商品情報を確認し、検索語欄へカテゴリを含む語を入力してください。");
+      const gender = extractGender(product, targetUser);
+      if (productCategory.key === "pants") {
+        const prefix = gender ? `${gender} ` : "";
+        const titleText = [title, category].join(" ");
+        terms = [];
+        if (/テーパード/.test(titleText)) terms.push(`${prefix}テーパードパンツ`);
+        if (/ニット/.test(titleText)) terms.push(`${prefix}ニットパンツ`);
+        if (/ワイド/.test(titleText)) terms.push(`${prefix}ワイドパンツ`);
+        terms.push(`${prefix}ロングパンツ`);
+        const titleCategoryIndex = title.search(/テーパードパンツ|ワイドパンツ|ロングパンツ|カジュアルパンツ|ニットパンツ|スラックス|ジーンズ|デニム|パンツ|ズボン/);
+        const prefixTokens = (titleCategoryIndex >= 0 ? title.slice(0, titleCategoryIndex) : "").split(/[\s　]+/).map((word) => word.replace(promoNoise, "").trim()).filter((word) => word && !/^(?:メンズ|レディース|男性用|女性用|紳士|婦人|ニット|ワイド|テーパード|ロング|カジュアル)$/i.test(word));
+        if (prefixTokens.length) terms.push(`${prefixTokens[0]} ${prefix}パンツ`.trim());
+        else if (terms.length < 5) terms.push(`${prefix}パンツ`.trim());
+      } else {
+        terms = [`${gender ? `${gender} ` : ""}${productCategory.label}`, category && `${category} ${productCategory.label}`];
+      }
+    } else {
+      const base = title.split(/[\s　【】()（）]/).filter(Boolean)[0]?.slice(0, 28) || title.slice(0, 28);
+      terms = relation === "same" ? [base, category && `${category} ${base}`]
       : relation === "together" ? [`${base} 併用`, category && `${category} 関連用品`]
       : relation === "problem" ? [p, p && `${p} 対策`] : [];
+    }
     const valid = terms.filter((term) => term && term.trim().length >= 2).slice(0, 5);
     if (!valid.length) throw new Error("検索語の根拠が不足しています。起点商品の情報または悩みを確認してください。");
     return validateKeywords([...new Set(valid)]);
@@ -128,6 +177,16 @@
 
   function classifyRelevance(product, context = {}) {
     const text = [product?.itemName, product?.itemCaption, product?.categoryName].filter(Boolean).join(" ").replace(/<[^>]*>/g, " ").toLowerCase();
+    if (context.searchMode === "related" && context.relation === "compare") {
+      const sourceCategory = identifyProductCategory(context.originProduct);
+      const resultCategory = identifyProductCategory(product);
+      if (!sourceCategory || !resultCategory) return { status: "review", reason: "商品カテゴリを確認できず、比較可能か判定できません。" };
+      if (sourceCategory.key !== resultCategory.key) return { status: "low", reason: `検索元は「${sourceCategory.label}」、検索結果は「${resultCategory.label}」のため比較対象外です。` };
+      const sourceGender = extractGender(context.originProduct, context.targetUser);
+      const resultGender = extractGender(product);
+      if (sourceGender && resultGender && sourceGender !== resultGender) return { status: "low", reason: `検索元は${sourceGender}、検索結果は${resultGender}のため対象が異なります。` };
+      return { status: "relevant", reason: `商品名またはカテゴリ情報に同じ「${sourceCategory.label}」カテゴリを確認しました。` };
+    }
     const problem = String(context.problem || "");
     if (/(デスク|机)/.test(problem) && /(狭|収納|片付|スペース)/.test(problem)) {
       const deskCues = ["デスク収納ラック", "デスク周り", "デスク下", "机下", "デスク上", "机上", "机の上", "モニター台", "モニタースタンド", "卓上ラック", "デスクラック", "パソコンラック", "pcラック", "配線収納", "ケーブル収納", "文具収納", "デスクオーガナイザー"];
@@ -137,12 +196,12 @@
     }
     const terms = Array.isArray(context.keywords) ? context.keywords : [];
     const matched = terms.find((term) => {
-      const words = String(term).toLowerCase().split(/[\s　]+/).filter((word) => word.length >= 2 && !/^(便利|対策|比較|併用|関連用品)$/.test(word));
+      const words = String(term).replace(promoNoise, " ").toLowerCase().split(/[\s　]+/).filter((word) => word.length >= 2 && !/^(便利|対策|比較|compare|併用|関連用品|おすすめ|人気|公式|送料無料|sale|off)$/.test(word));
       return words.some((word) => text.includes(word));
     });
     if (matched) return { status: "relevant", reason: `商品情報に検索語「${matched}」と一致する語があります。` };
     return { status: "review", reason: "商品情報だけでは検索条件との関連を判定できません。内容を確認してください。" };
   }
 
-  root.RoomExpandedSearch = Object.freeze({ modes, seasonal, validateKeywords, parseCodexResult, suggestProblem, suggestRelated, suggestSeasonal, mergeResults, makeSearchContext, supportedSelectionReason, suggestSelectionReason, classifyRelevance });
+  root.RoomExpandedSearch = Object.freeze({ modes, seasonal, validateKeywords, parseCodexResult, suggestProblem, suggestRelated, suggestSeasonal, mergeResults, makeSearchContext, supportedSelectionReason, suggestSelectionReason, identifyProductCategory, classifyRelevance });
 })(typeof window !== "undefined" ? window : globalThis);
