@@ -54,6 +54,33 @@ for (const status of ["売り切れ", "販売終了", "sold out", "discontinued"
 }
 assert.strictEqual(normalization.isUnavailableProduct({ saleStatus: "在庫あり" }), false);
 
+const accountingProducts = [
+  { itemCode: "keyword-unavailable-posted", itemName: "除外語 販売終了", availability: 0, posted: true, rank: 99 },
+  { itemCode: "unavailable-posted", itemName: "販売終了", availability: 0, posted: true, rank: 99 },
+  { itemCode: "posted-out-of-range", itemName: "履歴一致", posted: true, rank: 99 },
+  { itemCode: "low-rank", itemName: "順位範囲外", rank: 11 },
+  { itemCode: "missing-rank", itemName: "順位なし", rank: null },
+  { itemCode: "visible-1", itemName: "表示商品1", rank: 2 },
+  { itemCode: "visible-2", itemName: "表示商品2", rank: 3 }
+];
+const rankingAccounting = normalization.classifySearchResults(accountingProducts, {
+  isKeywordExcluded: (item) => item.itemName.includes("除外語"),
+  isPosted: (item) => item.posted,
+  rankRange: { start: 1, end: 10 }
+});
+assert.deepStrictEqual(JSON.parse(JSON.stringify(rankingAccounting.counts)), {
+  api: 7, keyword: 1, unavailable: 1, posted: 1, rankRange: 2, displayed: 2
+});
+assert.deepStrictEqual(JSON.parse(JSON.stringify(rankingAccounting.products.map((item) => item.itemCode))), ["visible-1", "visible-2"]);
+
+const regularAccounting = normalization.classifySearchResults(accountingProducts, {
+  isKeywordExcluded: (item) => item.itemName.includes("除外語"),
+  isPosted: (item) => item.posted
+});
+assert.strictEqual(regularAccounting.counts.api, 7);
+assert.strictEqual(regularAccounting.counts.keyword + regularAccounting.counts.unavailable + regularAccounting.counts.posted + regularAccounting.counts.displayed, 7, "regular search assigns each result to one bucket");
+assert.strictEqual(regularAccounting.counts.displayed, 4, "regular search keeps available products not in posted history");
+
 const params = new URLSearchParams();
 normalization.addParam(params, "present", "value");
 normalization.addParam(params, "empty", "");

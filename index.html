@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <title>楽天ROOM投稿アシスタント</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=expanded-search-v1-r3">
   <link rel="stylesheet" href="src/sns-trend.css">
 </head>
 <body>
@@ -107,6 +107,26 @@
         </label>
         <button type="submit" class="primary-button">検索する</button>
       </form>
+      <details id="expandedSearch" class="panel expanded-search">
+        <summary>検索方法を広げる</summary>
+        <div class="expanded-search-fields">
+          <label>検索方法<select id="expandedMode"><option value="problem">悩み検索</option><option value="related">関連商品検索</option><option value="seasonal">季節・イベント検索</option></select></label>
+          <label data-expanded="problem related">悩み<input id="expandedProblem" type="text" maxlength="120" placeholder="例：デスク周りが狭い"></label>
+          <label data-expanded="problem related">対象者<input id="expandedTarget" type="text" maxlength="80" placeholder="例：在宅ワーカー"></label>
+          <label data-expanded="related">起点<select id="expandedOriginType"><option value="history">投稿履歴</option><option value="sales">売上履歴</option><option value="result">検索結果</option></select></label>
+          <label data-expanded="related">商品<select id="expandedOrigin"></select></label>
+          <label data-expanded="related">関連の種類<select id="expandedRelation"><option value="same">同じ用途</option><option value="compare">比較候補</option><option value="together">一緒に使う商品</option><option value="problem">同じ悩み</option></select></label>
+          <label data-expanded="seasonal">季節・イベント<select id="expandedSeason"><option value="spring">春</option><option value="summer">夏</option><option value="autumn">秋</option><option value="winter">冬</option><option value="newlife">新生活</option><option value="school">入園入学</option><option value="travel">旅行</option><option value="disaster">防災</option><option value="cleaning">大掃除</option></select></label>
+        </div>
+        <div class="button-row"><button id="expandedSuggest" type="button" class="secondary-button">検索語を提案</button><button id="expandedPrompt" type="button" class="secondary-button">Codex用プロンプトを作成・コピー</button></div>
+        <label class="expanded-wide">検索語（1行1件、最大5件。編集できます）<textarea id="expandedKeywords" rows="5" placeholder="検索語を入力"></textarea></label>
+        <label class="expanded-wide">Codex結果のJSONを貼り付け<textarea id="expandedJson" rows="4" placeholder='{"schemaVersion":1,"requestId":"...","searchMode":"problem","keywords":["...包"]}'></textarea></label>
+        <div class="button-row"><button id="expandedImport" type="button" class="secondary-button">JSONから検索語を取り込む</button><button id="expandedRun" type="button" class="primary-button">検索語で楽天商品を検索</button></div>
+        <p id="expandedMessage" class="message" role="status" aria-live="polite"></p>
+        <div id="expandedResults" class="expanded-results"></div>
+        <div class="button-row"><button id="expandedSave" type="button" class="secondary-button" hidden>選択商品を一括で候補登録</button></div>
+        <p id="expandedSaveMessage" class="message" role="status" aria-live="polite"></p>
+      </details>
       <p id="searchMessage" class="message"></p>
       <div id="results" class="product-grid"></div>
     </section>
@@ -461,9 +481,12 @@
   <script src="src/core/utils.js"></script>
   <script src="src/core/affiliate-sales.js"></script>
   <script src="src/core/product-normalization.js"></script>
+  <script src="src/core/backup-security.js?v=backup-security-v1-r1"></script>
   <script src="src/core/ranking-rules.js"></script>
   <script src="src/core/trend-rules.js"></script>
-  <script src="script.js?v=room-combined-copy-20261017-r1"></script>
+  <script src="src/core/expanded-search.js"></script>
+  <script src="script.js?v=backup-security-20261026-r1"></script>
+  <script src="src/expanded-search-ui.js?v=expanded-search-v1-r2"></script>
   <script src="src/sns-trend.js"></script>
   <script src="src/sns-trend-discovery.js?v=adoption-feedback-20260929"></script>
 </body>

@@ -721,9 +721,13 @@ async function searchProducts(event) {
     const json = await response.json();
     const products = normalizeRakutenItems(json);
     const excludeWords = $("#excludeWords").value.trim().split(/\s+/).filter(Boolean);
-    const filtered = products.filter((product) => !excludeWords.some((word) => product.itemName.includes(word)));
-    renderResults(filtered);
-    message.textContent = `${filtered.length}件の商品を表示しました。`;
+    const accounting = window.RoomProductNormalization.classifySearchResults(products, {
+      isKeywordExcluded: (product) => excludeWords.some((word) => product.itemName.includes(word)),
+      isPosted: postedHistoryMatch
+    });
+    renderResults(accounting.products);
+    const counts = accounting.counts;
+    message.textContent = `API取得：${counts.api}件 / キーワード除外：${counts.keyword}件 / 販売終了・在庫なし除外：${counts.unavailable}件 / 投稿履歴一致除外：${counts.posted}件 / 最終表示：${searchResults.length}件。`;
   } catch (error) {
     renderResults(sampleProducts);
     message.textContent = `${error.message} サンプル商品を表示します。`;
@@ -5118,7 +5122,8 @@ function selectRankingCandidate(categoryItems, context) {
 }
 
 function exportJson() {
-  downloadFile(`room-assistant-backup-${dateStamp()}.json`, JSON.stringify(data, null, 2), "application/json");
+  const backup = window.RoomBackupSecurity.createBackupSnapshot(data);
+  downloadFile(`room-assistant-backup-${dateStamp()}.json`, JSON.stringify(backup, null, 2), "application/json");
 }
 
 function importJson(event) {
@@ -5131,11 +5136,14 @@ function importJson(event) {
       if (!Array.isArray(imported.candidates) || !Array.isArray(imported.history) || typeof imported.settings !== "object") {
         throw new Error("バックアップ形式が違います。");
       }
-      data = normalizeStoredData(imported);
+      data = normalizeStoredData(window.RoomBackupSecurity.mergeImportedData(imported, data));
       const result = saveData();
       if (!result.ok) return;
       fillSettings();
-      toast("バックアップを復元しました。");
+      const hasApiCredentials = Boolean(data.settings.applicationId && data.settings.accessKey);
+      toast(hasApiCredentials
+        ? "バックアップを復元しました。現在のブラウザーに保存済みのAPI認証設定は維持されています。"
+        : "バックアップを復元しました。API認証情報はバックアップに含まれないため、未設定の場合は設定画面で再設定してください。");
     } catch (error) {
       alert(error.message);
     }
@@ -5413,6 +5421,7 @@ async function loadRanking(event) {
   data.settings.rankingCategoryIds = selectedCategories.map((category) => category.id);
   saveData();
   const allProducts = [];
+  const rankingCounts = { api: 0, unavailable: 0, posted: 0, rankRange: 0 };
   const errors = [];
   const diagnostics = [];
   const selectionContext = { selectedIdentities: new Set() };
@@ -5425,21 +5434,30 @@ async function loadRanking(event) {
       const products = [];
       for (const page of pages) {
         if (products.length) await sleep(requestInterval);
-        products.push(...filterAvailableProducts(await fetchRankingCategory(category, page, requestInterval)));
+        products.push(...await fetchRankingCategory(category, page, requestInterval));
       }
       categoryState.status = "success";
       categoryState.httpStatus = 200;
       categoryState.errorMessage = "";
       categoryState.retryCount = 0;
-      const categoryProducts = products.map((product) => applyOfficialRankingRank({
+      const rankedProducts = products.map((product) => applyOfficialRankingRank({
         ...product,
         categoryId: category.id,
         categoryName: category.name,
         fetchedAt: new Date().toISOString()
-      })).filter((product) => product.rank !== null && product.rank >= requestedStart && product.rank <= requestedEnd);
+      }));
+      const accounting = window.RoomProductNormalization.classifySearchResults(rankedProducts, {
+        isPosted: postedHistoryMatch,
+        rankRange: { start: requestedStart, end: requestedEnd }
+      });
+      rankingCounts.api += accounting.counts.api;
+      rankingCounts.unavailable += accounting.counts.unavailable;
+      rankingCounts.posted += accounting.counts.posted;
+      rankingCounts.rankRange += accounting.counts.rankRange;
+      const categoryProducts = accounting.products;
       const actualRanks = categoryProducts.map((product) => product.rank);
       const actualRange = actualRanks.length ? `${Math.min(...actualRanks)}〜${Math.max(...actualRanks)}位` : "該当なし";
-      diagnostics.push(`${category.name}(genreId:${category.id}, page:${pages.join("+")}): API取得${products.length}件 / 要求${requestedStart}〜${requestedEnd}位 / 実取得${actualRange}（${categoryProducts.length}件）`);
+      diagnostics.push(`${category.name}(genreId:${category.id}, page:${pages.join("+")}): API取得${accounting.counts.api}件 / 販売終了・在庫なし除外${accounting.counts.unavailable}件 / 投稿履歴一致除外${accounting.counts.posted}件 / 順位範囲外除外${accounting.counts.rankRange}件 / 表示${accounting.counts.displayed}件（要求${requestedStart}〜${requestedEnd}位、実取得${actualRange}）`);
       if (!selectRankingCandidate(categoryProducts, selectionContext)) {
         categoryProducts.forEach((product) => {
           if (!product.selectionStatus) {
@@ -5461,17 +5479,16 @@ async function loadRanking(event) {
       await sleep(requestInterval);
     }
   }
-  const postedExcludedCount = allProducts.filter((product) => postedHistoryMatch(product)).length;
   renderRankingResults(allProducts);
   renderRankingRetryControl();
   if (!allProducts.length && errors.length) {
     message.textContent = `${errors.join(" / ")} サンプル商品を表示します。`;
     renderRankingResults(sampleProducts);
   } else if (errors.length) {
-    message.textContent = `${allProducts.length}件を表示しました。一部カテゴリーで取得に失敗しました：${errors.join(" / ")}`;
+    message.textContent = `API取得：${rankingCounts.api}件 / 販売終了・在庫なし除外：${rankingCounts.unavailable}件 / 投稿履歴一致除外：${rankingCounts.posted}件 / 順位範囲外除外：${rankingCounts.rankRange}件 / 最終表示：${searchResults.length}件。一部カテゴリーで取得に失敗しました：${errors.join(" / ")}`;
   } else {
-    message.textContent = allProducts.length
-      ? `${allProducts.length}件取得 / 投稿済み除外：${postedExcludedCount}件 / 表示：${searchResults.length}件。${diagnostics.length ? `（${diagnostics.join("、")}）` : ""}`
+    message.textContent = rankingCounts.api
+      ? `API取得：${rankingCounts.api}件 / 販売終了・在庫なし除外：${rankingCounts.unavailable}件 / 投稿履歴一致除外：${rankingCounts.posted}件 / 順位範囲外除外：${rankingCounts.rankRange}件 / 最終表示：${searchResults.length}件。${diagnostics.length ? `（${diagnostics.join("、")}）` : ""}`
       : `ランキング結果が0件でした。${diagnostics.length ? ` 診断：${diagnostics.join("、")}` : ""}`;
   }
 }

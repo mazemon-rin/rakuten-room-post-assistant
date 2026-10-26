@@ -60,6 +60,15 @@ scoring.evaluateRoomProduct = context.evaluateRoomProduct;
 scoring.applyRoomProductEvaluation = context.applyRoomProductEvaluation;
 scoring.scoreProductSelection = context.scoreProductSelection;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
+// 新しい検索文脈は任意項目。旧候補・履歴・商品本体の復元と軽量化を妨げない。
+const searchContextFixture = { version: 1, searchMode: "problem", targetUser: "在宅ワーカー", problem: "机が狭い", selectionReason: "収納", searchKeywords: ["デスク 収納"], origin: null };
+const compatibleSnapshot = scoring.normalizeStoredData({ candidates: [{ id: "old", itemCode: "old:1", product: { itemName: "旧商品" } }, { id: "new", itemCode: "new:1", product: { itemCode: "new:1", itemName: "収納用品" }, searchContext: searchContextFixture }], history: [{ id: "history", itemCode: "posted:1", title: "投稿済み" }] });
+assert(!compatibleSnapshot.candidates[0].searchContext && compatibleSnapshot.candidates[0].product.itemName === "旧商品", "Legacy candidate remains readable without searchContext");
+assert(compatibleSnapshot.candidates[1].searchContext.problem === "机が狭い" && compatibleSnapshot.history[0].itemCode === "posted:1", "Search context and history survive normalization");
+const importedSnapshot = scoring.normalizeStoredData(JSON.parse(JSON.stringify(compatibleSnapshot)));
+assert(importedSnapshot.candidates[1].searchContext.searchKeywords[0] === "デスク 収納", "Search context survives JSON backup round trip");
+const compactedSearchCandidate = scoring.buildLightweightPostedProduct({ itemCode: "new:1", title: "収納用品", product: { itemCode: "new:1", itemName: "収納用品", itemUrl: "https://example.test/item", shopName: "店舗" } });
+assert(compactedSearchCandidate.itemCode === "new:1" && compactedSearchCandidate.itemName === "収納用品", "Posted product retains display identity after lightweight conversion");
 // 楽天商品取得→候補→中間情報→一括AIプロンプトを実関数で通して確認。
 const driedFish = { itemCode: "kitanomachi:10000551", itemName: "【期間限定50％OFF！7,960円⇒3,980円】北海道産 干物 詰め合わせ 全5種+1種", itemPrice: 3980, shopName: "北の町から", itemCaption: "北海道産。冷凍。", discountRate: 50, rateConfirmed: false, discountRateType: "unknown" };
 const fishBefore = JSON.stringify(driedFish);

@@ -1,0 +1,45 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+const context = { console };
+context.globalThis = context;
+vm.runInNewContext(fs.readFileSync("src/core/expanded-search.js", "utf8"), context);
+const rules = context.RoomExpandedSearch;
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
+assert.deepEqual(plain(rules.suggestProblem("デスク周りが狭い", "在宅ワーカー")), ["デスク周りが狭い", "デスク周りが狭い 便利", "デスク周りが狭い 在宅ワーカー", "省スペース 収納"]);
+assert.ok(rules.suggestRelated({ itemName: "収納ラック", categoryName: "収納" }, "compare")[0].includes("比較"));
+assert.ok(rules.suggestRelated({ itemName: "収納ラック" }, "together")[0].includes("併用"));
+assert.ok(rules.suggestRelated({ itemName: "収納ラック" }, "problem", "机が狭い")[0].includes("机が狭い"));
+assert.deepEqual(plain(rules.suggestSeasonal("winter")), ["防寒 グッズ", "大掃除 便利", "年末年始 キッチン"]);
+assert.deepEqual(plain(rules.validateKeywords(["語句 1", "語句 2", "語句 3", "語句 4", "語句 5"])).length, 5);
+assert.throws(() => rules.validateKeywords(["重複", "重複"]));
+assert.throws(() => rules.validateKeywords(["<script>"]));
+assert.throws(() => rules.validateKeywords(["https://example.test"]));
+assert.throws(() => rules.validateKeywords(Array(6).fill("語句")));
+
+const expected = { requestId: "request-1", searchMode: "problem" };
+const valid = { schemaVersion: 1, requestId: "request-1", searchMode: "problem", keywords: ["収納 ラック", "デスク 収納"] };
+assert.deepEqual(plain(rules.parseCodexResult(JSON.stringify(valid), expected)), valid.keywords);
+for (const bad of ["{", JSON.stringify({ ...valid, requestId: "wrong" }), JSON.stringify({ ...valid, searchMode: "related" }), JSON.stringify({ ...valid, schemaVersion: 2 }), JSON.stringify({ ...valid, keywords: ["https://example.test"] }), "x".repeat(8193)]) assert.throws(() => rules.parseCodexResult(bad, expected));
+
+const products = [{ itemCode: "a" }, { itemCode: "b" }, { itemCode: "a" }, { itemCode: "c" }];
+assert.deepEqual(plain(rules.mergeResults([products.slice(0, 2), products.slice(2)], (item) => item.itemCode).map((item) => item.itemCode)), ["a", "b", "c"]);
+assert.equal(rules.supportedSelectionReason("通気性", { itemName: "靴", itemCaption: "通気性のある素材" }), "通気性");
+assert.throws(() => rules.supportedSelectionReason("最安", { itemName: "靴", itemCaption: "通気性のある素材" }));
+assert.equal(rules.supportedSelectionReason("", {}), "");
+assert.equal(rules.suggestSelectionReason({ itemCaption: "机の上を整理できる収納ラック。人気の商品です。" }), "机の上を整理できる収納ラック");
+assert.equal(rules.suggestSelectionReason({ itemCaption: "大人気の特別商品です。" }), "");
+const searchContext = plain(rules.makeSearchContext({ searchMode: "problem", targetUser: "在宅ワーカー", problem: "デスクが狭い", selectionReason: "収納", searchKeywords: ["収納 ラック"] }));
+assert.equal(searchContext.version, 1);
+assert.equal(searchContext.selectionReason, "収納");
+assert.equal(searchContext.origin, null);
+
+const html = fs.readFileSync("index.html", "utf8");
+assert.ok(html.includes('id="expandedSearch"') && html.includes('id="expandedSave"'));
+assert.ok(html.includes('id="searchForm"') && html.includes('id="rankingForm"'));
+assert.ok(html.includes('src="src/core/expanded-search.js"') && /src="src\/expanded-search-ui\.js(?:\?[^\"]+)?"/.test(html));
+const css = fs.readFileSync("style.css", "utf8");
+assert.ok(css.includes(".expanded-search-fields") && css.includes("max-width: 620px"));
+console.log("expanded search rules and UI structure: passed");
