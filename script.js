@@ -1819,6 +1819,8 @@ function validateGeneratedCopy(introText, product = {}) {
   return "";
 }
 
+const ROOM_INTRO_STYLE_RULE = "親しみやすい自然な日本語で100〜180文字程度を目安にする。読者の悩み・共感・季節感・生活場面から始め、商品情報で確認できた特徴を会話の流れに沿って紹介する。最後は商品に興味を持てる自然な一言にし、毎回同じ構成・冒頭・締めに固定しない。「仕様を見てみると」「商品ページで確認してください」「サイズや仕様を見比べて」「選ぶ参考にしてみてください」を定型句として使わない。絵文字は0〜3個。スペックの羅列、過度な煽り、未確認の割引・価格・ポイント・期限、未確認の効果・性能、使用体験の創作は禁止。商品情報にない用途や設置場所を断定しない。情報が少ない場合は短くし、文字数を満たすために推測を加えない。";
+
 const ROOM_COPY_HOOKS = Object.freeze([
   { id: "discovery", label: "驚き・ニュース型" },
   { id: "audience", label: "対象者呼びかけ型" },
@@ -1895,34 +1897,52 @@ function buildRoomIntroVariants(product = {}) {
     ? fullCopyTitle.split(/\s+/).slice(0, 2).join(" ") : fullCopyTitle;
   const productText = `${title} ${features.join(" ")} ${cleanRoomCopySource(product.itemCaption || product.description || "")}`;
   const genreSource = `${category} ${productText}`;
+  const seasonalLabel = `${title} ${category}`.match(/(春物|夏物|秋物|冬物|春用|夏用|秋用|冬用|防寒|冷感|ひんやり|クリスマス|お正月|年末年始|入園|入学|新生活)/)?.[1] || "";
   const genre = /(抱っこ|ベビー|新生児|赤ちゃん|マタニティ)/.test(genreSource) ? "baby"
     : /(食品|食材|グルメ|菓子|スイーツ|米|肉|魚|海鮮|飲料|フード)/.test(genreSource) ? "food"
       : /(家電|電化製品|加湿器|掃除機|炊飯器|トースター|電子レンジ|照明|ライト|モバイルバッテリー|充電器)/.test(genreSource) ? "appliance"
-        : /(ファッション|衣類|アパレル|服|シューズ|スニーカー|靴|バッグ|アウター|インナー|ウェア)/.test(genreSource) ? "fashion"
-          : /(日用品|生活雑貨|洗剤|タオル|収納|キッチン用品|掃除用品|消耗品)/.test(genreSource) ? "daily"
-            : "general";
+        : /(ソックス|靴下|ルームソックス)/.test(genreSource) ? "socks"
+          : /(バッグ|ショルダー)/.test(genreSource) ? "bag"
+            : /(収納|ラック|ケース|ボックス|整理棚)/.test(genreSource) ? "storage"
+              : /(デザイン雑貨|インテリア雑貨|置物|オブジェ|花瓶|時計|ランプ|クッション)/.test(genreSource) ? "design"
+                : /(ファッション|衣類|アパレル|服|シューズ|スニーカー|靴|アウター|インナー|ウェア)/.test(genreSource) ? "fashion"
+                  : /(日用品|生活雑貨|洗剤|タオル|キッチン用品|掃除用品|消耗品)/.test(genreSource) ? "daily"
+                    : "general";
+  const isKitchenStorage = genre === "storage" && /(フライパン|鍋ふた|鍋蓋|鍋)/.test(genreSource);
   const genreCopy = {
-    baby: { discovery: "ベビー用品選び、サイズや素材も見ておきたい。", audience: "ベビー用品を準備中の方", concern: "ベビー用品はサイズや素材も比べたいところ", short: "小さな仕様も、選ぶ手がかりに。" },
-    food: { discovery: "食品選び、産地や保存方法もチェック。", audience: "産地や保存方法も見て選びたい方", concern: "食べものを選ぶとき、産地や保存方法も気になりますよね", short: "食卓に迎える前に、仕様もチェック。" },
-    appliance: { discovery: "家電選び、使う場面に合う仕様かも確認。", audience: "家電の仕様を見比べている方", concern: "家電は置き場所や使い方に合うか迷うことも", short: "選ぶ前に、仕様をひとつ確認。" },
-    fashion: { discovery: "服や小物、加工や素材にも注目。", audience: "服や小物を探している方", concern: "服や小物は、見た目だけでなく仕様も比べたいですよね", short: "選ぶポイントは、ここにも。" },
-    daily: { discovery: "日用品は、素材や手入れ方法もチェック。", audience: "日用品の素材や仕様を見直したい方", concern: "毎日使うものは、素材や扱い方も気になるところ", short: "毎日のものこそ、仕様を確認。" },
-    general: { discovery: category ? `${category}選び、仕様から見てみる。` : "商品選び、仕様から見てみる。", audience: category ? `${category}を探している方` : "仕様を見て選びたい方", concern: category ? `${category}選び、どこを比べるか迷うことも` : "商品選びでは、仕様の違いも気になるところ", short: "選ぶポイントを、ひとつ確認。" }
+    baby: { discovery: "赤ちゃんとの暮らしに使うもの、素材やサイズも気になりますよね。", audience: "ベビー用品を探している方へ。", concern: "赤ちゃんのものを選ぶとき、何を重視するか迷うことも。", short: "赤ちゃんとの毎日に、こんな選択肢も。", closings: ["暮らしに合うものを探すときの候補にどうぞ。", "気になる方は商品情報ものぞいてみてくださいね。", "準備するものを考えるとき、候補のひとつにいかがでしょう。", "毎日の暮らしに合うか想像しながら見てみてください。", "ベビー用品選びの候補として、のぞいてみてくださいね。"] },
+    food: { discovery: "今日の食卓に何を用意しようか、迷う日ありませんか？", audience: "食卓に加えるものを探している方へ。", concern: "食品を選ぶとき、産地や保存方法も気になりますよね。", short: "食卓の候補に、ひとつ。", closings: ["いつもの食事に加える候補として、チェックしてみてください。", "食べる人数に合わせて選ぶ品のひとつにいかがでしょう。", "気になる方は内容ものぞいてみてくださいね。", "献立を考えるときの候補にどうぞ。", "食卓に迎える選択肢として、見てみてください。"] },
+    appliance: { discovery: "家電を選ぶとき、置き場所や使い方も気になりますよね。", audience: "暮らしに合う家電を探している方へ。", concern: "毎日の道具、そろそろ見直したいと思うことありませんか？", short: "暮らしの道具に、こんな選択肢。", closings: ["卓上に置く家電を探している方は、使う場所に合う候補として見てみてくださいね。", "毎日の暮らしに取り入れる候補にいかがでしょう。", "使う場所に合うものを探すときの候補にどうぞ。", "こんな選択肢もあります😊", "暮らしの道具選びに、加えてみてはいかがでしょうか？"] },
+    socks: { discovery: "寒い季節、足元の冷えが気になりませんか？🧦", audience: "ルームソックスを探している方へ。", concern: "おうち時間の足元、何を履こうか迷うことも。", short: "冬支度の候補に、ルームソックス。", closings: ["寒い季節のルームウェア小物を探している方は、冬支度の候補としてチェックしてみてください。", "冬支度のアイテムとして、気になる方は見てみてください。", "素材や長さなど、好みに合うものを探してみてくださいね。", "おうち時間の小物選びに、こんな選択肢も。", "季節の準備に加えてみてはいかがでしょう。"] },
+    bag: { discovery: "お出かけ用のバッグ、形や持ち方で迷うことありませんか？", audience: "ショルダーバッグを探している方へ。", concern: "バッグは使う場面に合うかも気になるところ。", short: "お出かけ小物に、こんな候補。", closings: ["持ち方の好みやお出かけの場面を思い浮かべて、候補に加えてみるのはいかがでしょう。", "気になる方はチェックしてみてください✨", "手持ちの服に合わせたい小物を探すときにも、候補のひとつに。", "使う場面を思い浮かべて、のぞいてみてくださいね。", "お出かけの相棒候補にいかがでしょうか？"] },
+    fashion: { discovery: "身につけるものは、形や素材もこだわって選びたいですよね。", audience: "服や小物を探している方へ。", concern: "着る場面を考えると、形や素材も気になりますよね。", short: "いつもの装いに、ひとつの候補。", closings: ["季節の装いを考えるとき、候補に加えてみてください。", "気になる方はチェックしてみてくださいね。", "着る場面に合うものを探すときの候補にどうぞ。", "好みの形や素材を探している方にも。", "装いの選択肢として、のぞいてみてください。"] },
+    storage: { discovery: isKitchenStorage ? "フライパンや鍋ふた、しまう場所に困ることありませんか？" : "収納場所が足りないと感じること、ありませんか？", audience: isKitchenStorage ? "キッチンの収納を見直したい方へ。" : "収納場所を見直したい方へ。", concern: isKitchenStorage ? "キッチンまわり、置き場所に迷うこともありますよね。" : "しまう場所や置き方に悩むこと、ありませんか？", short: "収納の悩みに、こんな選択肢。", closings: [isKitchenStorage ? "フライパンや鍋の置き場所を見直したいとき、候補のひとつにどうぞ。" : "片付け方を見直したいときの候補にいかがでしょう。", "収納場所に合うものを探している方は、チェックしてみてください。", "キッチンの整理を考えるとき、候補のひとつにどうぞ。", "置き場所を整えるアイテムを探すときにも。", "毎日の片付けに合うものを探してみてくださいね。"] },
+    design: { discovery: "お部屋の雰囲気に合う小物を探している方へ✨", audience: "インテリア小物が気になる方へ。", concern: "お部屋の印象を考えると、色や形も気になりますよね。", short: "お部屋づくりの候補に、ひとつ。", closings: ["お部屋づくりの候補にいかがでしょうか？", "気になる方はチェックしてみてください✨", "飾る場所を思い浮かべながら、候補に加えてみてください。", "こんな小物を取り入れるのも素敵ですね。", "好きな雰囲気に合うものを探すときの候補にどうぞ。"] },
+    daily: { discovery: "毎日使うもの、ちょっと見直したいと思うことありませんか？", audience: "日用品を探している方へ。", concern: "日々使うものは、素材や手入れのしやすさも気になりますよね。", short: "毎日の暮らしに、こんな候補。", closings: ["日々の暮らしに合うものを探すときの候補にどうぞ。", "気になる方はチェックしてみてくださいね。", "いつもの生活用品を選ぶとき、候補のひとつに。", "毎日使うものを見直すきっかけにいかがでしょう。", "暮らしの小物選びに、加えてみてください。"] },
+    general: { discovery: category ? `${category}を探すとき、こんな商品も気になりませんか？` : "暮らしの中で使うもの、選ぶ時間も大切にしたいですね。", audience: category ? `${category}を探している方へ。` : "暮らしの品を探している方へ。", concern: category ? `${category}選び、どんなものが合うか迷うこともありますよね。` : "毎日の暮らしに合うものを探すこと、ありませんか？", short: "暮らしの候補に、ひとつ。", closings: ["気になる方はチェックしてみてくださいね。", "こんな選択肢もあります😊", "暮らしに合うものを探すときの候補にどうぞ。", "気になる方は商品情報ものぞいてみてください。", "日々の選択肢に加えてみてはいかがでしょうか？"] }
   }[genre];
+  if (seasonalLabel && genre !== "socks") {
+    genreCopy.discovery = `${seasonalLabel}の準備、暮らしに合うものを探しませんか？ ${genreCopy.discovery}`;
+    genreCopy.concern = `${seasonalLabel}に向けて、暮らしの中で使うものを見直したくなることも。`;
+  }
   const featureSentence = (value, includeSubject = true) => {
     const property = value.match(/^(.+?)は(.+)$/);
     return property ? `${includeSubject ? `${copyTitle}の` : ""}${property[1]}は${property[2]}。` : `${includeSubject ? `${copyTitle}は` : ""}${value}。`;
   };
-  const featureSentences = features.map((value, index) => featureSentence(value, index === 0));
   const audience = genreCopy.audience;
-  const benefitFeature = features.find((value) => /(洗える|丸洗い|洗濯機|対応|収納|付属|個包装|冷凍|折りたたみ|撥水|防水|UVカット|軽量|保温|保冷)/i.test(value)) || features[0];
-  const benefitLabel = benefitFeature.replace(/[。.!！?？]+$/g, "");
+  const benefitFeature = features[0];
+  const benefitProperty = benefitFeature.match(/^(.+?)は(.+)$/);
+  const benefitLabel = benefitProperty ? `${benefitProperty[1]}が${benefitProperty[2]}` : benefitFeature.replace(/[。.!！?？]+$/g, "");
+  const benefitTopic = benefitProperty?.[1] || benefitFeature.match(/^(サイズ|幅|高さ|長さ|奥行き|容量|重量|タンク容量)/)?.[1];
+  const benefitLead = benefitTopic ? `${benefitTopic}が気になる方へ。` : `「${benefitLabel}」が気になる方へ。`;
+  const verifiedFeatureSentence = (index) => featureSentence(features[index % features.length], true);
+  const closing = (index) => genreCopy.closings[index % genreCopy.closings.length];
   const base = [
-    { ...ROOM_COPY_HOOKS[0], text: `${genreCopy.discovery}${featureSentences.join("")}` },
-    { ...ROOM_COPY_HOOKS[1], text: `${audience}へ。${featureSentences.join("")}` },
-    { ...ROOM_COPY_HOOKS[2], text: `${genreCopy.concern}。${featureSentences.join("")}` },
-    { ...ROOM_COPY_HOOKS[3], text: `「${benefitLabel}」を重視する方は要チェック。${copyTitle}の仕様を確認してみてください。${features.filter((value) => value !== benefitFeature).map((value) => featureSentence(value, false)).join("")}` },
-    { ...ROOM_COPY_HOOKS[4], text: `${genreCopy.short}${featureSentences[0]}` }
+    { ...ROOM_COPY_HOOKS[0], text: `${genreCopy.discovery}${verifiedFeatureSentence(0)}${closing(0)}` },
+    { ...ROOM_COPY_HOOKS[1], text: `${audience}${verifiedFeatureSentence(1)}${closing(1)}` },
+    { ...ROOM_COPY_HOOKS[2], text: `${genreCopy.concern}${verifiedFeatureSentence(2)}${closing(2)}` },
+    { ...ROOM_COPY_HOOKS[3], text: `${benefitLead}${verifiedFeatureSentence(0)}${closing(3)}` },
+    { ...ROOM_COPY_HOOKS[4], text: `${genreCopy.short}${verifiedFeatureSentence(features.length > 1 ? 1 : 0)}${closing(4)}` }
   ].map((variant) => ({ ...variant, text: finalizeRoomIntro(product, variant.text) }));
   return { ok: true, title, features, variants: base };
 }
@@ -2340,6 +2360,7 @@ ${getRoomIntroDeadlineRule(currentProduct)}
 
 【必ず守ること】
 商品名と確認済みの商品固有特徴が1つ以上あれば、通常の紹介文とハッシュタグを完成させてください。対象者・悩み・用途が明確でない場合は、それらを推測せず、確認できる特徴を中心に書いてください。
+${ROOM_INTRO_STYLE_RULE}
 割引率、クーポン、セール期間が未確認なら該当表現だけを省いて通常文を作成してください。未確認の割引だけを理由に、文章全体の作成を中止・保留しないでください。
 商品ページにない内容を勝手に追加しないでください。
 実際に使っていない場合は「使いました」と書かないでください。
@@ -3726,7 +3747,7 @@ function buildCombinedContentPrompt(item) {
     : "usageStatusはusedではない。使ってみた、買ってみた、愛用しています、使いやすかった、おすすめです、買ってよかった等の使用経験・断定を絶対に書かない。便利そう、気になりました、チェックしておきたい等の安全な表現を使う。";
   const xRules = `Xは短め、冒頭の1〜2行を重視し、商品名の羅列から始めない。${getSnsTypeSpecificRule("x", posts.x.postType)} 投稿タイプは${SNS_POST_TYPES[posts.x.postType] || posts.x.postType}（${posts.x.postType}）。絵文字は少なめ、#PRを付け、必要なら#楽天ROOMを付ける。${getXLengthPromptRule()}`;
   const threadsRules = `ThreadsはXより少し長めの会話調にし、共感・困りごと・発見から始める。商品名や価格だけで始めず、なぜ気になったかを伝え、売り込み感を弱くする。Xの単純な長文化にしない。${getSnsTypeSpecificRule("threads", posts.threads.postType)} 投稿タイプは${SNS_POST_TYPES[posts.threads.postType] || posts.threads.postType}（${posts.threads.postType}）。絵文字は少なめ、#PRを付ける。`;
-  return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\n${getRoomUrlPromptRule(roomUrl)}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、対象者・困りごと・特徴・利用場面が伝わる自然な紹介文を作る。確認済み割引がある場合は割引情報を冒頭に置き、商品説明内で同じ割引情報を不自然に繰り返さない。未使用または不明の商品は体験談を書かない。\n${getRoomIntroPlacementRule(item)}\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\n${getSalePromptRule()}\nURL未設定時は、投稿本文に「ROOM個別URL未設定」と書かず、URL部分を省略する。登録済みURLがある場合は、X_POSTとTHREADS_POSTの両方へ登録URLを1回だけそのまま記載する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_THREADS_POST===`;
+  return `商品情報を確認し、楽天ROOM紹介文・ハッシュタグ・X投稿文・Threads投稿文を一度に作成してください。存在しない情報、レビュー、効果、在庫、価格、クーポン、セール期限、使用体験を推測・捏造しないでください。\n\n【商品情報】\n${getSnsProductFacts(item)}\n商品URL：${itemUrl || "未設定"}\n${getRoomUrlPromptRule(roomUrl)}\n文章作成用中間情報：対象者=${context.targetUser} / 悩み=${context.problem} / 主なメリット=${context.mainBenefit} / 利用シーン=${context.usageScene} / 商品状態=${context.usageStatus} / 今チェックする理由=${context.saleReason || "なし"}\n\n【ROOM紹介文】\n商品情報だけを使い、自然なROOM紹介文を作る。${ROOM_INTRO_STYLE_RULE} 確認済み割引がある場合は割引情報を冒頭に置き、商品説明内で同じ割引情報を不自然に繰り返さない。未使用または不明の商品は体験談を書かない。\n${getRoomIntroPlacementRule(item)}\n【ROOMハッシュタグ】\n商品情報とROOM紹介文に合うタグを作る。根拠のない人気・効果・最安表現は使わない。\n【X投稿文】\n${xRules}\n【Threads投稿文】\n${threadsRules}\n【共通の安全ルール】\n${usageRule}\n${getSalePromptRule()}\nURL未設定時は、投稿本文に「ROOM個別URL未設定」と書かず、URL部分を省略する。登録済みURLがある場合は、X_POSTとTHREADS_POSTの両方へ登録URLを1回だけそのまま記載する。\n\n【必須出力形式】\n===ROOM_INTRO===\nROOM紹介文\n===END_ROOM_INTRO===\n\n===ROOM_HASHTAGS===\n#タグ1 #タグ2 #タグ3\n===END_ROOM_HASHTAGS===\n\n===X_POST===\nX投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_X_POST===\n\n===THREADS_POST===\nThreads投稿文\nROOM個別URLが登録済みなら、URLを1回だけ記載する。\n===END_THREADS_POST===`;
 }
 
 function parseCombinedContentResult(rawText = "") {
@@ -4831,7 +4852,7 @@ function buildCodexPostInstructions(candidate, { mode = "confirmation" } = {}) {
     "",
     "【手順】",
     "1. 商品情報を確認する",
-    "2. 保存済み紹介文・タグがあればそのまま使う。文章が必要な場合は商品情報だけから、次の5つのフック型（驚き・発見／対象者への呼びかけ／悩みへの共感／確認済みメリット／短い一言）のうち商品に合うものを選ぶ。冒頭フック→商品の魅力→確認済み特徴→自然な締めの順で、冒頭にスペックを並べず自然な日本語にする。毎回同じ型に固定しない",
+    `2. 保存済み紹介文・タグがあればそのまま使う。文章が必要な場合は商品情報だけを根拠にする。${ROOM_INTRO_STYLE_RULE} 5つのフック型は商品に合う場合だけ使い、固定順や定型文の連続を避ける`,
     `3. #codex-result-inputでitemCode「${candidate.itemCode || product.itemCode || ""}」に一致する商品カードを1件だけ特定する`,
     `4. itemUrl「${itemUrl}」も照合し、商品名だけで判定しない`,
     "5. 作成した紹介文・ハッシュタグをアプリへ先に保存し、結果を反映する",
@@ -4877,7 +4898,7 @@ function buildCodexPostInstructions(candidate, { mode = "confirmation" } = {}) {
       ]),
     "",
     "【紹介文条件】",
-    "楽天ROOM向けに親しみやすく、確認済みの商品情報だけを使用する。冒頭は商品に合う具体的なフックとし、商品名の長い繰り返し・SEO語の羅列・冒頭の仕様羅列・機械的な定型文を避ける。通常紹介文は100〜180文字程度、絵文字は適度、ハッシュタグ5〜8個、全体500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項だけを反映する。楽天イベントは開催状況・開催期間・当該商品の対象条件が確認できた場合だけ自然に触れる。開始前・開催中・終了間近を日付から推測せず、確認できない場合は通常の商品紹介にする。商品タイトルからの検出だけで割引を現在有効と判断しない。",
+    `${ROOM_INTRO_STYLE_RULE} 商品名の長い繰り返し・SEO語の羅列・冒頭の仕様羅列を避ける。ハッシュタグは5〜8個、紹介文と合わせて500文字以内。明記されたセール価格、割引率、クーポン、期間、ポイント還元、通常価格との比較、注意事項だけを反映する。楽天イベントは開催状況・開催期間・当該商品の対象条件が確認できた場合だけ自然に触れる。開始前・開催中・終了間近を日付から推測せず、確認できない場合は通常の商品紹介にする。商品タイトルからの検出だけで割引を現在有効と判断しない。`,
     "割引確認状態がconfirmedで確認済みヘッダーがある場合だけ、50%OFFや半額などの確認済み表現を目立つ位置へ使用してよい。candidateやunknownは割引候補として扱い、50%OFFや半額と断定しない。警告対象と選定理由は内部情報であり、未確認情報を商品事実として文章化しない。",
     "未使用または状態不明の商品は、使用体験を書かず『便利そう』『候補に入れてもよさそう』などの表現にする。レビューは取得できた情報だけを使う。",
     "生成後に、フックの自然さ、冒頭の具体性、商品固有性、使用状況、効果・レビュー・価格・クーポン・期限・イベント開催状況と対象条件の事実性、過度な煽りを自己点検し、条件を満たさなければ書き直す。未確認の割引・セール・イベントを理由に文章全体を止めず、その記述だけを省く。",
