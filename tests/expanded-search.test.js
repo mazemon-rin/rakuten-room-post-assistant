@@ -48,6 +48,10 @@ assert.throws(() => rules.supportedSelectionReason("最安", { itemName: "靴", 
 assert.equal(rules.supportedSelectionReason("", {}), "");
 assert.equal(rules.suggestSelectionReason({ itemCaption: "机の上を整理できる収納ラック。人気の商品です。" }), "机の上を整理できる収納ラック");
 assert.equal(rules.suggestSelectionReason({ itemCaption: "大人気の特別商品です。" }), "");
+assert.equal(rules.suggestSelectionReason({ itemCaption: "対応いたします。" }), "", "courtesy copy is not product evidence");
+assert.equal(rules.suggestSelectionReason({ itemCaption: "軽量・折りたたみ式）約0." }), "", "truncated fragments are not shown as selection reasons");
+assert.equal(rules.suggestSelectionReason({ itemCaption: "折りたたみ式 火傷防止 温度ヒュー" }), "", "unverified safety claims and incomplete text are rejected");
+assert.equal(rules.suggestSelectionReason({ itemCaption: "30%OFFでお得。折りたたみ式の商品です。" }), "折りたたみ式の商品です", "a verified complete fact can be used while discount language is ignored");
 const longReason = rules.suggestSelectionReason({ itemCaption: `在宅勤務の環境づくりに役立つ多機能な商品です。${"詳しい説明です。".repeat(14)}机上を整理できる収納ラックです。` });
 assert.equal(longReason, "机上を整理できる収納ラックです");
 assert.ok(longReason.length < 50, "selection reason is a concise evidence excerpt, not a full description");

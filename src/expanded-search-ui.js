@@ -113,9 +113,12 @@
       const compareSearch = state.context?.searchMode === "related" && state.context.relation === "compare";
       const imageUrl = getImage(product);
       const image = imageUrl ? `<img class="expanded-result-image" src="${escapeAttr(imageUrl)}" alt="${escapeAttr(product.itemName || "商品画像")}" loading="lazy">` : "<p>商品画像なし</p>";
+      const productUrl = String(product.itemUrl || "");
+      const productLink = productUrl ? `<a class="expanded-result-link" href="${escapeAttr(productUrl)}" target="_blank" rel="noopener noreferrer">楽天市場で商品を見る ↗</a>` : "";
       const relevanceLabel = relevance.status === "low" ? "関連性なし（候補登録対象外）" : relevance.status === "review" ? (compareSearch ? "要確認（判定確定まで候補登録不可）" : "要確認") : "関連性あり";
       const disabled = duplicate || !code || relevance.status === "low" || (compareSearch && relevance.status !== "relevant");
-      return `<article class="expanded-result"><label><input type="checkbox" class="expanded-select" data-index="${index}" ${disabled ? "disabled" : ""}> <strong>${escapeHtml(product.itemName || "商品名未設定")}</strong></label>${image}<p>${escapeHtml(product.shopName || "ショップ未設定")} / 商品ID（itemCode）: ${escapeHtml(code || "未記録")}</p><p>商品URL: ${escapeHtml(product.itemUrl || "未記録")}</p><p>${duplicate ? "候補または履歴に登録済み" : !code ? "商品コード未記録のため登録不可" : formatYen(product.itemPrice)}</p><p class="expanded-relevance expanded-relevance-${relevance.status}"><strong>${escapeHtml(relevanceLabel)}</strong>：${escapeHtml(relevance.reason)}</p><label>商品固有の選定理由（商品情報の確認済み表現のみ。任意）<input class="expanded-reason" data-index="${index}" maxlength="160" value="${escapeAttr(rules.suggestSelectionReason(product))}" placeholder="根拠がなければ空欄"></label></article>`;
+      const singleButtonLabel = duplicate ? "登録済み" : "この商品を候補登録";
+      return `<article class="expanded-result"><label><input type="checkbox" class="expanded-select" data-index="${index}" ${disabled ? "disabled" : ""}> <strong>${escapeHtml(product.itemName || "商品名未設定")}</strong></label>${image}<p>${escapeHtml(product.shopName || "ショップ未設定")} / 商品ID（itemCode）: ${escapeHtml(code || "未記録")}</p>${productLink}<p>${duplicate ? "候補または履歴に登録済み" : !code ? "商品コード未記録のため登録不可" : formatYen(product.itemPrice)}</p><p class="expanded-relevance expanded-relevance-${relevance.status}"><strong>${escapeHtml(relevanceLabel)}</strong>：${escapeHtml(relevance.reason)}</p><label>商品固有の選定理由（商品情報の確認済み表現のみ。任意）<input class="expanded-reason" data-index="${index}" maxlength="160" value="${escapeAttr(rules.suggestSelectionReason(product))}" placeholder="根拠がなければ空欄"></label><button type="button" class="secondary-button expanded-register" data-index="${index}" ${disabled ? "disabled" : ""}>${singleButtonLabel}</button></article>`;
     }).join("");
     el("expandedSave").hidden = products.length === 0;
     el("expandedSaveMessage").textContent = "";
@@ -133,11 +136,28 @@
     return merged;
   }
 
+  function clearResults() {
+    if (state.busy) throw new Error("検索中は結果をクリアできません。検索完了後に操作してください。");
+    document.querySelectorAll(".expanded-select:checked").forEach((input) => { input.checked = false; });
+    state.products = [];
+    state.termResults.clear();
+    state.failedTerms = [];
+    state.context = null;
+    state.relevanceContext = null;
+    renderProducts([]);
+    el("expandedFailures").replaceChildren();
+    el("expandedRetryFailed").hidden = true;
+    el("expandedRetryFailed").disabled = false;
+    el("expandedSaveMessage").textContent = "";
+    message("検索結果をクリアしました。検索条件と検索語は保持しています。");
+  }
+
   async function executeTerms(terms, { reset = false } = {}) {
     if (state.busy) return;
     state.busy = true;
     el("expandedRun").disabled = true;
     el("expandedRetryFailed").disabled = true;
+    el("expandedClearResults").disabled = true;
     if (reset) {
       state.termResults.clear();
       state.failedTerms = [];
@@ -183,6 +203,7 @@
       state.busy = false;
       el("expandedRun").disabled = false;
       el("expandedRetryFailed").disabled = false;
+      el("expandedClearResults").disabled = false;
     }
   }
 
@@ -207,17 +228,15 @@
     await executeTerms(failed);
   }
 
-  function saveSelected() {
+  function saveProducts(entries) {
     if (!state.context || JSON.stringify(currentContext(readTerms())) !== JSON.stringify(state.context)) throw new Error("検索条件が変わりました。検索し直してください。");
-    const checked = [...document.querySelectorAll(".expanded-select:checked")];
-    if (!checked.length) throw new Error("登録する商品を選択してください。");
+    if (!entries.length) throw new Error("登録する商品を選択してください。");
     const next = { ...data, candidates: [...data.candidates] };
     const added = [];
     let duplicates = 0;
     let failed = 0;
     const seenCodes = new Set();
-    checked.forEach((input) => {
-      const index = Number(input.dataset.index);
+    entries.forEach(({ index, card }) => {
       const product = state.products[index];
       const code = getItemCode(product);
       if (!product || !code || code !== String(product.itemCode || "")) { failed++; return; }
@@ -225,7 +244,6 @@
       const compareSearch = state.context.searchMode === "related" && state.context.relation === "compare";
       if (relevance.status === "low" || (compareSearch && relevance.status !== "relevant")) { failed++; return; }
       if (seenCodes.has(code) || !window.DuplicateDetection.canSaveRoomCandidate(product, next.candidates, next.history)) { duplicates++; return; }
-      const card = input.closest(".expanded-result");
       const reason = card?.querySelector(".expanded-reason")?.value.trim() || "";
       let verifiedReason;
       try { verifiedReason = rules.supportedSelectionReason(reason, product); }
@@ -247,6 +265,17 @@
     el("expandedSaveMessage").textContent = `登録成功${added.length}件、重複除外${duplicates}件、失敗${failed}件。保存後の照合も完了しました。${failed ? "失敗した商品のitemCodeと選定理由を確認してください。" : ""}`;
   }
 
+  function saveSelected() {
+    const checked = [...document.querySelectorAll(".expanded-select:checked")];
+    saveProducts(checked.map((input) => ({ index: Number(input.dataset.index), card: input.closest(".expanded-result") })));
+  }
+
+  function saveSingle(event) {
+    const button = event.target.closest(".expanded-register");
+    if (!button) return;
+    saveProducts([{ index: Number(button.dataset.index), card: button.closest(".expanded-result") }]);
+  }
+
   function bind(id, handler) {
     el(id).addEventListener("click", async () => {
       try { await handler(); } catch (error) { message(error.message || "処理に失敗しました。"); }
@@ -258,12 +287,16 @@
     el("expandedMode").addEventListener("change", updateMode);
     el("expandedSeason").addEventListener("change", updateSeasonalPurposes);
     el("expandedOriginType").addEventListener("change", updateOrigins);
+    el("expandedResults").addEventListener("click", (event) => {
+      try { saveSingle(event); } catch (error) { message(error.message || "処理に失敗しました。"); }
+    });
     el("expandedSearch").addEventListener("toggle", () => { if (el("expandedSearch").open && value("expandedMode") === "related") updateOrigins(); });
     bind("expandedSuggest", suggest);
     bind("expandedPrompt", copyPrompt);
     bind("expandedImport", importJson);
     bind("expandedRun", runSearch);
     bind("expandedRetryFailed", retryFailedTerms);
+    bind("expandedClearResults", clearResults);
     bind("expandedSave", saveSelected);
     updateMode();
     updateSeasonalPurposes();

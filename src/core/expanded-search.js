@@ -281,24 +281,16 @@
 
   function suggestSelectionReason(product) {
     const caption = String(product?.itemCaption || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
-    if (/(最安|人気|売れ|絶対|必ず|効果|クーポン|セール|%\s*OFF|％\s*OFF|期間限定|使ってみた)/i.test(caption)) {
-      // 販促や体験表現を含む説明文から、文全体を理由として転載しない。
-      const safeCaption = caption.split(/[。\n]/).filter((part) => !/(最安|人気|売れ|絶対|必ず|効果|クーポン|セール|%\s*OFF|％\s*OFF|期間限定|使ってみた)/i.test(part)).join("。");
-      return extractShortEvidence(safeCaption);
-    }
-    return extractShortEvidence(caption);
-  }
-
-  function extractShortEvidence(text) {
-    const patterns = [
-      /(?:デスク|机|卓上)[^、。！？\n]{0,40}(?:収納|整理|配線)[^、。！？\n]{0,18}/,
-      /(?:折りたたみ|洗える|保温|保冷|軽量|通気性|防水|撥水|耐熱|耐冷|抗菌)[^、。！？\n]{0,12}/,
-      /(?:収納|ポケット|引き出し|棚|容量|サイズ|素材|材質|対応|付属)[^、。！？\n]{0,14}/
-    ];
-    for (const pattern of patterns) {
-      const match = String(text || "").match(pattern);
-      const evidence = match?.[0]?.trim() || "";
-      if (evidence && evidence.length <= 48) return evidence;
+    const sentences = caption.match(/[^。！？!?\n]+[。！？!?]/g) || [];
+    const promotional = /(最安|人気|売れ|絶対|必ず|効果|効く|改善|クーポン|セール|割引|%\s*OFF|％\s*OFF|期間限定|使ってみた|おすすめ)/i;
+    const objectiveFact = /(デスク|机|卓上|収納|折りたたみ|洗える|保温|保冷|軽量|通気性|防水|撥水|耐熱|耐冷|抗菌|ポケット|引き出し|棚|容量|サイズ|素材|材質|対応|付属)/;
+    for (const sentence of sentences) {
+      const evidence = sentence.replace(/[。！？!?]+$/, "").trim();
+      if (evidence.length < 3 || evidence.length > 48) continue;
+      if (promotional.test(evidence) || !objectiveFact.test(evidence)) continue;
+      // 途中で切れた説明や、対象が分からない定型句は理由に使わない。
+      if (/(?:対応いたします|ご用意しております|お選びいただけます|約|サイズ|容量|温度|火傷防止|ヒュー|[（(、・：:]|\d)$/.test(evidence)) continue;
+      return evidence;
     }
     return "";
   }

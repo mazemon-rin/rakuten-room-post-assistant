@@ -571,6 +571,8 @@ textarea {
 .expanded-result { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; overflow-wrap: anywhere; }
 .expanded-result-image { display: block; width: 100%; max-height: 160px; margin: 8px 0; object-fit: contain; }
 .expanded-result p { margin: 7px 0; }
+.expanded-result-link { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+.expanded-result .expanded-register { max-width: 100%; margin-top: 10px; white-space: normal; }
 .expanded-failures { margin: 8px 0; padding-left: 1.5rem; color: #8a3022; }
 .expanded-failures:empty { display: none; }
 .expanded-relevance { padding: 7px 9px; border-radius: 6px; background: #edf6f1; }
