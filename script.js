@@ -765,9 +765,28 @@ async function readRakutenApiError(response) {
   }
 }
 
+const EXPANDED_SEARCH_MAX_429_RETRIES = 2;
+
+function getExpandedSearchRetryWaitMs(response, rawBody, retryCount) {
+  const retryAfter = response?.headers?.get?.("Retry-After");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) return Math.max(0, retryAt - Date.now());
+  }
+  const body = String(rawBody || "");
+  const secondsMatch = body.match(/(?:try\s+again\s+in|retry\s+after)\s+(\d+(?:\.\d+)?)\s+seconds?/i)
+    || body.match(/(?:再試行|再度アクセス)[^\d]{0,12}(\d+(?:\.\d+)?)\s*秒後/);
+  if (secondsMatch) return Math.ceil(Number(secondsMatch[1]) * 1000);
+  // サーバーの待機指定が読めない場合も即時連打せず、1秒から段階的に待ちます。
+  return Math.min(8000, 1000 * (2 ** retryCount));
+}
+
 async function requestRakutenItemSearch(keyword, options = {}) {
   const fetchImpl = options.fetchImpl || window.fetch.bind(window);
   if (!hasRakutenCredentials()) return { status: "not_configured", query: String(keyword || "").trim(), products: [] };
+  const retry429 = options.retry429 === true;
   const params = new URLSearchParams({
     format: "json",
     applicationId: data.settings.applicationId,
@@ -777,14 +796,30 @@ async function requestRakutenItemSearch(keyword, options = {}) {
     sort: options.sort || "standard"
   });
   addAffiliateIdParam(params);
-  const response = await fetchImpl(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`, { method: "GET", headers: { Accept: "application/json" } });
-  if (!response?.ok) {
-    const error = new Error(await readRakutenApiError(response));
-    error.status = response?.status || null;
-    throw error;
+  let retryCount = 0;
+  while (true) {
+    const response = await fetchImpl(`https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701?${params.toString()}`, { method: "GET", headers: { Accept: "application/json" } });
+    if (response?.status === 429 && retry429) {
+      const rawBody = await response.text().catch(() => "");
+      if (retryCount >= EXPANDED_SEARCH_MAX_429_RETRIES) {
+        const error = new Error(formatRakutenApiError(`HTTP 429：${rawBody || "利用制限が続いています。時間をおいて再検索してください。"}`));
+        error.status = 429;
+        error.retryCount = retryCount;
+        throw error;
+      }
+      const waitMs = getExpandedSearchRetryWaitMs(response, rawBody, retryCount);
+      retryCount += 1;
+      await sleep(waitMs);
+      continue;
+    }
+    if (!response?.ok) {
+      const error = new Error(await readRakutenApiError(response));
+      error.status = response?.status || null;
+      throw error;
+    }
+    const payload = await response.json();
+    return { status: "ok", query: String(keyword || "").trim(), products: normalizeRakutenItems(payload) };
   }
-  const payload = await response.json();
-  return { status: "ok", query: String(keyword || "").trim(), products: normalizeRakutenItems(payload) };
 }
 
 window.RoomRakutenApi = { requestItemSearch: requestRakutenItemSearch, hasCredentials: hasRakutenCredentials };

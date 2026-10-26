@@ -1,6 +1,7 @@
 (function () {
+  const SEARCH_REQUEST_INTERVAL_MS = 1000;
   const rules = window.RoomExpandedSearch;
-  const state = { requestId: "", mode: "", keywords: [], products: [], origins: [], origin: null, busy: false };
+  const state = { requestId: "", mode: "", keywords: [], products: [], origins: [], origin: null, context: null, termResults: new Map(), failedTerms: [], lastRequestAt: null, busy: false };
   const el = (id) => document.getElementById(id);
   const value = (id) => el(id)?.value?.trim() || "";
   const message = (text) => { el("expandedMessage").textContent = text; };
@@ -90,43 +91,96 @@
     el("expandedResults").innerHTML = products.map((product, index) => {
       const duplicate = !canSaveRoomCandidate(product);
       const code = String(product.itemCode || "");
+      const relevance = rules.classifyRelevance(product, { problem: state.context?.problem || "", keywords: state.keywords });
       const imageUrl = getImage(product);
       const image = imageUrl ? `<img class="expanded-result-image" src="${escapeAttr(imageUrl)}" alt="${escapeAttr(product.itemName || "商品画像")}" loading="lazy">` : "<p>商品画像なし</p>";
-      return `<article class="expanded-result"><label><input type="checkbox" class="expanded-select" data-index="${index}" ${duplicate || !code ? "disabled" : ""}> <strong>${escapeHtml(product.itemName || "商品名未設定")}</strong></label>${image}<p>${escapeHtml(product.shopName || "ショップ未設定")} / 商品ID（itemCode）: ${escapeHtml(code || "未記録")}</p><p>商品URL: ${escapeHtml(product.itemUrl || "未記録")}</p><p>${duplicate ? "候補または履歴に登録済み" : !code ? "商品コード未記録のため登録不可" : formatYen(product.itemPrice)}</p><label>商品固有の選定理由（商品説明の確認済み表現のみ。任意）<input class="expanded-reason" data-index="${index}" maxlength="160" value="${escapeAttr(rules.suggestSelectionReason(product))}" placeholder="根拠がなければ空欄"></label></article>`;
+      const relevanceLabel = relevance.status === "low" ? "関連性が低いため候補登録対象外" : relevance.status === "review" ? "関連性は要確認" : "検索条件と関連する情報あり";
+      const disabled = duplicate || !code || relevance.status === "low";
+      return `<article class="expanded-result"><label><input type="checkbox" class="expanded-select" data-index="${index}" ${disabled ? "disabled" : ""}> <strong>${escapeHtml(product.itemName || "商品名未設定")}</strong></label>${image}<p>${escapeHtml(product.shopName || "ショップ未設定")} / 商品ID（itemCode）: ${escapeHtml(code || "未記録")}</p><p>商品URL: ${escapeHtml(product.itemUrl || "未記録")}</p><p>${duplicate ? "候補または履歴に登録済み" : !code ? "商品コード未記録のため登録不可" : formatYen(product.itemPrice)}</p><p class="expanded-relevance expanded-relevance-${relevance.status}"><strong>${escapeHtml(relevanceLabel)}</strong>：${escapeHtml(relevance.reason)}</p><label>商品固有の選定理由（商品情報の確認済み表現のみ。任意）<input class="expanded-reason" data-index="${index}" maxlength="160" value="${escapeAttr(rules.suggestSelectionReason(product))}" placeholder="根拠がなければ空欄"></label></article>`;
     }).join("");
     el("expandedSave").hidden = products.length === 0;
     el("expandedSaveMessage").textContent = "";
+  }
+
+  function renderFailures() {
+    const failures = state.failedTerms;
+    el("expandedFailures").innerHTML = failures.map(({ term, reason, deferred }) => `<li><strong>${escapeHtml(term)}</strong>：${escapeHtml(deferred ? `未実行。${reason}` : reason)}</li>`).join("");
+    el("expandedRetryFailed").hidden = failures.length === 0;
+  }
+
+  function renderMergedResults() {
+    const merged = rules.mergeResults([...state.termResults.values()], rankingIdentity);
+    renderProducts(merged);
+    return merged;
+  }
+
+  async function executeTerms(terms, { reset = false } = {}) {
+    if (state.busy) return;
+    state.busy = true;
+    el("expandedRun").disabled = true;
+    el("expandedRetryFailed").disabled = true;
+    if (reset) {
+      state.termResults.clear();
+      state.failedTerms = [];
+      renderProducts([]);
+      el("expandedFailures").replaceChildren();
+    }
+    message(`${countLabel(terms)}の検索語で順番に検索します（API呼び出し間隔 ${SEARCH_REQUEST_INTERVAL_MS / 1000}秒）。`);
+    let stoppedByRateLimit = false;
+    try {
+      for (let index = 0; index < terms.length; index += 1) {
+        const term = terms[index];
+        if (state.lastRequestAt !== null) {
+          const waitMs = Math.max(0, SEARCH_REQUEST_INTERVAL_MS - (Date.now() - state.lastRequestAt));
+          if (waitMs > 0) await sleep(waitMs);
+        }
+        try {
+          const response = await requestRakutenItemSearch(term, { hits: 10, retry429: true });
+          if (response.status !== "ok") throw new Error("楽天APIを利用できません。");
+          state.termResults.set(term, response.products.filter((item) => !isUnavailableProduct(item)));
+          state.failedTerms = state.failedTerms.filter((failure) => failure.term !== term);
+        } catch (error) {
+          state.failedTerms = state.failedTerms.filter((failure) => failure.term !== term);
+          state.failedTerms.push({ term, reason: error.message || "検索エラー", deferred: false });
+          if (error.status === 429) {
+            stoppedByRateLimit = true;
+            for (const unattempted of terms.slice(index + 1)) state.failedTerms.push({ term: unattempted, reason: "HTTP 429が続いたため今回の検索では実行していません。", deferred: true });
+            break;
+          }
+        } finally {
+          // API関数内で429再試行した場合も含め、実際の処理完了から次の語まで間隔を取ります。
+          state.lastRequestAt = Date.now();
+        }
+      }
+      const merged = renderMergedResults();
+      renderFailures();
+      const successCount = state.termResults.size;
+      const status = stoppedByRateLimit ? "HTTP 429が続いたため、残りの検索語を停止しました。" : "";
+      message(`${successCount}/${state.keywords.length}検索語成功、商品${countLabel(merged)}。${state.failedTerms.length ? `失敗・未実行${state.failedTerms.length}件は下に表示しています。` : "失敗なし。"} ${status}`);
+    } finally {
+      state.busy = false;
+      el("expandedRun").disabled = false;
+      el("expandedRetryFailed").disabled = false;
+    }
   }
 
   async function runSearch() {
     if (state.busy) return;
     if (!hasRakutenCredentials()) throw new Error("楽天APIの設定が必要です。サンプル商品を候補登録に使用しません。");
     const terms = readTerms();
-    const context = currentContext(terms);
-    state.busy = true;
-    el("expandedRun").disabled = true;
-    renderProducts([]);
-    message(`${countLabel(terms)}の検索語で検索中です。`);
-    const results = [];
-    const failures = [];
-    try {
-      for (const term of terms) {
-        try {
-          const response = await requestRakutenItemSearch(term, { hits: 10 });
-          if (response.status !== "ok") throw new Error("楽天APIを利用できません。");
-          results.push(response.products.filter((item) => !isUnavailableProduct(item)));
-        } catch (error) { failures.push(`${term}: ${error.message}`); }
-      }
-      if (!results.length) throw new Error(`全検索語の取得に失敗しました。${failures.join(" / ")}`);
-      const merged = rules.mergeResults(results, rankingIdentity);
-      state.keywords = terms;
-      state.context = context;
-      renderProducts(merged);
-      message(`${countLabel(merged)}を表示しました。${failures.length ? `${failures.length}件の検索語は失敗しました: ${failures.join(" / ")}` : ""}`);
-    } finally {
-      state.busy = false;
-      el("expandedRun").disabled = false;
-    }
+    state.keywords = terms;
+    state.context = currentContext(terms);
+    await executeTerms(terms, { reset: true });
+  }
+
+  async function retryFailedTerms() {
+    if (state.busy) return;
+    if (!state.failedTerms.length) return;
+    const terms = readTerms();
+    if (JSON.stringify(currentContext(terms)) !== JSON.stringify(state.context) || JSON.stringify(terms) !== JSON.stringify(state.keywords)) throw new Error("検索条件が変わっています。内容を確認して新しい検索を実行してください。");
+    const failed = state.failedTerms.map((item) => item.term);
+    state.failedTerms = [];
+    await executeTerms(failed);
   }
 
   function saveSelected() {
@@ -143,6 +197,7 @@
       const product = state.products[index];
       const code = getItemCode(product);
       if (!product || !code || code !== String(product.itemCode || "")) { failed++; return; }
+      if (rules.classifyRelevance(product, { problem: state.context.problem, keywords: state.keywords }).status === "low") { failed++; return; }
       if (seenCodes.has(code) || !window.DuplicateDetection.canSaveRoomCandidate(product, next.candidates, next.history)) { duplicates++; return; }
       const card = input.closest(".expanded-result");
       const reason = card?.querySelector(".expanded-reason")?.value.trim() || "";
@@ -181,6 +236,7 @@
     bind("expandedPrompt", copyPrompt);
     bind("expandedImport", importJson);
     bind("expandedRun", runSearch);
+    bind("expandedRetryFailed", retryFailedTerms);
     bind("expandedSave", saveSelected);
     updateMode();
   });

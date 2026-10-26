@@ -5,7 +5,7 @@ const vm = require("node:vm");
 function element() {
   return { value: "", textContent: "", innerHTML: "", hidden: false, disabled: false, listeners: {}, addEventListener(name, callback) { this.listeners[name] = callback; }, replaceChildren() { this.innerHTML = ""; } };
 }
-const ids = Object.fromEntries(["expandedSearch", "expandedMode", "expandedOriginType", "expandedOrigin", "expandedRelation", "expandedProblem", "expandedTarget", "expandedSeason", "expandedSuggest", "expandedPrompt", "expandedKeywords", "expandedJson", "expandedImport", "expandedRun", "expandedMessage", "expandedResults", "expandedSave", "expandedSaveMessage"].map((id) => [id, element()]));
+const ids = Object.fromEntries(["expandedSearch", "expandedMode", "expandedOriginType", "expandedOrigin", "expandedRelation", "expandedProblem", "expandedTarget", "expandedSeason", "expandedSuggest", "expandedPrompt", "expandedKeywords", "expandedJson", "expandedImport", "expandedRun", "expandedRetryFailed", "expandedFailures", "expandedMessage", "expandedResults", "expandedSave", "expandedSaveMessage"].map((id) => [id, element()]));
 ids.expandedMode.value = "problem";
 ids.expandedOriginType.value = "history";
 ids.expandedRelation.value = "same";
@@ -17,6 +17,12 @@ let current = { candidates: [], history, sales: [] };
 let persisted = structuredClone(current);
 let quota = false;
 let calls = [];
+const waits = [];
+let inFlight = 0;
+let maxInFlight = 0;
+let termFourCalls = 0;
+let persistent429 = false;
+let fakeNow = 0;
 let sequence = 0;
 const catalog = {
   "検索 1": [{ itemCode: "a:1", itemName: "商品A", itemCaption: "収納に便利", shopName: "店A", mediumImageUrls: [{ imageUrl: "https://example.test/a.jpg" }] }, { itemCode: "old:1", itemName: "投稿済み商品" }],
@@ -26,9 +32,19 @@ const catalog = {
   "検索 5": [{ itemCode: "e:5", itemName: "商品E" }]
 };
 const context = {
-  console, document, data: current, searchResults: [], crypto: { randomUUID: () => `candidate-${++sequence}` }, navigator: { clipboard: { writeText: async () => {} } },
+  console, document, data: current, searchResults: [], Date: { now: () => fakeNow }, crypto: { randomUUID: () => `candidate-${++sequence}` }, navigator: { clipboard: { writeText: async () => {} } },
   hasRakutenCredentials: () => true,
-  requestRakutenItemSearch: async (term) => { calls.push(term); if (term === "検索 4") throw new Error("HTTP 500"); return { status: "ok", products: catalog[term] || [] }; },
+  requestRakutenItemSearch: async (term) => {
+    calls.push(term);
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await Promise.resolve();
+    inFlight--;
+    if (persistent429 && term === "検索 2") { const error = new Error("HTTP 429"); error.status = 429; throw error; }
+    if (term === "検索 4" && termFourCalls++ === 0) { const error = new Error("HTTP 500"); error.status = 500; throw error; }
+    return { status: "ok", products: catalog[term] || [] };
+  },
+  sleep: async (milliseconds) => { waits.push(milliseconds); fakeNow += milliseconds; },
   isUnavailableProduct: () => false,
   rankingIdentity: (product) => product.itemCode,
   getItemCode: (product) => product.itemCode || "",
@@ -56,13 +72,25 @@ const click = async (id) => ids[id].listeners.click();
   await click("expandedImport");
   assert.equal(ids.expandedKeywords.value, "収納 ラック", "matching Codex JSON is imported for review");
   ids.expandedKeywords.value = [1, 2, 3, 4, 5].map((n) => `検索 ${n}`).join("\n");
-  await click("expandedRun");
+  const firstRun = click("expandedRun");
+  const duplicateRun = click("expandedRun");
+  await Promise.all([firstRun, duplicateRun]);
   assert.equal(calls.length, 5, "five searches are attempted");
-  assert.match(ids.expandedMessage.textContent, /1件の検索語は失敗/);
+  assert.equal(maxInFlight, 1, "search requests never run concurrently");
+  assert.deepEqual(waits, [1000, 1000, 1000, 1000], "sequential requests are separated by one second");
+  assert.match(ids.expandedMessage.textContent, /失敗・未実行1件/);
+  assert.match(ids.expandedFailures.innerHTML, /検索 4.*HTTP 500/);
+  assert.equal(ids.expandedRetryFailed.hidden, false, "retry control appears only when there are failed terms");
   assert.equal((ids.expandedResults.innerHTML.match(/class="expanded-result"/g) || []).length, 5, "five groups merge, duplicate product deduplicated");
   assert.match(ids.expandedResults.innerHTML, /投稿済み商品[\s\S]*登録済み/);
   assert.match(ids.expandedResults.innerHTML, /class="expanded-result-image" src="https:\/\/example\.test\/a\.jpg"/, "product image is visible in search result");
   assert.equal(ids.expandedSave.hidden, false);
+
+  await click("expandedRetryFailed");
+  assert.deepEqual(calls, ["検索 1", "検索 2", "検索 3", "検索 4", "検索 5", "検索 4"], "retry runs only the failed search term");
+  assert.deepEqual(waits, [1000, 1000, 1000, 1000, 1000], "retry also respects the interval from the previous request");
+  assert.equal((ids.expandedResults.innerHTML.match(/class="expanded-result"/g) || []).length, 6, "successful earlier results remain and retried results are merged");
+  assert.equal(ids.expandedRetryFailed.hidden, true, "retry control hides after recovery");
 
   selected.push({ dataset: { index: "0" }, closest: () => ({ querySelector: () => ({ value: "収納" }) }) });
   selected.push({ dataset: { index: "1" }, closest: () => ({ querySelector: () => ({ value: "" }) }) });
@@ -94,5 +122,16 @@ const click = async (id) => ids[id].listeners.click();
   current.sales = [{ historyId: "history-1", itemCode: "old:1" }];
   ids.expandedOriginType.listeners.change();
   assert.match(ids.expandedOrigin.innerHTML, /old:1/, "linked sales can be a related-search origin");
+
+  calls = [];
+  waits.length = 0;
+  persistent429 = true;
+  ids.expandedKeywords.value = ["検索 1", "検索 2", "検索 3"].join("\n");
+  await click("expandedRun");
+  assert.deepEqual(calls, ["検索 1", "検索 2"], "persistent rate limit stops later API requests");
+  assert.deepEqual(waits.slice(-2), [1000, 1000], "new searches retain the request interval across batches");
+  assert.match(ids.expandedMessage.textContent, /HTTP 429が続いたため、残りの検索語を停止/);
+  assert.match(ids.expandedFailures.innerHTML, /検索 3.*未実行/);
+  assert.match(ids.expandedResults.innerHTML, /商品A/, "successful query results remain visible after a later 429");
   console.log("expanded search mocked API, partial failure, batch duplicate and quota cases: passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

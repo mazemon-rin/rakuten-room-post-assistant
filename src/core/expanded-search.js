@@ -38,6 +38,11 @@
     const p = clean(problem, 40);
     const target = clean(targetUser, 25);
     if (p.length < 2) throw new Error("悩みを2文字以上入力してください。");
+    if (/(デスク|机)/.test(p) && /(狭|収納|片付|スペース)/.test(p)) {
+      const terms = ["デスク収納ラック", "モニター台 収納", "デスク下 収納", "デスク上 収納"];
+      if (/在宅|ワーカー|仕事/.test(target)) terms.push("在宅ワーク デスク収納");
+      return validateKeywords([...new Set(terms)].slice(0, 5));
+    }
     const terms = [p, `${p} 便利`, target ? `${p} ${target}` : `${p} 対策`];
     if (/狭|収納|片付/.test(p)) terms.push("省スペース 収納");
     else if (/掃除|洗濯|家事/.test(p)) terms.push("家事 時短 グッズ");
@@ -98,10 +103,46 @@
   }
 
   function suggestSelectionReason(product) {
-    const caption = String(product?.itemCaption || "");
-    const sentence = caption.split(/[。\n]/).map((part) => part.trim()).find((part) => part.length <= 160 && /(収納|素材|材質|容量|サイズ|対応|付属|洗える|折りたたみ|軽量|保温|保冷)/.test(part) && !/(最安|人気|売れ|絶対|必ず|効果|クーポン|セール|%OFF|％OFF|期間限定|使ってみた)/.test(part));
-    return sentence || "";
+    const caption = String(product?.itemCaption || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+    if (/(最安|人気|売れ|絶対|必ず|効果|クーポン|セール|%\s*OFF|％\s*OFF|期間限定|使ってみた)/i.test(caption)) {
+      // 販促や体験表現を含む説明文から、文全体を理由として転載しない。
+      const safeCaption = caption.split(/[。\n]/).filter((part) => !/(最安|人気|売れ|絶対|必ず|効果|クーポン|セール|%\s*OFF|％\s*OFF|期間限定|使ってみた)/i.test(part)).join("。");
+      return extractShortEvidence(safeCaption);
+    }
+    return extractShortEvidence(caption);
   }
 
-  root.RoomExpandedSearch = Object.freeze({ modes, seasonal, validateKeywords, parseCodexResult, suggestProblem, suggestRelated, suggestSeasonal, mergeResults, makeSearchContext, supportedSelectionReason, suggestSelectionReason });
+  function extractShortEvidence(text) {
+    const patterns = [
+      /(?:デスク|机|卓上)[^、。！？\n]{0,40}(?:収納|整理|配線)[^、。！？\n]{0,18}/,
+      /(?:折りたたみ|洗える|保温|保冷|軽量|通気性|防水|撥水|耐熱|耐冷|抗菌)[^、。！？\n]{0,12}/,
+      /(?:収納|ポケット|引き出し|棚|容量|サイズ|素材|材質|対応|付属)[^、。！？\n]{0,14}/
+    ];
+    for (const pattern of patterns) {
+      const match = String(text || "").match(pattern);
+      const evidence = match?.[0]?.trim() || "";
+      if (evidence && evidence.length <= 48) return evidence;
+    }
+    return "";
+  }
+
+  function classifyRelevance(product, context = {}) {
+    const text = [product?.itemName, product?.itemCaption, product?.categoryName].filter(Boolean).join(" ").replace(/<[^>]*>/g, " ").toLowerCase();
+    const problem = String(context.problem || "");
+    if (/(デスク|机)/.test(problem) && /(狭|収納|片付|スペース)/.test(problem)) {
+      const deskCues = ["デスク収納ラック", "デスク周り", "デスク下", "机下", "デスク上", "机上", "机の上", "モニター台", "モニタースタンド", "卓上ラック", "デスクラック", "パソコンラック", "pcラック", "配線収納", "ケーブル収納", "文具収納", "デスクオーガナイザー"];
+      const matched = deskCues.find((cue) => text.includes(cue.toLowerCase()));
+      if (matched) return { status: "relevant", reason: `商品情報に「${matched}」の記載があります。` };
+      return { status: "low", reason: "商品名・説明にデスク周辺の収納・整理との関連を確認できません。" };
+    }
+    const terms = Array.isArray(context.keywords) ? context.keywords : [];
+    const matched = terms.find((term) => {
+      const words = String(term).toLowerCase().split(/[\s　]+/).filter((word) => word.length >= 2 && !/^(便利|対策|比較|併用|関連用品)$/.test(word));
+      return words.some((word) => text.includes(word));
+    });
+    if (matched) return { status: "relevant", reason: `商品情報に検索語「${matched}」と一致する語があります。` };
+    return { status: "review", reason: "商品情報だけでは検索条件との関連を判定できません。内容を確認してください。" };
+  }
+
+  root.RoomExpandedSearch = Object.freeze({ modes, seasonal, validateKeywords, parseCodexResult, suggestProblem, suggestRelated, suggestSeasonal, mergeResults, makeSearchContext, supportedSelectionReason, suggestSelectionReason, classifyRelevance });
 })(typeof window !== "undefined" ? window : globalThis);

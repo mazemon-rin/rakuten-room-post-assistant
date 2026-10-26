@@ -8,7 +8,7 @@ vm.runInNewContext(fs.readFileSync("src/core/expanded-search.js", "utf8"), conte
 const rules = context.RoomExpandedSearch;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-assert.deepEqual(plain(rules.suggestProblem("デスク周りが狭い", "在宅ワーカー")), ["デスク周りが狭い", "デスク周りが狭い 便利", "デスク周りが狭い 在宅ワーカー", "省スペース 収納"]);
+assert.deepEqual(plain(rules.suggestProblem("デスク周りが狭い", "在宅ワーカー")), ["デスク収納ラック", "モニター台 収納", "デスク下 収納", "デスク上 収納", "在宅ワーク デスク収納"]);
 assert.ok(rules.suggestRelated({ itemName: "収納ラック", categoryName: "収納" }, "compare")[0].includes("比較"));
 assert.ok(rules.suggestRelated({ itemName: "収納ラック" }, "together")[0].includes("併用"));
 assert.ok(rules.suggestRelated({ itemName: "収納ラック" }, "problem", "机が狭い")[0].includes("机が狭い"));
@@ -31,15 +31,20 @@ assert.throws(() => rules.supportedSelectionReason("最安", { itemName: "靴", 
 assert.equal(rules.supportedSelectionReason("", {}), "");
 assert.equal(rules.suggestSelectionReason({ itemCaption: "机の上を整理できる収納ラック。人気の商品です。" }), "机の上を整理できる収納ラック");
 assert.equal(rules.suggestSelectionReason({ itemCaption: "大人気の特別商品です。" }), "");
+const longReason = rules.suggestSelectionReason({ itemCaption: `在宅勤務の環境づくりに役立つ多機能な商品です。${"詳しい説明です。".repeat(14)}机上を整理できる収納ラックです。` });
+assert.equal(longReason, "机上を整理できる収納ラックです");
+assert.ok(longReason.length < 50, "selection reason is a concise evidence excerpt, not a full description");
+assert.deepEqual(plain(rules.classifyRelevance({ itemName: "猫用爪とぎ", itemCaption: "猫が使う爪とぎ" }, { problem: "デスク周りが狭い", keywords: ["デスク下 収納"] })), { status: "low", reason: "商品名・説明にデスク周辺の収納・整理との関連を確認できません。" });
+assert.equal(rules.classifyRelevance({ itemName: "モニター台収納ラック" }, { problem: "デスク周りが狭い", keywords: ["モニター台 収納"] }).status, "relevant");
 const searchContext = plain(rules.makeSearchContext({ searchMode: "problem", targetUser: "在宅ワーカー", problem: "デスクが狭い", selectionReason: "収納", searchKeywords: ["収納 ラック"] }));
 assert.equal(searchContext.version, 1);
 assert.equal(searchContext.selectionReason, "収納");
 assert.equal(searchContext.origin, null);
 
 const html = fs.readFileSync("index.html", "utf8");
-assert.ok(html.includes('id="expandedSearch"') && html.includes('id="expandedSave"'));
+assert.ok(html.includes('id="expandedSearch"') && html.includes('id="expandedSave"') && html.includes('id="expandedRetryFailed"') && html.includes('id="expandedFailures"'));
 assert.ok(html.includes('id="searchForm"') && html.includes('id="rankingForm"'));
-assert.ok(html.includes('src="src/core/expanded-search.js"') && /src="src\/expanded-search-ui\.js(?:\?[^\"]+)?"/.test(html));
+assert.ok(/src="src\/core\/expanded-search\.js(?:\?[^\"]+)?"/.test(html) && /src="src\/expanded-search-ui\.js(?:\?[^\"]+)?"/.test(html));
 const css = fs.readFileSync("style.css", "utf8");
 assert.ok(css.includes(".expanded-search-fields") && css.includes("max-width: 620px"));
 console.log("expanded search rules and UI structure: passed");

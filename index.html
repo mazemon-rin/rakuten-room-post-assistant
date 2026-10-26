@@ -121,8 +121,9 @@
         <div class="button-row"><button id="expandedSuggest" type="button" class="secondary-button">検索語を提案</button><button id="expandedPrompt" type="button" class="secondary-button">Codex用プロンプトを作成・コピー</button></div>
         <label class="expanded-wide">検索語（1行1件、最大5件。編集できます）<textarea id="expandedKeywords" rows="5" placeholder="検索語を入力"></textarea></label>
         <label class="expanded-wide">Codex結果のJSONを貼り付け<textarea id="expandedJson" rows="4" placeholder='{"schemaVersion":1,"requestId":"...","searchMode":"problem","keywords":["...包"]}'></textarea></label>
-        <div class="button-row"><button id="expandedImport" type="button" class="secondary-button">JSONから検索語を取り込む</button><button id="expandedRun" type="button" class="primary-button">検索語で楽天商品を検索</button></div>
+        <div class="button-row"><button id="expandedImport" type="button" class="secondary-button">JSONから検索語を取り込む</button><button id="expandedRun" type="button" class="primary-button">検索語で楽天商品を検索</button><button id="expandedRetryFailed" type="button" class="secondary-button" hidden>失敗した検索語だけ再検索</button></div>
         <p id="expandedMessage" class="message" role="status" aria-live="polite"></p>
+        <ul id="expandedFailures" class="expanded-failures" aria-label="失敗した検索語"></ul>
         <div id="expandedResults" class="expanded-results"></div>
         <div class="button-row"><button id="expandedSave" type="button" class="secondary-button" hidden>選択商品を一括で候補登録</button></div>
         <p id="expandedSaveMessage" class="message" role="status" aria-live="polite"></p>
@@ -484,9 +485,9 @@
   <script src="src/core/backup-security.js?v=backup-security-v1-r1"></script>
   <script src="src/core/ranking-rules.js"></script>
   <script src="src/core/trend-rules.js"></script>
-  <script src="src/core/expanded-search.js"></script>
-  <script src="script.js?v=backup-security-20261026-r1"></script>
-  <script src="src/expanded-search-ui.js?v=expanded-search-v1-r2"></script>
+  <script src="src/core/expanded-search.js?v=expanded-search-relevance-r2"></script>
+  <script src="script.js?v=expanded-search-rate-limit-20261026-r1"></script>
+  <script src="src/expanded-search-ui.js?v=expanded-search-rate-limit-r1"></script>
   <script src="src/sns-trend.js"></script>
   <script src="src/sns-trend-discovery.js?v=adoption-feedback-20260929"></script>
 </body>
