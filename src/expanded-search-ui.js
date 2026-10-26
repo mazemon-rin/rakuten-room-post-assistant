@@ -98,10 +98,11 @@
       const duplicate = !canSaveRoomCandidate(product);
       const code = String(product.itemCode || "");
       const relevance = rules.classifyRelevance(product, state.relevanceContext || { problem: state.context?.problem || "", keywords: state.keywords });
+      const compareSearch = state.context?.searchMode === "related" && state.context.relation === "compare";
       const imageUrl = getImage(product);
       const image = imageUrl ? `<img class="expanded-result-image" src="${escapeAttr(imageUrl)}" alt="${escapeAttr(product.itemName || "商品画像")}" loading="lazy">` : "<p>商品画像なし</p>";
-      const relevanceLabel = relevance.status === "low" ? "関連性なし（候補登録対象外）" : relevance.status === "review" ? "要確認" : "関連性あり";
-      const disabled = duplicate || !code || relevance.status === "low";
+      const relevanceLabel = relevance.status === "low" ? "関連性なし（候補登録対象外）" : relevance.status === "review" ? (compareSearch ? "要確認（判定確定まで候補登録不可）" : "要確認") : "関連性あり";
+      const disabled = duplicate || !code || relevance.status === "low" || (compareSearch && relevance.status !== "relevant");
       return `<article class="expanded-result"><label><input type="checkbox" class="expanded-select" data-index="${index}" ${disabled ? "disabled" : ""}> <strong>${escapeHtml(product.itemName || "商品名未設定")}</strong></label>${image}<p>${escapeHtml(product.shopName || "ショップ未設定")} / 商品ID（itemCode）: ${escapeHtml(code || "未記録")}</p><p>商品URL: ${escapeHtml(product.itemUrl || "未記録")}</p><p>${duplicate ? "候補または履歴に登録済み" : !code ? "商品コード未記録のため登録不可" : formatYen(product.itemPrice)}</p><p class="expanded-relevance expanded-relevance-${relevance.status}"><strong>${escapeHtml(relevanceLabel)}</strong>：${escapeHtml(relevance.reason)}</p><label>商品固有の選定理由（商品情報の確認済み表現のみ。任意）<input class="expanded-reason" data-index="${index}" maxlength="160" value="${escapeAttr(rules.suggestSelectionReason(product))}" placeholder="根拠がなければ空欄"></label></article>`;
     }).join("");
     el("expandedSave").hidden = products.length === 0;
@@ -208,7 +209,9 @@
       const product = state.products[index];
       const code = getItemCode(product);
       if (!product || !code || code !== String(product.itemCode || "")) { failed++; return; }
-      if (rules.classifyRelevance(product, state.relevanceContext || { problem: state.context.problem, keywords: state.keywords }).status === "low") { failed++; return; }
+      const relevance = rules.classifyRelevance(product, state.relevanceContext || { problem: state.context.problem, keywords: state.keywords });
+      const compareSearch = state.context.searchMode === "related" && state.context.relation === "compare";
+      if (relevance.status === "low" || (compareSearch && relevance.status !== "relevant")) { failed++; return; }
       if (seenCodes.has(code) || !window.DuplicateDetection.canSaveRoomCandidate(product, next.candidates, next.history)) { duplicates++; return; }
       const card = input.closest(".expanded-result");
       const reason = card?.querySelector(".expanded-reason")?.value.trim() || "";

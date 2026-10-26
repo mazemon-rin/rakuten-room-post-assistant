@@ -34,7 +34,8 @@ const catalog = {
   "メンズ ニットパンツ": [
     { itemCode: "pants:2", itemName: "メンズ ニットパンツ" },
     { itemCode: "cover:2", itemName: "ゴルフ用ヘッドカバー", itemCaption: "30%OFF 比較" },
-    { itemCode: "outerwear:1", itemName: "メンズ スイングトップ" }
+    { itemCode: "outerwear:1", itemName: "メンズ スイングトップ" },
+    { itemCode: "generic-pants:1", itemName: "メンズ パンツ" }
   ]
 };
 const context = {
@@ -155,6 +156,15 @@ const click = async (id) => ids[id].listeners.click();
   assert.match(ids.expandedResults.innerHTML, /関連性なし（候補登録対象外）/);
   assert.match(ids.expandedResults.innerHTML, /data-index="1" disabled/);
   assert.match(ids.expandedResults.innerHTML, /data-index="2" disabled/);
+  assert.match(ids.expandedResults.innerHTML, /要確認（判定確定まで候補登録不可）/);
+  assert.match(ids.expandedResults.innerHTML, /data-index="3" disabled/, "ambiguous category cannot be selected for candidate registration");
+  const candidatesBeforeAmbiguousSave = current.candidates.length;
+  selected.length = 0;
+  selected.push({ dataset: { index: "3" }, closest: () => ({ querySelector: () => ({ value: "" }) }) });
+  await click("expandedSave");
+  assert.equal(current.candidates.length, candidatesBeforeAmbiguousSave, "save handler rejects an ambiguous product even if a checked input is supplied");
+  assert.match(ids.expandedSaveMessage.textContent, /失敗1件/);
+  selected.length = 0;
 
   ids.expandedMode.value = "problem";
   ids.expandedMode.listeners.change();
