@@ -1120,8 +1120,8 @@ const babyProduct = {
 };
 const babyVariants = context.__roomPostTest.buildRoomIntroVariants(babyProduct);
 assert(babyVariants.ok && babyVariants.variants.length === 5, "Room copy hooks: verified baby-product facts produce five variants");
-assert(babyVariants.variants[0].text.startsWith("赤ちゃんとの暮らしに使うもの、素材やサイズも気になりますよね。") && babyVariants.variants[0].text.includes("はサイズ41×65cm"), "Room copy hooks: discovery hook opens with an empathetic, category-fit lead and uses a verified fact");
-assert(babyVariants.variants[3].text.startsWith("サイズが気になる方へ。") && babyVariants.variants[4].text.startsWith("赤ちゃんとの毎日に、こんな選択肢も。"), "Room copy hooks: benefit and short hooks lead with distinct, verified angles");
+assert(babyVariants.variants[0].text.startsWith(`${babyVariants.title}は`) && babyVariants.variants[0].text.includes(babyVariants.features[0]), "Room copy hooks: product name and a verified feature lead the copy");
+assert(babyVariants.variants[2].text.startsWith("「抱っこ布団 ベビー用」は") && babyVariants.variants[4].text.startsWith("抱っこ布団 ベビー用、"), "Room copy hooks: quoted product and feature-first openings remain distinct");
 assert(babyVariants.variants.every((variant) => !variant.text.includes("!-- / イベント") && !/(本日限定|今なら\d+%OFF|大人気|最安)/.test(variant.text)), "Room copy safety: HTML comments, unverified sales, and unsupported claims do not leak into variants");
 const longBabyTitle = {
   itemCode: "hook-test:long-baby-title",
@@ -1131,8 +1131,9 @@ const longBabyTitle = {
 };
 const longBabyResult = scoring.buildRoomIntroVariants(longBabyTitle);
 assert(longBabyResult.ok && longBabyResult.features.includes("サイズは41×65cm") && longBabyResult.features.includes("カバーは綿100%") && longBabyResult.features.includes("洗濯機で洗濯可（ネット使用）"), "Room copy live-format regression: verified short facts survive a long caution-filled caption");
-assert(longBabyResult.variants.length === 5 && longBabyResult.variants.every((variant) => variant.text.length < 180 && variant.text.includes("抱っこ布団") && !variant.text.includes("出産祝い ギフト") && !/20%OFF|最大20/.test(variant.text)), "Room copy live-format regression: five concise hooks avoid long SEO titles and unconfirmed discounts");
+assert(longBabyResult.variants.length === 5 && longBabyResult.variants.every((variant) => variant.text.length <= 100 && variant.text.includes("抱っこ布団") && !variant.text.includes("出産祝い ギフト") && !/20%OFF|最大20/.test(variant.text)), "Room copy live-format regression: five hooks stay within the short target and avoid long SEO titles or unconfirmed discounts");
 const genreCopyFixtures = [
+  { key: "character", product: { itemCode: "hook-test:character", itemName: "サンリオ コラボ ポーチ", itemCaption: "キャラクター柄。幅20cm。", categoryName: "キャラクター雑貨" } },
   { key: "appliance", product: { itemCode: "hook-test:appliance", itemName: "USB-C対応 卓上加湿器", itemCaption: "USB-C対応。タンク容量は300ml。", categoryName: "生活家電" }, audience: "暮らしに合う家電を探している方へ。", discovery: "家電を選ぶとき、置き場所や使い方も気になりますよね。", short: "暮らしの道具に、こんな選択肢。" },
   { key: "food", product: { itemCode: "hook-test:food", itemName: "北海道産 鮭切り身 個包装", itemCaption: "北海道産。個包装で冷凍配送。", categoryName: "食品" }, audience: "食卓に加えるものを探している方へ。", discovery: "今日の食卓に何を用意しようか、迷う日ありませんか？", short: "食卓の候補に、ひとつ。" },
   { key: "daily", product: { itemCode: "hook-test:daily", itemName: "フェイスタオル 3枚セット", itemCaption: "綿100%素材。3枚セット。洗濯ネット使用で洗濯機洗い可能。", categoryName: "日用品" }, audience: "日用品を探している方へ。", discovery: "毎日使うもの、ちょっと見直したいと思うことありませんか？", short: "毎日の暮らしに、こんな候補。" },
@@ -1141,14 +1142,19 @@ const genreCopyFixtures = [
   { key: "design", product: { itemCode: "hook-test:design", itemName: "北欧デザイン 花瓶", itemCaption: "高さ20cm。陶器製。", categoryName: "デザイン雑貨" }, audience: "インテリア小物が気になる方へ。", discovery: "お部屋の雰囲気に合う小物を探している方へ✨", short: "お部屋づくりの候補に、ひとつ。" },
   { key: "socks", product: { itemCode: "hook-test:socks", itemName: "冬用 ルームソックス", itemCaption: "素材は綿とポリエステル。", categoryName: "ファッション" }, audience: "ルームソックスを探している方へ。", discovery: "寒い季節、足元の冷えが気になりませんか？🧦", short: "冬支度の候補に、ルームソックス。" },
 ];
-genreCopyFixtures.forEach(({ key, product, audience, discovery, short }) => {
+genreCopyFixtures.forEach(({ key, product }) => {
   const result = context.__roomPostTest.buildRoomIntroVariants(product);
   assert(result.ok && result.variants.length === 5, "Room copy genre " + key + ": all five styles generate from isolated verified fixture data");
   assert(new Set(result.variants.map((variant) => variant.text)).size === 5, "Room copy genre " + key + ": the five outputs are not duplicates");
-  assert(result.variants[0].text.startsWith(discovery) && result.variants[1].text.startsWith(audience), "Room copy genre " + key + ": discovery and audience hooks use genre-appropriate language");
-  assert(result.variants[4].text.startsWith(short) && !result.variants[4].text.startsWith(result.title), "Room copy genre " + key + ": short hook is not a title/specification list");
+  assert(result.variants.every((variant) => {
+    const opening = variant.text.split("\n")[0].slice(0, 45);
+    return opening.includes(result.title.slice(0, Math.min(8, result.title.length))) || opening.includes(result.features[0].replace(/[。.!！?？]+$/g, "").slice(0, 8));
+  }), "Room copy genre " + key + ": the opening line quickly signals the product or a verified feature");
+  assert(result.variants.every((variant) => !/したい方へ/.test(variant.text)), "Room copy genre " + key + ": repeated audience-callout wording is avoided");
+  assert(result.variants.every((variant) => !/(家電選びは置き場所や仕様も大切|バッグは形や素材も選ぶポイント|食卓に加える品は内容も気になりますね|好きなデザインを探す楽しみもありますね|商品ページで確認してください)/.test(variant.text)), "Room copy genre " + key + ": generic filler and repetitive page-check wording are avoided");
+  assert(new Set(result.variants.map((variant) => variant.text.slice(0, 10))).size >= 3, "Room copy genre " + key + ": five variants vary their openings or feature placement");
   assert(result.variants.every((variant) => variant.text.length <= 500), "Room copy genre " + key + ": all generated variants remain within the ROOM text limit");
-  assert(result.variants.every((variant) => variant.text.length <= 180), "Room copy genre " + key + ": copy stays near the 100-180 character target without padding; lengths=" + result.variants.map((variant) => variant.text.length).join(","));
+  assert(result.variants.every((variant) => variant.text.length <= 100), "Room copy genre " + key + ": generated copy stays within the new 60-100 character target; lengths=" + result.variants.map((variant) => variant.text.length).join(","));
   assert(result.variants.every((variant) => !/(の仕様を見てみると|商品ページで確認してください|サイズや仕様を見比べて|選ぶ参考にしてみてください)/.test(variant.text)), "Room copy genre " + key + ": repetitive instruction-style phrases are avoided");
   assert(result.variants.every((variant) => result.features.some((verifiedFeature) => variant.text.includes(verifiedFeature.replace(/[。.!！?？]+$/g, "")) || variant.text.includes(verifiedFeature.replace(/^(.+?)は(.+)$/, "$1が$2").replace(/[。.!！?？]+$/g, "")))), "Room copy genre " + key + ": each style remains anchored to verified item information");
   assert(result.variants.every((variant) => !/(大人気|最安|売り切れ必至|本日限定|今なら\d+%OFF|愛用しています|使ってみました)/.test(variant.text)), "Room copy genre " + key + ": unsupported popularity, urgency, discount, or experience claims are not generated");
@@ -1156,7 +1162,7 @@ genreCopyFixtures.forEach(({ key, product, audience, discovery, short }) => {
 const socksVariants = context.__roomPostTest.buildRoomIntroVariants(genreCopyFixtures.find(({ key }) => key === "socks").product).variants;
 assert(socksVariants.every((variant) => !variant.text.includes("手持ちの服") && !variant.text.includes("コーディネート")), "Room copy category fit: room socks do not receive clothing-coordination copy");
 const kitchenStorageVariants = context.__roomPostTest.buildRoomIntroVariants(genreCopyFixtures.find(({ key }) => key === "storage").product).variants;
-assert(kitchenStorageVariants[0].text.startsWith("フライパンや鍋ふた、しまう場所に困ることありませんか？"), "Room copy category fit: kitchen storage opens with a relevant household concern");
+assert(kitchenStorageVariants[0].text.startsWith("フライパン収納ラックは") && kitchenStorageVariants[0].text.includes("幅が45cm") && !kitchenStorageVariants[0].text.includes("フライパンや鍋ふたの置き場"), "Room copy category fit: kitchen storage uses confirmed product facts without generic use-scene filler");
 const roomPostPromptCandidate = {
   id: "hook-test:composer-confirmation",
   itemCode: "hook-test:composer-confirmation",
@@ -1186,9 +1192,10 @@ assert(confirmationPrompt.includes("確認モード") && confirmationPrompt.incl
 assert(!confirmationPrompt.includes("60秒後にROOMの「完了」") && confirmationPrompt.includes("投稿済み記録を作らない"), "ROOM post mode: confirmation instructions do not schedule completion or app posting records");
 assert(continuousPrompt.includes("連続実投稿") && continuousPrompt.includes("現在のユーザー依頼にROOM外部公開の明示的な許可") && continuousPrompt.includes("完了"), "ROOM post mode: continuous instructions require explicit current-user publication authorization");
 assert(confirmationPrompt.includes("楽天イベントは開催状況・開催期間・当該商品の対象条件が確認できた場合だけ"), "ROOM copy safety: event timing and item eligibility must be verified before use");
-assert(confirmationPrompt.includes("100〜180文字程度") && confirmationPrompt.includes("絵文字は0〜3個") && confirmationPrompt.includes("文字数を満たすために推測を加えない"), "ROOM copy style: Codex generation guidance includes conversational style, length, emoji, and no-padding safety rules");
+assert(confirmationPrompt.includes("40〜100文字程度") && confirmationPrompt.includes("絵文字は0〜3個") && confirmationPrompt.includes("40文字未満も許容する") && confirmationPrompt.includes("文字数を満たすための一般論"), "ROOM copy style: Codex generation guidance includes the short target and no-padding safety rule");
 const combinedIntroPrompt = scoring.buildCombinedContentPrompt(roomPostPromptCandidate);
-assert(combinedIntroPrompt.includes("100〜180文字程度") && combinedIntroPrompt.includes("読者の悩み・共感・季節感・生活場面") && combinedIntroPrompt.includes("使用体験の創作は禁止"), "ROOM copy style: combined generation prompt carries the same style and safety rules");
+assert(combinedIntroPrompt.includes("40〜100文字程度") && combinedIntroPrompt.includes("特徴は1〜2個") && combinedIntroPrompt.includes("実際に使った体験を作らない"), "ROOM copy style: combined generation prompt carries the same concise style and safety rules");
+assert(scoring.getSafeRoomCopyTags(genreCopyFixtures.find(({ key }) => key === "storage").product).length > 0, "ROOM hashtags: existing safe hashtag generation remains available");
 const discountVariants = scoring.buildRoomIntroVariants({
   ...roomCopyProduct,
   itemName: "アディダス ランニングシューズ UVカット",

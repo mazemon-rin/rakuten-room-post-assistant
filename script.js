@@ -1819,7 +1819,7 @@ function validateGeneratedCopy(introText, product = {}) {
   return "";
 }
 
-const ROOM_INTRO_STYLE_RULE = "親しみやすい自然な日本語で100〜180文字程度を目安にする。読者の悩み・共感・季節感・生活場面から始め、商品情報で確認できた特徴を会話の流れに沿って紹介する。最後は商品に興味を持てる自然な一言にし、毎回同じ構成・冒頭・締めに固定しない。「仕様を見てみると」「商品ページで確認してください」「サイズや仕様を見比べて」「選ぶ参考にしてみてください」を定型句として使わない。絵文字は0〜3個。スペックの羅列、過度な煽り、未確認の割引・価格・ポイント・期限、未確認の効果・性能、使用体験の創作は禁止。商品情報にない用途や設置場所を断定しない。情報が少ない場合は短くし、文字数を満たすために推測を加えない。";
+const ROOM_INTRO_STYLE_RULE = "ハッシュタグを除く本文は原則40〜100文字程度とし、40文字未満も許容する。商品名や確認済みの特徴を冒頭1行に置き、特徴は1〜2個に絞る。文字数を満たすための一般論、商品情報に結び付かない生活場面やおすすめ表現を足さず、根拠が少なければ短く完結させる。5パターンでは語尾だけでなく、商品名・特徴の順序や見せ方を変える。「〇〇したい方へ」など同じ定型の書き出しを繰り返さない。絵文字は0〜3個。同じ書き出し・締めくくりを続けない。商品情報・効果・使用感を推測しない。実際に使った体験を作らない。価格・割引・クーポン・ポイント・期限は、現在の有効性と条件を確認できた場合だけ使う。根拠のない最安・人気・販売実績を断定しない。必須の注意事項は短文化のために削除せず、種類や仕様の重要な違いは誤認を招かないよう簡潔に示す。不必要な「商品ページで確認してください」を繰り返さない。";
 
 const ROOM_COPY_HOOKS = Object.freeze([
   { id: "discovery", label: "驚き・ニュース型" },
@@ -1849,7 +1849,7 @@ function cleanRoomCopySource(value = "") {
 function extractVerifiedRoomFeatures(product = {}) {
   const title = cleanRoomCopySource(product.itemName || product.title || "");
   const caption = cleanRoomCopySource(product.itemCaption || product.description || "");
-  const featureCue = /(対応|収納|付属|素材|材質|容量|サイズ|冷凍|北海道産|国産|日本製|個包装|セット|加工|搭載|防水|撥水|UVカット|洗える|丸洗い|洗濯機|折りたたみ|軽量|大容量|保温|保冷|耐水|USB|Bluetooth|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点))/i;
+  const featureCue = /(対応|収納|付属|素材|材質|容量|サイズ|冷凍|北海道産|国産|日本製|個包装|セット|加工|搭載|防水|撥水|UVカット|洗える|丸洗い|洗濯機|折りたたみ|軽量|大容量|保温|保冷|耐水|USB|Bluetooth|キャラクター|コラボ|デザイン|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点))/i;
   const unsafeFeature = /(\d{1,3}\s*[%％]\s*OFF|クーポン|セール|期間限定|最大\s*\d|最安|人気|ランキング|売り切れ|残りわずか|絶対|必ず|効果|口コミ|レビュー|買ってよかった|使ってみた|愛用)/i;
   const features = [];
   // 長い商品説明に注意書きが混在しても、明示された短い仕様だけを抽出する。
@@ -1860,7 +1860,7 @@ function extractVerifiedRoomFeatures(product = {}) {
   caption.split(/[\n。！？!?；;]+/).map((part) => part.trim()).filter(Boolean).forEach((part) => {
     if (featureCue.test(part) && !unsafeFeature.test(part)) features.push(part.replace(/[、,]+$/g, "").trim());
   });
-  const titleFeaturePattern = /(?:USB[- ]?C(?:入出力)?対応|Bluetooth対応|A4(?:サイズ)?対応|A4収納|PC収納|UVカット|防水|撥水|丸洗い|洗える|折りたたみ|軽量|大容量|個包装|冷凍|国産|日本製|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点)(?:入り|セット|対応)?)/gi;
+  const titleFeaturePattern = /(?:USB[- ]?C(?:入出力)?対応|Bluetooth対応|A4(?:サイズ)?対応|A4収納|PC収納|UVカット|防水|撥水|丸洗い|洗える|折りたたみ|軽量|大容量|個包装|冷凍|国産|日本製|キャラクターデザイン|キャラクター柄|コラボ|\d+(?:\.\d+)?\s*(?:mAh|ml|L|kg|g|cm|mm|段|個|枚|本|種|色|点)(?:入り|セット|対応)?)/gi;
   let titleMatch;
   while ((titleMatch = titleFeaturePattern.exec(title)) !== null) features.push(titleMatch[0].trim());
   const uniqueFeatures = [];
@@ -1895,54 +1895,16 @@ function buildRoomIntroVariants(product = {}) {
   // SEO語が長く続く場合だけ、先頭の具体的な商品タイプを本文で使う。
   const copyTitle = fullCopyTitle.length > 36 && fullCopyTitle.includes(" ")
     ? fullCopyTitle.split(/\s+/).slice(0, 2).join(" ") : fullCopyTitle;
-  const productText = `${title} ${features.join(" ")} ${cleanRoomCopySource(product.itemCaption || product.description || "")}`;
-  const genreSource = `${category} ${productText}`;
-  const seasonalLabel = `${title} ${category}`.match(/(春物|夏物|秋物|冬物|春用|夏用|秋用|冬用|防寒|冷感|ひんやり|クリスマス|お正月|年末年始|入園|入学|新生活)/)?.[1] || "";
-  const genre = /(抱っこ|ベビー|新生児|赤ちゃん|マタニティ)/.test(genreSource) ? "baby"
-    : /(食品|食材|グルメ|菓子|スイーツ|米|肉|魚|海鮮|飲料|フード)/.test(genreSource) ? "food"
-      : /(家電|電化製品|加湿器|掃除機|炊飯器|トースター|電子レンジ|照明|ライト|モバイルバッテリー|充電器)/.test(genreSource) ? "appliance"
-        : /(ソックス|靴下|ルームソックス)/.test(genreSource) ? "socks"
-          : /(バッグ|ショルダー)/.test(genreSource) ? "bag"
-            : /(収納|ラック|ケース|ボックス|整理棚)/.test(genreSource) ? "storage"
-              : /(デザイン雑貨|インテリア雑貨|置物|オブジェ|花瓶|時計|ランプ|クッション)/.test(genreSource) ? "design"
-                : /(ファッション|衣類|アパレル|服|シューズ|スニーカー|靴|アウター|インナー|ウェア)/.test(genreSource) ? "fashion"
-                  : /(日用品|生活雑貨|洗剤|タオル|キッチン用品|掃除用品|消耗品)/.test(genreSource) ? "daily"
-                    : "general";
-  const isKitchenStorage = genre === "storage" && /(フライパン|鍋ふた|鍋蓋|鍋)/.test(genreSource);
-  const genreCopy = {
-    baby: { discovery: "赤ちゃんとの暮らしに使うもの、素材やサイズも気になりますよね。", audience: "ベビー用品を探している方へ。", concern: "赤ちゃんのものを選ぶとき、何を重視するか迷うことも。", short: "赤ちゃんとの毎日に、こんな選択肢も。", closings: ["暮らしに合うものを探すときの候補にどうぞ。", "気になる方は商品情報ものぞいてみてくださいね。", "準備するものを考えるとき、候補のひとつにいかがでしょう。", "毎日の暮らしに合うか想像しながら見てみてください。", "ベビー用品選びの候補として、のぞいてみてくださいね。"] },
-    food: { discovery: "今日の食卓に何を用意しようか、迷う日ありませんか？", audience: "食卓に加えるものを探している方へ。", concern: "食品を選ぶとき、産地や保存方法も気になりますよね。", short: "食卓の候補に、ひとつ。", closings: ["いつもの食事に加える候補として、チェックしてみてください。", "食べる人数に合わせて選ぶ品のひとつにいかがでしょう。", "気になる方は内容ものぞいてみてくださいね。", "献立を考えるときの候補にどうぞ。", "食卓に迎える選択肢として、見てみてください。"] },
-    appliance: { discovery: "家電を選ぶとき、置き場所や使い方も気になりますよね。", audience: "暮らしに合う家電を探している方へ。", concern: "毎日の道具、そろそろ見直したいと思うことありませんか？", short: "暮らしの道具に、こんな選択肢。", closings: ["卓上に置く家電を探している方は、使う場所に合う候補として見てみてくださいね。", "毎日の暮らしに取り入れる候補にいかがでしょう。", "使う場所に合うものを探すときの候補にどうぞ。", "こんな選択肢もあります😊", "暮らしの道具選びに、加えてみてはいかがでしょうか？"] },
-    socks: { discovery: "寒い季節、足元の冷えが気になりませんか？🧦", audience: "ルームソックスを探している方へ。", concern: "おうち時間の足元、何を履こうか迷うことも。", short: "冬支度の候補に、ルームソックス。", closings: ["寒い季節のルームウェア小物を探している方は、冬支度の候補としてチェックしてみてください。", "冬支度のアイテムとして、気になる方は見てみてください。", "素材や長さなど、好みに合うものを探してみてくださいね。", "おうち時間の小物選びに、こんな選択肢も。", "季節の準備に加えてみてはいかがでしょう。"] },
-    bag: { discovery: "お出かけ用のバッグ、形や持ち方で迷うことありませんか？", audience: "ショルダーバッグを探している方へ。", concern: "バッグは使う場面に合うかも気になるところ。", short: "お出かけ小物に、こんな候補。", closings: ["持ち方の好みやお出かけの場面を思い浮かべて、候補に加えてみるのはいかがでしょう。", "気になる方はチェックしてみてください✨", "手持ちの服に合わせたい小物を探すときにも、候補のひとつに。", "使う場面を思い浮かべて、のぞいてみてくださいね。", "お出かけの相棒候補にいかがでしょうか？"] },
-    fashion: { discovery: "身につけるものは、形や素材もこだわって選びたいですよね。", audience: "服や小物を探している方へ。", concern: "着る場面を考えると、形や素材も気になりますよね。", short: "いつもの装いに、ひとつの候補。", closings: ["季節の装いを考えるとき、候補に加えてみてください。", "気になる方はチェックしてみてくださいね。", "着る場面に合うものを探すときの候補にどうぞ。", "好みの形や素材を探している方にも。", "装いの選択肢として、のぞいてみてください。"] },
-    storage: { discovery: isKitchenStorage ? "フライパンや鍋ふた、しまう場所に困ることありませんか？" : "収納場所が足りないと感じること、ありませんか？", audience: isKitchenStorage ? "キッチンの収納を見直したい方へ。" : "収納場所を見直したい方へ。", concern: isKitchenStorage ? "キッチンまわり、置き場所に迷うこともありますよね。" : "しまう場所や置き方に悩むこと、ありませんか？", short: "収納の悩みに、こんな選択肢。", closings: [isKitchenStorage ? "フライパンや鍋の置き場所を見直したいとき、候補のひとつにどうぞ。" : "片付け方を見直したいときの候補にいかがでしょう。", "収納場所に合うものを探している方は、チェックしてみてください。", "キッチンの整理を考えるとき、候補のひとつにどうぞ。", "置き場所を整えるアイテムを探すときにも。", "毎日の片付けに合うものを探してみてくださいね。"] },
-    design: { discovery: "お部屋の雰囲気に合う小物を探している方へ✨", audience: "インテリア小物が気になる方へ。", concern: "お部屋の印象を考えると、色や形も気になりますよね。", short: "お部屋づくりの候補に、ひとつ。", closings: ["お部屋づくりの候補にいかがでしょうか？", "気になる方はチェックしてみてください✨", "飾る場所を思い浮かべながら、候補に加えてみてください。", "こんな小物を取り入れるのも素敵ですね。", "好きな雰囲気に合うものを探すときの候補にどうぞ。"] },
-    daily: { discovery: "毎日使うもの、ちょっと見直したいと思うことありませんか？", audience: "日用品を探している方へ。", concern: "日々使うものは、素材や手入れのしやすさも気になりますよね。", short: "毎日の暮らしに、こんな候補。", closings: ["日々の暮らしに合うものを探すときの候補にどうぞ。", "気になる方はチェックしてみてくださいね。", "いつもの生活用品を選ぶとき、候補のひとつに。", "毎日使うものを見直すきっかけにいかがでしょう。", "暮らしの小物選びに、加えてみてください。"] },
-    general: { discovery: category ? `${category}を探すとき、こんな商品も気になりませんか？` : "暮らしの中で使うもの、選ぶ時間も大切にしたいですね。", audience: category ? `${category}を探している方へ。` : "暮らしの品を探している方へ。", concern: category ? `${category}選び、どんなものが合うか迷うこともありますよね。` : "毎日の暮らしに合うものを探すこと、ありませんか？", short: "暮らしの候補に、ひとつ。", closings: ["気になる方はチェックしてみてくださいね。", "こんな選択肢もあります😊", "暮らしに合うものを探すときの候補にどうぞ。", "気になる方は商品情報ものぞいてみてください。", "日々の選択肢に加えてみてはいかがでしょうか？"] }
-  }[genre];
-  if (seasonalLabel && genre !== "socks") {
-    genreCopy.discovery = `${seasonalLabel}の準備、暮らしに合うものを探しませんか？ ${genreCopy.discovery}`;
-    genreCopy.concern = `${seasonalLabel}に向けて、暮らしの中で使うものを見直したくなることも。`;
-  }
-  const featureSentence = (value, includeSubject = true) => {
-    const property = value.match(/^(.+?)は(.+)$/);
-    return property ? `${includeSubject ? `${copyTitle}の` : ""}${property[1]}は${property[2]}。` : `${includeSubject ? `${copyTitle}は` : ""}${value}。`;
-  };
-  const audience = genreCopy.audience;
-  const benefitFeature = features[0];
-  const benefitProperty = benefitFeature.match(/^(.+?)は(.+)$/);
-  const benefitLabel = benefitProperty ? `${benefitProperty[1]}が${benefitProperty[2]}` : benefitFeature.replace(/[。.!！?？]+$/g, "");
-  const benefitTopic = benefitProperty?.[1] || benefitFeature.match(/^(サイズ|幅|高さ|長さ|奥行き|容量|重量|タンク容量)/)?.[1];
-  const benefitLead = benefitTopic ? `${benefitTopic}が気になる方へ。` : `「${benefitLabel}」が気になる方へ。`;
-  const verifiedFeatureSentence = (index) => featureSentence(features[index % features.length], true);
-  const closing = (index) => genreCopy.closings[index % genreCopy.closings.length];
+  const featureText = (feature) => feature.replace(/^(.+?)は(.+)$/, "$1が$2").replace(/[。.!！?？]+$/g, "");
+  const primaryFeature = featureText(features[0]);
+  const secondaryFeature = features[1] ? featureText(features[1]) : "";
+  const featurePair = secondaryFeature && secondaryFeature !== primaryFeature ? `${primaryFeature}、${secondaryFeature}` : primaryFeature;
   const base = [
-    { ...ROOM_COPY_HOOKS[0], text: `${genreCopy.discovery}${verifiedFeatureSentence(0)}${closing(0)}` },
-    { ...ROOM_COPY_HOOKS[1], text: `${audience}${verifiedFeatureSentence(1)}${closing(1)}` },
-    { ...ROOM_COPY_HOOKS[2], text: `${genreCopy.concern}${verifiedFeatureSentence(2)}${closing(2)}` },
-    { ...ROOM_COPY_HOOKS[3], text: `${benefitLead}${verifiedFeatureSentence(0)}${closing(3)}` },
-    { ...ROOM_COPY_HOOKS[4], text: `${genreCopy.short}${verifiedFeatureSentence(features.length > 1 ? 1 : 0)}${closing(4)}` }
+    { ...ROOM_COPY_HOOKS[0], text: `${copyTitle}は${featurePair}。` },
+    { ...ROOM_COPY_HOOKS[1], text: `${featurePair}の${copyTitle}。` },
+    { ...ROOM_COPY_HOOKS[2], text: `「${copyTitle}」は${featurePair}。` },
+    { ...ROOM_COPY_HOOKS[3], text: `${copyTitle}の特徴は${featurePair}。` },
+    { ...ROOM_COPY_HOOKS[4], text: `${copyTitle}、${featurePair}がポイント。` }
   ].map((variant) => ({ ...variant, text: finalizeRoomIntro(product, variant.text) }));
   return { ok: true, title, features, variants: base };
 }
