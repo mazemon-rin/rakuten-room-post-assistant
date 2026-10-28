@@ -69,6 +69,7 @@ vm.runInContext(fs.readFileSync("src/core/expanded-search.js", "utf8"), context)
 vm.runInContext(fs.readFileSync("src/expanded-search-ui.js", "utf8"), context);
 document.listeners.DOMContentLoaded();
 const click = async (id) => ids[id].listeners.click();
+const copiedRequestId = () => ids.expandedMessage.textContent.match(/照合ID: (\S+)/)?.[1] || "";
 
 (async () => {
   assert.match(ids.expandedSeasonPurpose.innerHTML, /value="newlife"/, "initial season purpose options are populated for the default spring season");
@@ -97,7 +98,13 @@ const click = async (id) => ids[id].listeners.click();
   assert.match(ids.expandedMessage.textContent, /矛盾/);
   ids.expandedSeasonIntent.value = "在宅ワーク中の足元の寒さ対策";
   await click("expandedPrompt");
-  const seasonalRequestId = copiedPrompt.match(/requestId=([^、]+)/)[1];
+  const seasonalRequestId = copiedRequestId();
+  assert.match(copiedPrompt, /検索語を1〜5件、1行に1件ずつ/);
+  assert.match(copiedPrompt, /各検索語は2〜40文字/);
+  assert.match(copiedPrompt, /引用符・カンマ・番号を付けず、JSON・説明文・Markdownは出力しない/);
+  assert.match(copiedPrompt, /同義語の重複を避け/);
+  assert.match(copiedPrompt, /具体的な商品カテゴリを優先/);
+  assert.doesNotMatch(copiedPrompt, /JSONのみ|schemaVersion=1|keywords=2〜40文字/);
   assert.match(copiedPrompt, /"seasonPurpose":"dry"/);
   assert.match(copiedPrompt, /"customIntent":"在宅ワーク中の足元の寒さ対策"/);
   ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: seasonalRequestId, searchMode: "seasonal", keywords: ["検索語 1", "検索語 2"] });
@@ -114,7 +121,7 @@ const click = async (id) => ids[id].listeners.click();
 
   ids.expandedKeywords.value = "";
   await click("expandedPrompt");
-  const initialRequestId = copiedPrompt.match(/requestId=([^、]+)/)[1];
+  const initialRequestId = copiedRequestId();
   ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: "wrong", searchMode: "problem", keywords: ["誤った 語句"] });
   await click("expandedImport");
   assert.equal(ids.expandedKeywords.value, "", "invalid Codex JSON never changes search terms");
@@ -241,7 +248,7 @@ const click = async (id) => ids[id].listeners.click();
   ids.expandedMode.value = "problem";
   ids.expandedMode.listeners.change();
   await click("expandedPrompt");
-  const singleRequestId = copiedPrompt.match(/requestId=([^、]+)/)[1];
+  const singleRequestId = copiedRequestId();
   ids.expandedJson.value = JSON.stringify({ schemaVersion: 1, requestId: singleRequestId, searchMode: "problem", keywords: ["単独の検索語"] });
   await click("expandedImport");
   assert.equal(ids.expandedKeywords.value, "単独の検索語", "one JSON term replaces prior five terms without being padded");

@@ -95,7 +95,7 @@
     const conditions = { searchMode: mode, problem: mode === "seasonal" ? "" : value("expandedProblem"), targetUser: mode === "seasonal" ? "" : value("expandedTarget"), season: mode === "seasonal" ? value("expandedSeason") : "", seasonPurpose: mode === "seasonal" ? value("expandedSeasonPurpose") : "", customIntent: mode === "seasonal" ? value("expandedSeasonIntent") : "", relation, origin: origin ? { itemCode: origin.code, itemName: origin.product.itemName || origin.record.title || "", categoryName: origin.product.categoryName || "", detectedCategory: originCategory?.label || null } : null };
     const relatedInstruction = relation === "compare" ? `比較検索では起点商品と同じカテゴリ（${originCategory.label}）を優先し、別カテゴリの商品を示す語や販促語だけの検索語は提案しないでください。` : "";
     const intentInstruction = ["problem", "seasonal"].includes(mode) ? "悩み・目的から具体的な商品カテゴリを優先し、同義語を重複させず、便利・対策・おすすめ等だけを機械的に足さないでください。対象者と季節・イベント条件を検索語へ適切に反映し、確かでない商品性能や効果は推測しないでください。" : "";
-    const prompt = `楽天市場の商品検索キーワードだけを提案してください。商品情報や効果を推測しないでください。${intentInstruction}${relatedInstruction}条件: ${JSON.stringify(conditions)}。出力は説明文やMarkdownを付けずJSONのみ。schemaVersion=1、requestId=${requestId}、searchMode=${mode}、keywords=2〜40文字の重複しない検索語1〜5件。`;
+    const prompt = `楽天市場で検索するキーワードだけを提案してください。商品情報・性能・効果を推測しないでください。${intentInstruction}${relatedInstruction}条件: ${JSON.stringify(conditions)}。出力ルール: 検索語を1〜5件、1行に1件ずつ出力してください。各検索語は2〜40文字にしてください。引用符・カンマ・番号を付けず、JSON・説明文・Markdownは出力しないでください。同義語の重複を避け、悩み・目的から具体的な商品カテゴリを優先してください。対象者や季節条件は必要に応じて反映してください。`;
     await navigator.clipboard.writeText(prompt);
     state.requestId = requestId;
     state.mode = mode;
